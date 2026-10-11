@@ -49,11 +49,18 @@ public partial class World
         _ => BuffClips,
     };
 
+    private const int TransformedSkillAnim = 4;
+
     private int SkillAnim(int entityId, SkillData.Skill s, bool release)
     {
         int[]? gear = GearOf(entityId);
-        return SkillAnimation.Resolve(s, HeldItemClass(gear, 6), HeldItemClass(gear, 7), release);
+        int anim = SkillAnimation.Resolve(s, HeldItemClass(gear, 6), HeldItemClass(gear, 7), release);
+        return anim != SkillAnimation.None && WearsMonsterLook(entityId) ? TransformedSkillAnim : anim;
     }
+
+    private bool WearsMonsterLook(int entityId) =>
+        TransformHost(entityId)?.GetNodeOrNull<Node3D>(TransformNodeName) is { } worn
+        && !worn.GetMeta(WornAccessoriesMeta, false).AsBool();
 
     private const float StrikeTailPad = 0.08f;
 
@@ -65,7 +72,7 @@ public partial class World
         float last = 0f;
         for (int slot = 0; slot < 2; slot++)
             last = Mathf.Max(last, meta.StrikeTime(slot));
-        return last;
+        return last + (float)BlendHold.Remaining(anim);
     }
 
     private static float FirstStrikeTime(AnimationPlayer? anim)
@@ -79,11 +86,11 @@ public partial class World
             float at = meta.StrikeTime(slot);
             if (at > 0f && (first <= 0f || at < first)) first = at;
         }
-        return first;
+        return first > 0f ? first + (float)BlendHold.Remaining(anim) : first;
     }
 
     private static double ActionLength(Animation? clip, double blend) =>
-        clip == null ? ActionClip.MissingClip : ActionClip.Hold(clip.Length, blend);
+        clip == null ? ActionClip.MissingClip : ActionClip.Duration(clip.Length, blend);
 
     private static double PlayActionOn(AnimationPlayer? anim, string[] candidates)
     {
@@ -101,7 +108,7 @@ public partial class World
             res.LoopMode = Animation.LoopModeEnum.None;
             if (ActionClip.IsStaticPose(res.Length)) res.Length = (float)ActionClip.Hold(res.Length, blend);
         }
-        anim.Play(name, blend);
+        BlendHold.Play(anim, name, blend);
         CrowdAnimator.NotifyPlay(anim, name, blend);
         return ActionLength(res, blend);
     }
@@ -126,6 +133,8 @@ public partial class World
         CanPlayAction(rank, e.ActionRank, e.ActionUntil, now);
 
     private const int NoActionAnim = int.MinValue;
+
+    private int _selfStrikeAnim = NoActionAnim;
 
     private void BeginSelfAction(double len, int rank, double now, int anim = NoActionAnim)
     {
@@ -184,14 +193,22 @@ public partial class World
             if (!CanPlaySelfAction(rank, now)) return;
             double len = PlayActionOn(_selfAnim, action, fallback);
             if (len > 0 && rank == ActionRankSkill && Net.I.GenieRunning) len *= GenieClipScale();
-            if (len > 0) BeginSelfAction(len, rank, now, action);
+            if (len > 0)
+            {
+                BeginSelfAction(len, rank, now, action);
+                _selfStrikeAnim = action;
+            }
         }
         else if (_ents.TryGetValue(entityId, out var e) && e.Anim != null && !e.Dead)
         {
             if (!restart && now < e.ActionUntil && action == e.ActionAnim) return;
             if (!CanPlayEntityAction(e, rank, now)) return;
             double len = PlayActionOn(e.Anim, action, fallback);
-            if (len > 0) BeginEntityAction(e, len, rank, now, action);
+            if (len > 0)
+            {
+                BeginEntityAction(e, len, rank, now, action);
+                e.StrikeAnim = action;
+            }
         }
     }
 
@@ -211,13 +228,19 @@ public partial class World
         if (!CanPlaySelfAction(rank, now)) return;
         bool basicAttack = candidates == BasicAttackClips;
         double len;
+        int strikeAnim = NoActionAnim;
         if (basicAttack)
         {
             var gear = SelfGear();
-            len = PlayActionOn(_selfAnim, AttackSlot(gear), AttackVariant(AttackClips(gear)));
+            strikeAnim = AttackSlot(gear);
+            len = PlayActionOn(_selfAnim, strikeAnim, AttackVariant(AttackClips(gear)));
         }
         else len = PlayActionOn(_selfAnim, candidates);
-        if (len > 0) BeginSelfAction(len, rank, now);
+        if (len > 0)
+        {
+            BeginSelfAction(len, rank, now);
+            _selfStrikeAnim = strikeAnim;
+        }
     }
 
     private void PlayEntityAction(Ent e, string[] candidates, int rank)
@@ -226,11 +249,13 @@ public partial class World
         double now = Now();
         if (!CanPlayEntityAction(e, rank, now)) return;
         bool playerSwing = candidates == BasicAttackClips && !e.IsNpc;
+        int strikeAnim = playerSwing ? AttackSlot(e.Gear) : NoActionAnim;
         double len = playerSwing
-            ? PlayActionOn(e.Anim, AttackSlot(e.Gear), AttackVariant(AttackClips(e.Gear)))
+            ? PlayActionOn(e.Anim, strikeAnim, AttackVariant(AttackClips(e.Gear)))
             : PlayActionOn(e.Anim, candidates == BasicAttackClips ? AttackVariant(candidates) : candidates);
         if (len <= 0) return;
         BeginEntityAction(e, len, rank, now);
+        e.StrikeAnim = strikeAnim;
         if (candidates == BasicAttackClips && !e.IsNpc)
             e.CombatStanceUntil = e.ActionUntil + 3.0;
     }
@@ -263,6 +288,39 @@ public partial class World
         }
         if (e.IsNpc && GD.Randi() % NpcFlinchOneIn != 0) return;
         PlaySkillAction(entityId, StruckAnim(e.IsNpc), StruckClips, ActionRankStruck);
+    }
+
+    private const int MoveAttackWeaponAnim = 14;
+    private const int MoveAttackBareAnim = 15;
+
+    private bool TryMoveAttack(Ent a)
+    {
+        if (a.IsNpc || a.Flinch == null || a.Anim == null || !EntityMoving(a)) return false;
+        int pose = HandLoadout(a.Gear).Right != WeaponAnimation.NoItem ? MoveAttackWeaponAnim : MoveAttackBareAnim;
+        string? name = AnimationNameAt(a.Anim, pose);
+        if (name == null || !a.Anim.HasAnimation(name) || a.Anim.GetAnimation(name) is not { } clip) return false;
+        var meta = AnimationMetaAt(a.Anim, pose);
+        a.Flinch.PlayThrough(pose, clip, meta?.Blend ?? ActionClip.DefaultBlend);
+        double now = Now();
+        float swing = meta?.SoundTime(0) ?? -1f;
+        float strike = meta?.StrikeTime(0) ?? -1f;
+        a.MoveSwingAt = swing >= 0f ? now + swing : -1;
+        a.MoveStrikeAt = strike >= 0f ? now + strike : -1;
+        return true;
+    }
+
+    private void MoveAttackTick(Ent e, double now)
+    {
+        if (e.MoveSwingAt >= 0 && now >= e.MoveSwingAt)
+        {
+            e.MoveSwingAt = -1;
+            PlayEntitySound(e, SwingSound(e.Gear, LooksOf(e)), SoundOwnerKind.Swing);
+        }
+        if (e.MoveStrikeAt >= 0 && now >= e.MoveStrikeAt)
+        {
+            e.MoveStrikeAt = -1;
+            EntityStrike(e);
+        }
     }
 
     private static void PlayFlinch(Flinch layer, AnimationPlayer? anim)
@@ -308,34 +366,68 @@ public partial class World
         return varied;
     }
 
-    private void FaceToward(int attackerId, int targetId)
+    private void FaceToward(int attackerId, int targetId, bool instant = false)
     {
         Vector3? tgt = WorldPosOf(targetId);
         if (tgt == null) return;
-        if (attackerId == _myId && _self != null) FaceSelfToward(tgt.Value);
-        else if (_ents.TryGetValue(attackerId, out var a)) FaceEntityToward(a, tgt.Value);
+        if (attackerId == _myId && _self != null)
+        {
+            if (instant) FaceSelfToward(tgt.Value);
+            else TurnSelfToward(tgt.Value);
+        }
+        else if (_ents.TryGetValue(attackerId, out var a)) FaceEntityToward(a, tgt.Value, instant);
     }
 
     private void FaceTowardImpact(int casterId, short[] data)
     {
         if (data.Length <= 2 || (data[0] == 0 && data[2] == 0)) return;
         Vector3 impact = GroundPos(data[0], data[2], 0f, 0f);
-        if (casterId == _myId && _self != null) FaceSelfToward(impact);
+        if (casterId == _myId && _self != null) TurnSelfToward(impact);
         else if (_ents.TryGetValue(casterId, out var a)) FaceEntityToward(a, impact);
     }
 
+    private float? _selfYawGoal;
+
     private void FaceSelfToward(Vector3 target)
+    {
+        if (FlatDirectionTo(target) is not { } dir) return;
+        _faceDir = dir;
+        SnapSelfToFaceDir();
+    }
+
+    private void TurnSelfToward(Vector3 target)
+    {
+        if (FlatDirectionTo(target) is not { } dir) return;
+        _faceDir = dir;
+        _selfYawGoal = SelfYawOf(dir);
+    }
+
+    private void SnapSelfToFaceDir()
+    {
+        _selfYawGoal = null;
+        _self.RotationDegrees = new Vector3(0, SelfYawOf(_faceDir), 0);
+    }
+
+    private void TickSelfFacing(float dt)
+    {
+        if (_selfYawGoal is not { } goal || _self == null) return;
+        float yaw = Turning.Toward(_self.RotationDegrees.Y, goal, dt);
+        _self.RotationDegrees = new Vector3(0, yaw, 0);
+        if (yaw == goal) _selfYawGoal = null;
+    }
+
+    private Vector3? FlatDirectionTo(Vector3 target)
     {
         var d = target - _self.Position;
         d.Y = 0;
-        if (d.LengthSquared() < 0.01f) return;
-        _faceDir = d.Normalized();
-        _self.RotationDegrees = new Vector3(0, 180f - Coord.KoHeading(-_faceDir.X, _faceDir.Z), 0);
+        return d.LengthSquared() < 0.01f ? null : d.Normalized();
     }
 
-    private void FaceEntityToward(Ent e, Vector3 to)
+    private static float SelfYawOf(Vector3 dir) => 180f - Coord.KoHeading(-dir.X, dir.Z);
+
+    private void FaceEntityToward(Ent e, Vector3 to, bool instant = false)
     {
-        if (YawToward(e.Body.Position, to) is { } yaw) SetEntityYaw(e, yaw);
+        if (YawToward(e.Body.Position, to) is { } yaw) FaceEntity(e, yaw, instant);
     }
 
     private void FaceNodeToward(Node3D node, Vector3 from, Vector3 to)

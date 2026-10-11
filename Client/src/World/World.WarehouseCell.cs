@@ -21,6 +21,7 @@ public partial class World
         private readonly TextureRect _icon;
         private readonly Label _count;
         private readonly UpgradeBadge _plus;
+        private readonly IconVeilView _veil;
         private readonly bool _bag;
         private readonly StyleBox _normal = UiTheme.Slot();
         private bool _hovering;
@@ -54,6 +55,7 @@ public partial class World
             _count.AddThemeConstantOverride("shadow_offset_y", 1);
             _count.AddThemeConstantOverride("outline_size", 3);
             _count.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
+            _veil = IconVeilView.Attach(this);
             AddChild(_count);
             _plus = UpgradeBadge.Attach(this);
 
@@ -69,6 +71,7 @@ public partial class World
                 _icon.Texture = null;
                 _count.Text = "";
                 _plus.Clear();
+                _veil.Clear();
                 _icon.SelfModulate = Colors.White;
                 AddThemeStyleboxOverride("panel", _normal);
             }
@@ -78,7 +81,9 @@ public partial class World
                 int shown = ItemData.ShownCount(ItemData.Get(it.ItemId), it);
                 _count.Text = shown > 1 ? shown.ToString() : "";
                 _plus.Set(it.ItemId);
-                SealLook.Apply(it.State, _icon, this, _normal);
+                _veil.Set(it);
+                _icon.SelfModulate = Colors.White;
+                AddThemeStyleboxOverride("panel", _normal);
             }
             Notify();
         }

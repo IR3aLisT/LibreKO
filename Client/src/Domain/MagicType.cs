@@ -17,6 +17,26 @@ public static class MagicType
 public static class WarpType
 {
     public const int Blink = 20;
+    public const int Rush = 30;
+    public const int Pull = 31;
+}
+
+public static class StealthKind
+{
+    public const int DispelOnMove = 1;
+    public const int DispelOnAttack = 2;
+    public const int SeeInvisible = 3;
+    public const int SeeInvisibleParty = 4;
+    public const int ChiefGuardian = 7;
+    public const int PetSummon = 8;
+
+    public static int ExpiryCode(int stateChange) => stateChange switch
+    {
+        DispelOnMove or DispelOnAttack => BuffExpiry.StealthEnded,
+        SeeInvisible or SeeInvisibleParty => BuffExpiry.SightEnded,
+        ChiefGuardian or PetSummon => BuffExpiry.SummonEnded,
+        _ => 0,
+    };
 }
 
 public static class MagicSub
@@ -28,8 +48,38 @@ public static class MagicSub
     public const int DurationExpired = 5;
     public const int Cancel = 6;
     public const int CancelTransformation = 7;
+    public const int ExtendDuration = 8;
     public const int TransformationList = 9;
     public const int TransformationRefused = 10;
+}
+
+public enum MagicFailText { None, CastingFailed, SkillFailed, Missed, NotEnoughMp }
+
+public static class MagicFail
+{
+    public const int ResultSlot = 3;
+    public const int QuietSlot = 4;
+    public const short Quiet = 1;
+    public const short Casting = -100;
+    public const short ProjectileKilled = -101;
+    public const short NoEffect = -103;
+    public const short AttackZero = -104;
+    public const short ProjectileKilledByType = -105;
+    public const short NotEnoughMp = -106;
+
+    public static short Code(short[] data) => data.Length > ResultSlot ? data[ResultSlot] : (short)0;
+
+    public static bool RefundsCooldown(short code, bool hasFlyingFx) =>
+        code is not (ProjectileKilled or ProjectileKilledByType) && !hasFlyingFx;
+
+    public static MagicFailText TextFor(short[] data) => Code(data) switch
+    {
+        Casting => data.Length > QuietSlot && data[QuietSlot] == Quiet ? MagicFailText.None : MagicFailText.CastingFailed,
+        NoEffect => MagicFailText.SkillFailed,
+        AttackZero => MagicFailText.Missed,
+        NotEnoughMp => MagicFailText.NotEnoughMp,
+        _ => MagicFailText.None,
+    };
 }
 
 public static class HealTarget

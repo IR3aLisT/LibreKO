@@ -135,19 +135,9 @@ public partial class World
 
         var wear = new Button { Text = "Wear", FocusMode = Control.FocusModeEnum.None };
         int chosen = titleId;
-        wear.Pressed += () => Net.I.SendTitleSelect(chosen);
+        wear.Pressed += () => { if (chosen == NoTitle) Net.I.SendTitleReset(); else Net.I.SendTitleSelect(chosen); };
         columns.AddChild(wear);
         return row;
     }
 
-    private void RefreshTitleButton()
-    {
-        if (_stTitleBtn == null || !GodotObject.IsInstanceValid(_stTitleBtn)) return;
-
-        int titleId = Net.I.DisplayTitleId;
-        var title = titleId != 0 ? AchievementData.TitleOf(titleId) : null;
-        _stTitleBtn.Text = title is { } worn ? $"Title: {worn.Name}" : "Title: none";
-        _stTitleBtn.AddThemeColorOverride(
-            "font_color", title != null ? UiTheme.GoldBright : UiTheme.TextLo);
-    }
 }

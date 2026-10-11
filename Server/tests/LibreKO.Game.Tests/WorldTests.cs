@@ -323,7 +323,7 @@ public class WorldTests : GameTestBase
     }
 
     [Fact]
-    public async Task WorldPacketCoordinator_HandleMoveAsync_BroadcastsTheDestinationLedOneStepAhead()
+    public async Task WorldPacketCoordinator_HandleMoveAsync_KeepsTheCurrentPositionAndBroadcastsTheClientsDestination()
     {
         using var provider = CreateProvider(_ => { });
 
@@ -370,15 +370,15 @@ public class WorldTests : GameTestBase
         provider.GetRequiredService<MovementBroadcastService>().FlushMovers();
 
         mover.X.Should().Be(
-            60.4f, because: "the destination is led one speed step along the path of travel");
+            55f, because: "the packet's current position is where the player is; the destination is 2619's 1.5 s lead");
         mover.Z.Should().Be(8);
-        mover.MoveOldWillX.Should().Be(604);
+        mover.MoveOldWillX.Should().Be(600);
         mover.MoveOldWillZ.Should().Be(80);
 
         var movePacket = viewerPackets.Should().ContainSingle(p => p.GetOpcode() == (byte)GameOpcodes.GS_MOVE).Subject;
         movePacket.ResetOffset();
         movePacket.ReadInt().Should().Be(mover.CharacterId);
-        movePacket.ReadUShort().Should().Be(604);
+        movePacket.ReadUShort().Should().Be(600);
         movePacket.ReadUShort().Should().Be(80);
         movePacket.ReadUShort().Should().Be(0);
         movePacket.ReadShort().Should().Be(45);
@@ -387,7 +387,7 @@ public class WorldTests : GameTestBase
     }
 
     [Fact]
-    public async Task WorldPacketCoordinator_HandleMoveAsync_LeadsTheStartOfAMoveLikeAnyOther()
+    public async Task WorldPacketCoordinator_HandleMoveAsync_TheStartOfAMoveBroadcastsItsDestinationAsSent()
     {
         using var provider = CreateProvider(_ => { });
 
@@ -439,15 +439,14 @@ public class WorldTests : GameTestBase
         await coordinator.HandleMoveAsync(moverClient, packet);
         provider.GetRequiredService<MovementBroadcastService>().FlushMovers();
 
-        mover.X.Should().Be(
-            60.4f, because: "the first packet of a move is not halved any more, only led");
+        mover.X.Should().Be(50f);
         mover.Z.Should().Be(8);
-        mover.MoveOldWillX.Should().Be(604);
+        mover.MoveOldWillX.Should().Be(600);
 
         movePacket.Should().NotBeNull();
         movePacket!.ResetOffset();
         movePacket.ReadInt().Should().Be(mover.CharacterId);
-        movePacket.ReadUShort().Should().Be(604);
+        movePacket.ReadUShort().Should().Be(600);
         movePacket.ReadUShort().Should().Be(80);
         movePacket.ReadUShort().Should().Be(0);
         movePacket.ReadShort().Should().Be(45);
@@ -1943,7 +1942,7 @@ public class WorldTests : GameTestBase
         session.Magic = 55;
 
         var packet = new Packet(GameOpcodes.GS_CLASS_CHANGE);
-        packet.WriteByte(2);
+        packet.WriteByte((byte)ClassChangeSubOpcode.StatReset);
 
         var coordinator = provider.GetRequiredService<ICharacterDevelopmentPacketCoordinator>();
         await coordinator.HandleClassChangeAsync(client, packet);
@@ -1957,7 +1956,7 @@ public class WorldTests : GameTestBase
         sentPacket.Should().NotBeNull();
         sentPacket!.GetOpcode().Should().Be((byte)GameOpcodes.GS_CLASS_CHANGE);
         sentPacket.ResetOffset();
-        sentPacket.ReadByte().Should().Be(2);
+        sentPacket.ReadByte().Should().Be((byte)ClassChangeSubOpcode.StatReset);
         sentPacket.ReadByte().Should().Be(1);
         sentPacket.ReadInt().Should().Be(session.Money);
     }

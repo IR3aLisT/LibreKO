@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using LibreKO.Domain;
 using LibreKO.Network;
@@ -9,8 +10,24 @@ public partial class World
 {
     private CanvasLayer _exLayer = null!;
     private HudWindow _exPanel = null!;
-    private VBoxContainer _exMineList = null!, _exTheirsList = null!, _exBagList = null!;
+    private const int TradeOfferSlots = 12;
+    private const int TradeGridColumns = 4;
+    private const float TradeCellSize = 42f;
+    private const int TextTradeOwnGenie = 31082;
+    private const int TextTradePartnerGenie = 31083;
+    private const int TextTradeBusy = 3504;
+    private const int TextTradeDeclined = 6311;
+    private const int TextTradeDuplicate = 10761;
+    private static readonly Color TradeBusyColour = new("9b9bff");
+    private static readonly Color TradeConfirmedColour = new("7ddc6f");
+
+    private readonly ItemSlotView[] _exMineCells = new ItemSlotView[TradeOfferSlots];
+    private readonly ItemSlotView[] _exTheirsCells = new ItemSlotView[TradeOfferSlots];
     private Label _exMineGold = null!, _exTheirsGold = null!, _exStatus = null!;
+    private Label _exMineHeader = null!, _exTheirsHeader = null!, _exMineState = null!, _exTheirsState = null!;
+    private Label _exPurse = null!, _exRoom = null!;
+    private BagCompanion? _exCompanion;
+    private readonly HashSet<int> _genieUsers = new();
     private Button _exConfirmBtn = null!, _exCancelBtn = null!;
     private LineEdit _exGoldEdit = null!;
     private ConfirmationDialog _exAskDialog = null!;
@@ -40,15 +57,18 @@ public partial class World
     private int _exAmountItem;
     private int _exAmountMax = 1;
 
-    private struct PendingExAdd { public bool IsGold; public int ItemId; public int SourceAbs; public int Count; public short Dura; }
-    private struct ExOfferItem { public int ItemId; public int Count; public short Dura; public int SourceAbs; }
+    private struct PendingExAdd { public bool IsGold; public int ItemId; public int SourceAbs; public int Count; public short Dura; public int UniqueId; }
+    private struct ExOfferItem { public int ItemId; public int Count; public short Dura; public int SourceAbs; public int UniqueId; }
 
     private const float TradeRange = 8f;
     private const int ExchangeUntradableText = 7701;
 
+    private bool TradeHoldsInput => _exShown || _exWaiting || _exRequestPending;
+
     private void ExchangeInit()
     {
         BuildExchangePanel();
+        Net.I.TradeBlockedEvent += OnTradeBlocked;
         Net.I.ExchangeRequestEvent += OnExchangeRequest;
         Net.I.ExchangeAgreeEvent += OnExchangeAgree;
         Net.I.ExchangeAddResultEvent += OnExchangeAddResult;
@@ -56,10 +76,14 @@ public partial class World
         Net.I.ExchangeOtherDecideEvent += OnExchangeOtherDecide;
         Net.I.ExchangeDoneEvent += OnExchangeDone;
         Net.I.ExchangeCancelEvent += OnExchangeCancel;
+        Net.I.ExchangeDuplicateEvent += OnExchangeDuplicate;
     }
+
+    private void OnTradeBlocked(string text) => Notice.Show(this, text);
 
     private void ExchangeDispose()
     {
+        Net.I.TradeBlockedEvent -= OnTradeBlocked;
         Net.I.ExchangeRequestEvent -= OnExchangeRequest;
         Net.I.ExchangeAgreeEvent -= OnExchangeAgree;
         Net.I.ExchangeAddResultEvent -= OnExchangeAddResult;
@@ -67,6 +91,7 @@ public partial class World
         Net.I.ExchangeOtherDecideEvent -= OnExchangeOtherDecide;
         Net.I.ExchangeDoneEvent -= OnExchangeDone;
         Net.I.ExchangeCancelEvent -= OnExchangeCancel;
+        Net.I.ExchangeDuplicateEvent -= OnExchangeDuplicate;
     }
 
     private void BuildExchangePanel()
@@ -84,28 +109,30 @@ public partial class World
         var cols = new HBoxContainer();
         cols.AddThemeConstantOverride("separation", 16);
         root.AddChild(cols);
-        cols.AddChild(BuildOfferColumn("You offer", out _exMineList, out _exMineGold));
-        cols.AddChild(BuildOfferColumn("Partner offers", out _exTheirsList, out _exTheirsGold));
+        cols.AddChild(BuildOfferGrid(_exMineCells, out _exMineHeader, out _exMineState, out _exMineGold));
+        cols.AddChild(BuildOfferGrid(_exTheirsCells, out _exTheirsHeader, out _exTheirsState, out _exTheirsGold));
 
         root.AddChild(new HSeparator());
 
+        _exPurse = UiTheme.Text("", 12, UiTheme.Gold);
+        root.AddChild(_exPurse);
         var goldRow = new HBoxContainer();
         goldRow.AddThemeConstantOverride("separation", 6);
         var goldLbl = HudStyle.Label(13); goldLbl.Text = "Gold:";
         goldRow.AddChild(goldLbl);
         _exGoldEdit = new LineEdit { PlaceholderText = "amount", CustomMinimumSize = new Vector2(110, 0) };
+        _exGoldEdit.TextSubmitted += _ => OnAddGold();
         goldRow.AddChild(_exGoldEdit);
+        var allGoldBtn = new Button { Text = "All", FocusMode = Control.FocusModeEnum.None };
+        allGoldBtn.Pressed += () => _exGoldEdit.Text = Sheet.Gold.ToString();
+        goldRow.AddChild(allGoldBtn);
         var addGoldBtn = new Button { Text = "Add gold", FocusMode = Control.FocusModeEnum.None };
         addGoldBtn.Pressed += OnAddGold;
         goldRow.AddChild(addGoldBtn);
         root.AddChild(goldRow);
 
-        root.AddChild(UiTheme.SectionTitle("My backpack"));
-        var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(360, 200), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
-        root.AddChild(scroll);
-        _exBagList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-        _exBagList.AddThemeConstantOverride("separation", 3);
-        scroll.AddChild(_exBagList);
+        _exRoom = UiTheme.Text("", 12, UiTheme.TextLo);
+        root.AddChild(_exRoom);
 
         root.AddChild(new HSeparator());
         var footer = new HBoxContainer();
@@ -241,16 +268,33 @@ public partial class World
         buttons.AddChild(ok);
     }
 
-    private static Control BuildOfferColumn(string heading, out VBoxContainer list, out Label goldLbl)
+    private Control BuildOfferGrid(ItemSlotView[] cells, out Label header, out Label state, out Label count)
     {
-        var box = new VBoxContainer { CustomMinimumSize = new Vector2(180, 0) };
+        var box = new VBoxContainer();
         box.AddThemeConstantOverride("separation", 4);
-        box.AddChild(UiTheme.SectionTitle(heading));
-        list = new VBoxContainer { CustomMinimumSize = new Vector2(180, 150) };
-        list.AddThemeConstantOverride("separation", 2);
-        box.AddChild(list);
-        goldLbl = UiTheme.Text("", 12, UiTheme.Gold);
-        box.AddChild(goldLbl);
+        var head = new HBoxContainer();
+        head.AddThemeConstantOverride("separation", 8);
+        header = UiTheme.Text("", 13, UiTheme.GoldBright);
+        header.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        head.AddChild(header);
+        state = UiTheme.Text("", 11, UiTheme.TextLo, HorizontalAlignment.Right);
+        head.AddChild(state);
+        box.AddChild(head);
+        var grid = new GridContainer { Columns = TradeGridColumns };
+        grid.AddThemeConstantOverride("h_separation", 3);
+        grid.AddThemeConstantOverride("v_separation", 3);
+        for (int i = 0; i < cells.Length; i++)
+        {
+            var cell = new ItemSlotView(TradeCellSize) { Index = i, Veiled = true };
+            cell.Hovered += view => ShowItemTooltip(-1, view.Item);
+            cell.Unhovered += _ => HideItemTooltip();
+            cell.RightClicked += view => ShowSealedCharacterSheet(view.Item);
+            cells[i] = cell;
+            grid.AddChild(cell);
+        }
+        box.AddChild(grid);
+        count = UiTheme.Text("", 12, UiTheme.Gold);
+        box.AddChild(count);
         return box;
     }
 
@@ -273,6 +317,16 @@ public partial class World
 
     private void BeginTradeRequest(int charId, string name)
     {
+        if (Net.I.GenieRunning)
+        {
+            TradeRefusalLine(TextTradeOwnGenie, "You cannot trade while using Genie.");
+            return;
+        }
+        if (_genieUsers.Contains(charId))
+        {
+            TradeRefusalLine(TextTradePartnerGenie, "You cannot trade with users who are using Genie.");
+            return;
+        }
         if (_ents.TryGetValue(charId, out var partner)
             && partner.Nation != Net.I.Nation
             && !Net.I.CurrentZoneAbility.CanTrade)
@@ -314,7 +368,28 @@ public partial class World
     private void OnExchangeRequest(int requesterCharId)
     {
         if (_exRequestPending) return;
-        if (_exShown || _exWaiting) { Net.I.SendExchangeAgree(false); return; }
+        if (Net.I.GenieRunning || _genieUsers.Contains(requesterCharId))
+        {
+            if (Net.I.GenieRunning) TradeRefusalLine(TextTradeOwnGenie, "You cannot trade while using Genie.");
+            else TradeRefusalLine(TextTradePartnerGenie, "You cannot trade with users who are using Genie.");
+            Net.I.SendExchangeAgree(false);
+            return;
+        }
+        if (_tradeRequestsBlocked)
+        {
+            CommandRefusal(CommandCatalog.TradeRequestsRefusedText, "Has blocked trade requests.");
+            Net.I.SendExchangeAgree(false);
+            return;
+        }
+        if (_exShown || _exWaiting)
+        {
+            CombatLogAdd(ItemData.Text(TextTradeBusy, "A trade request has been received from another user while you were trading."),
+                CombatLogKind.Status, TradeBusyColour);
+            Net.I.SendExchangeAgree(false);
+            return;
+        }
+        CloseVendor();
+        CloseWarehouse();
         _exPartnerId = requesterCharId;
         _exPartnerName = _ents.TryGetValue(requesterCharId, out var e) ? e.Name : "Player";
         _exRequestPending = true;
@@ -335,7 +410,11 @@ public partial class World
     {
         HideExchangeWait();
         if (accepted) OpenExchange();
-        else { CombatNotice($"{_exPartnerName} declined the trade."); ResetExchangeState(); }
+        else
+        {
+            TradeRefusalLine(TextTradeDeclined, "The user has declined the request for a trade.");
+            ResetExchangeState();
+        }
     }
 
     private void OpenExchange()
@@ -345,10 +424,33 @@ public partial class World
         _exConfirmBtn.Disabled = false;
         _exConfirmBtn.Text = "Confirm";
         SetExStatus("", false);
-        RefreshExchangeBag();
-        RefreshExchangeOffers();
+        _exMineHeader.Text = "You offer";
+        _exTheirsHeader.Text = $"{_exPartnerName} offers";
         _exPanel.Visible = true;
         _exShown = true;
+        _exCompanion ??= new BagCompanion(TradeTakeFromBag, TradeBagFit, _ => "", () => AbortExchange(local: true));
+        AttachBagCompanion(_exCompanion);
+        RefreshExchangeOffers();
+    }
+
+    private bool TradeTakeFromBag(int abs)
+    {
+        if (!InMainBag(abs)) return false;
+        OfferSlot(abs);
+        return true;
+    }
+
+    private BagFit TradeBagFit(int abs) =>
+        UseRefusal(ItemUse.Trade, Inv[abs]) == ItemUseRules.Allowed ? BagFit.Normal : BagFit.Unfit;
+
+    private void TradeRefusalLine(int textId, string fallback) =>
+        CombatLogAdd(ItemData.Text(textId, fallback), CombatLogKind.Status, WhRefusalTint);
+
+    private void OnExchangeDuplicate()
+    {
+        string text = ItemData.Text(TextTradeDuplicate, "This item is a duplicated item.");
+        CombatLogAdd(text, CombatLogKind.Status, WhRefusalTint);
+        if (_exShown) SetExStatus(text, true);
     }
 
     private void AbortExchange(bool local)
@@ -365,6 +467,8 @@ public partial class World
         _exShown = false;
         _exPanel.Visible = false;
         ResetExchangeState();
+        PluginNotifyTrade();
+        if (_exCompanion != null) DetachBagCompanion(_exCompanion);
     }
 
     private void ResetExchangeState()
@@ -380,56 +484,54 @@ public partial class World
         if (_exGoldEdit != null) _exGoldEdit.Text = "";
     }
 
-    private void RefreshExchangeBag()
-    {
-        HideItemTooltip();
-        foreach (var c in _exBagList.GetChildren()) { _exBagList.RemoveChild(c); c.QueueFree(); }
-        for (int abs = GridStart; abs < GridStart + GridCount && abs < Inv.Length; abs++)
-        {
-            if (Inv[abs].IsEmpty) continue;
-            var slot = Inv[abs];
-            int absSlot = abs;
-            var def = ItemData.Get(slot.ItemId);
-            string sub = def != null && def.Weight > 0 ? $"{def.Weight * ItemData.CarriedUnits(def, slot)} wt" : "";
-            _exBagList.AddChild(BuildTradeRow(
-                slot.ItemId, sub, "Offer",
-                () => OfferSlot(absSlot), () => OfferSlot(absSlot), absSlot, slot, slot.Count));
-        }
-        if (_exBagList.GetChildCount() == 0)
-        {
-            var empty = HudStyle.Label(13); empty.Text = "Your bags are empty.";
-            _exBagList.AddChild(empty);
-        }
-    }
-
     private void RefreshExchangeOffers()
     {
-        RefreshOfferColumn(_exMineList, _exMyOffer);
-        RefreshOfferColumn(_exTheirsList, _exTheirOffer);
-        _exMineGold.Text = _exMyGoldOffer > 0 ? $"+ {_exMyGoldOffer:n0} gold" : "";
-        _exTheirsGold.Text = _exTheirGoldOffer > 0 ? $"+ {_exTheirGoldOffer:n0} gold" : "";
+        FillOfferGrid(_exMineCells, _exMyOffer);
+        FillOfferGrid(_exTheirsCells, _exTheirOffer);
+        _exMineGold.Text = OfferSummary(_exMyOffer.Count, _exMyGoldOffer);
+        _exTheirsGold.Text = OfferSummary(_exTheirOffer.Count, _exTheirGoldOffer);
+        SetOfferState(_exMineState, _exConfirmedByMe);
+        SetOfferState(_exTheirsState, _exConfirmedByPartner);
+        _exPurse.Text = $"You have {Sheet.Gold:n0} gold.";
+        RefreshTradeRoom();
+        RefreshBagFit();
+        PluginNotifyTrade();
     }
 
-    private static void RefreshOfferColumn(VBoxContainer list, List<ExOfferItem> offer)
+    private static string OfferSummary(int items, int gold) =>
+        gold > 0 ? $"{items} / {TradeOfferSlots} items   + {gold:n0} gold" : $"{items} / {TradeOfferSlots} items";
+
+    private static void SetOfferState(Label state, bool confirmed)
     {
-        foreach (var c in list.GetChildren()) { list.RemoveChild(c); c.QueueFree(); }
-        foreach (var o in offer)
-        {
-            var hb = new HBoxContainer();
-            hb.AddThemeConstantOverride("separation", 6);
-            hb.AddChild(new TextureRect
-            {
-                Texture = ItemData.Icon(o.ItemId),
-                CustomMinimumSize = new Vector2(26, 26),
-                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            });
-            var name = UiTheme.Text("", 12, UiTheme.TextHi);
-            name.Text = o.Count > 1 ? $"{ItemData.DisplayName(o.ItemId)} x{o.Count}" : ItemData.DisplayName(o.ItemId);
-            hb.AddChild(name);
-            list.AddChild(hb);
-        }
+        state.Text = confirmed ? "Confirmed" : "Not confirmed";
+        state.AddThemeColorOverride("font_color", confirmed ? TradeConfirmedColour : UiTheme.TextLo);
     }
+
+    private static void FillOfferGrid(ItemSlotView[] cells, List<ExOfferItem> offer)
+    {
+        for (int i = 0; i < cells.Length; i++)
+            cells[i].Set(i < offer.Count
+                ? new ItemSlot { ItemId = offer[i].ItemId, Count = (short)offer[i].Count, Durability = offer[i].Dura, UniqueId = offer[i].UniqueId }
+                : default);
+    }
+
+    private void RefreshTradeRoom()
+    {
+        int free = 0;
+        for (int abs = GridStart; abs < GridStart + GridCount && abs < Inv.Length; abs++)
+            if (Inv[abs].IsEmpty) free++;
+        long weight = CarriedWeight() + _exTheirOffer.Sum(o => OfferWeight(o)) - _exMyOffer.Sum(o => OfferWeight(o));
+        var room = new TradeRoom(free, _exTheirOffer.Count, weight, Sheet.MaxWeight);
+        _exRoom.Text = Sheet.MaxWeight > 0
+            ? $"Free slots: {free} (incoming {room.Incoming})   Weight after trade: {weight / 10f:0.0} / {Sheet.MaxWeight / 10f:0.0}"
+            : $"Free slots: {free} (incoming {room.Incoming})";
+        _exRoom.AddThemeColorOverride("font_color", room.Fits ? UiTheme.TextLo : UiTheme.Bad);
+    }
+
+    private static long OfferWeight(ExOfferItem offer) =>
+        ItemData.Get(offer.ItemId) is { } def
+            ? (long)def.Weight * ItemData.CarriedUnits(def, new ItemSlot { ItemId = offer.ItemId, Count = (short)offer.Count, Durability = offer.Dura })
+            : 0;
 
     private void OfferSlot(int absSlot)
     {
@@ -437,6 +539,11 @@ public partial class World
         if (_exAddInFlight || _exConfirmedByPartner) return;
         if (absSlot < 0 || absSlot >= Inv.Length || Inv[absSlot].IsEmpty) return;
         var slot = Inv[absSlot];
+        if (UseRefusal(ItemUse.Trade, slot) is not ItemUseRules.Allowed and var tradeRefusal)
+        {
+            SetExStatus(ItemData.Text(tradeRefusal, "You cannot trade this item."), true);
+            return;
+        }
         if (!CanOfferItem(slot)) return;
         int have = Mathf.Max(1, (int)slot.Count);
 
@@ -478,7 +585,7 @@ public partial class World
         }
         if (!CanOfferItem(slot)) return;
 
-        _exPending = new PendingExAdd { IsGold = false, ItemId = slot.ItemId, SourceAbs = absSlot, Count = count, Dura = slot.Durability };
+        _exPending = new PendingExAdd { IsGold = false, ItemId = slot.ItemId, SourceAbs = absSlot, Count = count, Dura = slot.Durability, UniqueId = slot.UniqueId };
         _exAddInFlight = true;
         Net.I.SendExchangeAddItem((byte)(absSlot - GridStart), slot.ItemId, count);
     }
@@ -530,6 +637,13 @@ public partial class World
         if (_exConfirmedByMe) { SetExStatus("You already confirmed.", true); return; }
         if (_exAddInFlight || _exConfirmedByPartner) return;
         if (!int.TryParse(_exGoldEdit.Text.Trim(), out int amount) || amount <= 0) { SetExStatus("Enter a gold amount.", true); return; }
+        AddTradeGold(amount);
+    }
+
+    private void AddTradeGold(int amount)
+    {
+        if (_exConfirmedByMe) { SetExStatus("You already confirmed.", true); return; }
+        if (_exAddInFlight || amount <= 0) return;
         if (amount > Sheet.Gold) { SetExStatus("Not enough gold.", true); return; }
 
         _exPending = new PendingExAdd { IsGold = true, Count = amount };
@@ -552,7 +666,7 @@ public partial class World
         }
         else
         {
-            _exMyOffer.Add(new ExOfferItem { ItemId = _exPending.ItemId, Count = _exPending.Count, Dura = _exPending.Dura, SourceAbs = _exPending.SourceAbs });
+            _exMyOffer.Add(new ExOfferItem { ItemId = _exPending.ItemId, Count = _exPending.Count, Dura = _exPending.Dura, SourceAbs = _exPending.SourceAbs, UniqueId = _exPending.UniqueId });
             int abs = _exPending.SourceAbs;
             if (abs >= 0 && abs < Inv.Length)
             {
@@ -567,17 +681,16 @@ public partial class World
                 Net.I.MirrorInventorySlot(abs, Inv[abs]);
             }
             if (CharTabOpen()) RefreshInventoryUI();
-            RefreshExchangeBag();
         }
         RefreshExchangeOffers();
         SetExStatus("", false);
     }
 
-    private void OnExchangeOtherAdd(int itemId, int count, short dura)
+    private void OnExchangeOtherAdd(int itemId, int count, short dura, int uniqueId)
     {
         if (!_exShown) return;
         if (itemId == Net.ExchangeGoldItem) _exTheirGoldOffer += count;
-        else _exTheirOffer.Add(new ExOfferItem { ItemId = itemId, Count = count, Dura = dura });
+        else _exTheirOffer.Add(new ExOfferItem { ItemId = itemId, Count = count, Dura = dura, UniqueId = uniqueId });
         RefreshExchangeOffers();
     }
 
@@ -589,6 +702,7 @@ public partial class World
         _exConfirmBtn.Disabled = true;
         _exConfirmBtn.Text = "Confirmed";
         SetExStatus("Waiting for partner…", false);
+        RefreshExchangeOffers();
         Net.I.SendExchangeDecide();
     }
 
@@ -597,6 +711,7 @@ public partial class World
         if (!_exShown) return;
         _exConfirmedByPartner = true;
         CloseExchangeAmount();
+        RefreshExchangeOffers();
         SetExStatus(_exConfirmedByMe ? "Finalising…" : "Partner confirmed — press Confirm.", false);
     }
 

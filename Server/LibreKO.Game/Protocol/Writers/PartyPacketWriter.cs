@@ -1,9 +1,10 @@
-using LibreKO.Common.Infrastructure.Network;
+﻿using LibreKO.Common.Infrastructure.Network;
 
 namespace LibreKO.Game.Protocol.Writers;
 
 public sealed class PartyPacketWriter
 {
+    public readonly record struct WarBoardShare(int MemberId, ushort Share);
 
     public const short StatusMemberRecord = 1;
 
@@ -32,7 +33,8 @@ public sealed class PartyPacketWriter
         _body = body;
     }
 
-    public static Packet MemberInfo(MemberState member, byte statusCode = MemberJoined) => new PartyPacketWriter(PartySubOpcode.MemberInfo, p =>
+    public static Packet MemberInfo(MemberState member, byte statusCode = MemberJoined, int markedTarget = NoTargetMark, byte partyType = TrailingDefault) =>
+        new PartyPacketWriter(PartySubOpcode.MemberInfo, p =>
         {
             p.WriteShort(StatusMemberRecord);
             p.WriteInt(member.CharacterId);
@@ -46,8 +48,8 @@ public sealed class PartyPacketWriter
             p.WriteShort(member.Mp);
             p.WriteByte(TrailingDefault);
             p.WriteByte(TrailingDefault);
-            p.WriteInt(NoTargetMark);
-            p.WriteByte(TrailingDefault);
+            p.WriteInt(markedTarget);
+            p.WriteByte(partyType);
             p.WriteByte(TrailingDefault);
         }).Build();
     public static Packet Rejected(short errorCode) => new PartyPacketWriter(PartySubOpcode.MemberInfo, p => p.WriteShort(errorCode)).Build();
@@ -88,12 +90,23 @@ public sealed class PartyPacketWriter
             p.WriteInt(characterId);
             p.WriteString(name);
         }).Build();
-    public static Packet TargetNumber(int targetId, sbyte success) => new PartyPacketWriter(PartySubOpcode.TargetNumber, p =>
+    public static Packet CommanderMark(int targetId, bool clear) => new PartyPacketWriter(PartySubOpcode.CommanderMark, p =>
         {
             p.WriteInt(targetId);
-            p.WriteByte(unchecked((byte)success));
+            p.WriteByte((byte)(clear ? 1 : 0));
         }).Build();
-    public static Packet Alert(byte alertType) => new PartyPacketWriter(PartySubOpcode.Alert, p => p.WriteByte(alertType)).Build();
+    public static Packet CommanderOrder(byte order) => new PartyPacketWriter(PartySubOpcode.CommanderOrder, p => p.WriteByte(order)).Build();
+    public static Packet WarBoard(byte target, byte mode, IReadOnlyList<WarBoardShare> shares) => new PartyPacketWriter(PartySubOpcode.WarBoard, p =>
+        {
+            p.WriteByte(target);
+            p.WriteByte(mode);
+            p.WriteByte((byte)shares.Count);
+            foreach (var share in shares)
+            {
+                p.WriteInt(share.MemberId);
+                p.WriteShort((short)share.Share);
+            }
+        }).Build();
     private Packet Build()
     {
         var packet = new Packet(GameOpcodes.GS_PARTY);

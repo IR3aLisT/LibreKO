@@ -15,9 +15,14 @@ public class CharacterRepository(AppDbContext context) : ICharacterRepository
     public async Task<IEnumerable<Character>> GetCharactersByAccount(int accountId)
     {
         return await context.Characters
-            .Where(c => c.AccountId == accountId)
+            .Where(c => c.AccountId == accountId && !c.Sealed)
             .OrderBy(c => c.Slot)
             .ToListAsync();
+    }
+
+    public async Task<IReadOnlyList<Character>> GetByIds(IReadOnlyCollection<int> ids)
+    {
+        return await context.Characters.Where(c => ids.Contains(c.Id)).ToListAsync();
     }
 
     public async Task CreateAsync(Character character)
@@ -47,38 +52,6 @@ public class CharacterRepository(AppDbContext context) : ICharacterRepository
     public async Task<Character?> GetByName(string name)
     {
         return await context.Characters.SingleOrDefaultAsync(c => c.Name == name);
-    }
-
-    public async Task<IReadOnlyList<CharacterRankRow>> GetTopByLoyalty(AccountNation nation, int count)
-    {
-        if (count <= 0) return Array.Empty<CharacterRankRow>();
-
-        var rows = await (from ch in context.Characters
-                          join acc in context.Accounts on ch.AccountId equals acc.Id
-                          where acc.Nation == nation && ch.LoyaltyDaily > 0 && ch.DeletionTime == null
-                          orderby ch.LoyaltyDaily descending
-                          select new CharacterRankRow(
-                              ch.Id,
-                              ch.Name,
-                              acc.Nation,
-                              ch.KnightsId,
-                              ch.Loyalty,
-                              ch.LoyaltyMonthly,
-                              ch.LoyaltyDaily))
-                         .Take(count)
-                         .ToListAsync();
-        return rows;
-    }
-
-    public async Task<int> GetLoyaltyRank(AccountNation nation, int dailyLoyalty)
-    {
-        if (dailyLoyalty <= 0) return 0;
-
-        var higher = await (from ch in context.Characters
-                            join acc in context.Accounts on ch.AccountId equals acc.Id
-                            where acc.Nation == nation && ch.LoyaltyDaily > dailyLoyalty && ch.DeletionTime == null
-                            select ch.Id).CountAsync();
-        return higher + 1;
     }
 
     public async Task<IReadOnlyList<int>> GetPlayerIdsByLoyalty(AccountNation nation, int count, bool monthly)

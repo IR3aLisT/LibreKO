@@ -1013,6 +1013,40 @@ public class ItemTests : GameTestBase
     }
 
     [Fact]
+    public async Task ItemPacketCoordinator_HandleRemoveAsync_DestroysAMagicBagItem()
+    {
+        const int itemId = 389010000;
+        const byte bagPosition = 13;
+
+        using var provider = CreateProvider(_ => { });
+
+        var client = Substitute.For<IClient>();
+        client.Id.Returns(Guid.NewGuid());
+        Packet? sentPacket = null;
+        client.SendPacket(Arg.Do<Packet>(packet => sentPacket = packet), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var session = sessionManager.CreateSession(client, characterId: 4141, accountId: 4241);
+        var slot = session.Inventory[InventoryConstants.MagicBagStart + bagPosition];
+        slot.ItemId = itemId;
+        slot.Count = 5;
+
+        var packet = new Packet(GameOpcodes.GS_ITEM_REMOVE);
+        packet.WriteByte((byte)ItemRemoveSource.MagicBag);
+        packet.WriteByte(bagPosition);
+        packet.WriteInt(itemId);
+
+        var coordinator = provider.GetRequiredService<IItemPacketCoordinator>();
+        await coordinator.HandleRemoveAsync(client, packet);
+
+        session.Inventory[InventoryConstants.MagicBagStart + bagPosition].IsEmpty.Should().BeTrue();
+        sentPacket.Should().NotBeNull();
+        sentPacket!.ResetOffset();
+        sentPacket.ReadByte().Should().Be((byte)ItemRemoveResult.Removed);
+    }
+
+    [Fact]
     public async Task ItemPacketCoordinator_HandleRemoveAsync_RemovesEquippedItemOpBuffOnTrash()
     {
         const int itemId = 700204;

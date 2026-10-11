@@ -36,6 +36,8 @@ public partial class World
         Chat.ItemTipShow = ShowChatItemTip;
         Chat.ItemTipHide = HideItemTooltip;
         Chat.IsFriend = IsFriendName;
+        Chat.NoahKnight = () => SelfIsNoahKnight;
+        Chat.PersonalRankOf = PersonalRankOf;
         Chat.ColorsRequested = OpenChatColors;
         Chat.StatusNotice = CombatNotice;
         Chat.LayoutChanged += OnChatLayoutChanged;
@@ -53,6 +55,10 @@ public partial class World
     private void ShowChatItemTip(int itemId) =>
         ShowItemTooltip(-1, new ItemSlot { ItemId = itemId, Count = 1, Durability = ItemData.MaxDurabilityOf(itemId) });
 
+    private int PersonalRankOf(int charId) =>
+        charId == _myId ? _selfPersonalRank
+        : _ents.TryGetValue(charId, out var e) ? e.PersonalRank : NationRankAura.Unranked;
+
     private bool IsFriendName(string name) =>
         _friends.Exists(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
 
@@ -62,7 +68,10 @@ public partial class World
     {
         _nearbyCard = new NearbyCard();
         Chat.DockNearby(_nearbyCard);
-        _nearbyCard.WhisperPicked += row => OpenWhisperWith(row.Name);
+        _nearbyCard.WhisperPicked += row =>
+        {
+            if (!ZoneLooks.KeepsNamesOutOfChat(_zone)) OpenWhisperWith(row.Name);
+        };
         _nearbyCard.MenuPicked += (row, at) => ShowPlayerMenuByName(row.Name, at);
         _nearbyTimer = new Godot.Timer { WaitTime = NearbyTickSeconds, OneShot = false, Autostart = true };
         _nearbyTimer.Timeout += NearbyTick;

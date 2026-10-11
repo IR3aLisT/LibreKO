@@ -31,9 +31,11 @@ public class EventSystemsPacketCoordinator(
     EventSchedulerService eventSchedulerService,
     ILoyaltyService loyaltyService,
     IMonsterStoneService monsterStoneService,
+    INereidMonumentService nereidMonuments,
     ILogger<EventSystemsPacketCoordinator> logger) : IEventSystemsPacketCoordinator
 {
     private const byte TempleEventMonsterStone = 6;
+    private const byte TempleEventMonsterStoneExp = 11;
     private const byte TempleEventJoin = 8;
     private const byte TempleEventDisband = 9;
 
@@ -68,6 +70,11 @@ public class EventSystemsPacketCoordinator(
                     await monsterStoneService.UseAsync(session, packet.ReadInt());
                 break;
 
+            case TempleEventMonsterStoneExp:
+                if (packet.RemainingBytes >= sizeof(int))
+                    await monsterStoneService.ExpAsync(session, packet.ReadInt());
+                break;
+
             case TempleEventJoin:
                 await HandleTempleEventJoinAsync(session);
                 break;
@@ -75,7 +82,24 @@ public class EventSystemsPacketCoordinator(
             case TempleEventDisband:
                 await HandleTempleEventDisbandAsync(session);
                 break;
+
+            case FullMoonRules.EntrySub:
+                await HandleFullMoonEntryAsync(session);
+                break;
         }
+    }
+
+    private async Task HandleFullMoonEntryAsync(UserSession session)
+    {
+        var party = session.IsInParty ? sessionManager.Parties.GetParty(session.PartyIndex) : null;
+        if (party != null && party.LeaderId != (short)session.CharacterId)
+            return;
+        var members = party == null
+            ? []
+            : party.MemberIds.Where(id => id >= 0).Select(id => sessionManager.GetByCharacterId(id))
+                .OfType<UserSession>().ToList();
+        var code = FullMoonRules.EntryRefusal(party == null ? null : session, members, party?.BoardType ?? FullMoonRules.NormalBoard);
+        await session.Client.SendPacket(EventPacketWriter.FullMoonEntry(code));
     }
 
     public async Task HandleBattleEventAsync(IClient client, Packet packet)
@@ -125,26 +149,14 @@ public class EventSystemsPacketCoordinator(
         if (session == null || packet.RemainingBytes < 1)
             return;
 
-        var eventType = packet.ReadByte();
+        if (packet.ReadByte() != MapEventPacketWriter.SubPoints)
+            return;
+
         var battle = sessionManager.Battle;
-
-        Packet response;
-        if (battle.IsBattleActive && session.ZoneId == BattleZoneManager.ZONE_BATTLE4)
-        {
-            response = EventPacketWriter.MapEventScores(
-                eventType, (short)battle.KarusMonumentPoint, (short)battle.ElmoMonumentPoint);
-        }
+        if (session.ZoneId == BattleZoneManager.ZONE_BATTLE4)
+            await session.Client.SendPacket(nereidMonuments.PointsPacket());
         else if (battle.IsBattleActive && session.ZoneId == BattleZoneManager.ZONE_BATTLE6)
-        {
-            response = EventPacketWriter.MapEventScores(
-                eventType, battle.KarusDead, battle.ElmoradDead);
-        }
-        else
-        {
-            response = EventPacketWriter.MapEventEmpty();
-        }
-
-        await session.Client.SendPacket(response);
+            await session.Client.SendPacket(MapEventPacketWriter.Points((ushort)battle.KarusDead, (ushort)battle.ElmoradDead));
     }
 
     public async Task OpenBattleZoneAsync(byte type, byte zone)
@@ -169,6 +181,7 @@ public class EventSystemsPacketCoordinator(
             return;
 
         var winner = battle.DetermineWinner();
+        await nereidMonuments.AnnounceResultAsync(winner);
         if (winner > 0)
             await AnnounceBattleResultAsync(winner);
 
@@ -235,29 +248,27 @@ public class EventSystemsPacketCoordinator(
 
     private async Task HandleTempleEventJoinAsync(UserSession session)
     {
-        Packet packet;
+        var result = eventSchedulerService.TryJoinTempleEvent(session);
+        await session.Client.SendPacket(EventPacketWriter.TempleEvent(
+            TempleEventJoin, (byte)result,
+            TempleEventRules.JoinReplyId(eventSchedulerService.CurrentTempleEvent, eventSchedulerService.TempleEventZone)));
+        if (result != TempleJoinResult.Joined)
+            return;
 
-        if (eventSchedulerService.TryJoinTempleEvent(session, out var reason))
-        {
-            packet = EventPacketWriter.TempleEvent(
-                TempleEventJoin, 1, eventSchedulerService.TempleEventZone);
-            logger.LogDebug("Player {Name} joined temple event zone {Zone}", session.Name, eventSchedulerService.TempleEventZone);
-        }
-        else
-        {
-            packet = EventPacketWriter.TempleEvent(TempleEventJoin, 0, 0);
-            if (!string.IsNullOrEmpty(reason))
-            {
-                var noticePkt = ChatPacketWriter.SystemNotice((byte)session.Nation, reason);
-                await session.Client.SendPacket(noticePkt);
-            }
-        }
+        logger.LogDebug("Player {Name} joined temple event zone {Zone}", session.Name, eventSchedulerService.TempleEventZone);
+        await BroadcastTempleSignUpsAsync();
+    }
 
-        await session.Client.SendPacket(packet);
+    private async Task BroadcastTempleSignUpsAsync()
+    {
+        var (karus, elMorad) = eventSchedulerService.TempleSignUps();
+        await sessionManager.BroadcastToAll(EventPacketWriter.TempleSignUps(
+            eventSchedulerService.CurrentTempleEvent, karus, elMorad));
     }
 
     private async Task HandleTempleEventDisbandAsync(UserSession session)
     {
+        bool wasSignedUp = eventSchedulerService.TempleEventAcceptingEntries;
         eventSchedulerService.LeaveTempleEvent(session.CharacterId);
 
         if (session.InstanceReturn is { } returnPoint)
@@ -276,6 +287,8 @@ public class EventSystemsPacketCoordinator(
 
         var packet = EventPacketWriter.TempleEvent(TempleEventDisband, 1, 0);
         await session.Client.SendPacket(packet);
+        if (wasSignedUp)
+            await BroadcastTempleSignUpsAsync();
     }
 
     private async Task HandleBattleEventOpenAsync(UserSession session)

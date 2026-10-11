@@ -8,6 +8,7 @@ public partial class Net
     {
         var p = new Packet(GameOpcodes.GS_VERSION_CHECK);
         p.WriteUShort((ushort)Config.ServerVersion);
+        p.WriteString(Build.Version);
         _conn.Send(p);
     }
 
@@ -73,8 +74,20 @@ public partial class Net
         _conn.Send(p);
     }
 
+    private const byte GameStartCharacterPicked = 1;
+    private const byte GameStartReady = 2;
+
+    public ulong OnlineSinceMsec { get; private set; } = Godot.Time.GetTicksMsec();
+
     private void SendGameStart(byte sub)
     {
+        if (sub == GameStartCharacterPicked)
+        {
+            OnlineSinceMsec = Godot.Time.GetTicksMsec();
+            GmCollisionsOff = false;
+            ResetAdminGrant();
+            ResetWhispersOnCharacterChange();
+        }
         var p = new Packet(GameOpcodes.GS_GAMESTART);
         p.WriteByte(sub);
         p.WriteByte(0);
@@ -82,22 +95,24 @@ public partial class Net
         _conn.Send(p);
     }
 
-    public void SendReady() => SendGameStart(2);
+    public void SendReady() => SendGameStart(GameStartReady);
 
     private const float MaxWireSpeed = 90f;
 
-    public void SendMove(float x, float z, float y, float speed, byte echo = MoveEchoMove)
+    public void SendMove(float x, float z, float y, float speed, byte echo = MoveEchoMove) =>
+        SendMove(x, z, y, speed, echo, x, z, y);
+
+    public void SendMove(float willX, float willZ, float willY, float speed, byte echo, float curX, float curZ, float curY)
     {
-        var wx = (ushort)(x * 10);
-        var wz = (ushort)(z * 10);
-        var wy = (ushort)(y * 10);
         var p = GenieActionPacket(GameOpcodes.GS_MOVE, GenieMove);
-        p.WriteUShort(wx); p.WriteUShort(wz); p.WriteUShort(wy);
+        p.WriteUShort(WirePosition(willX)); p.WriteUShort(WirePosition(willZ)); p.WriteUShort(WirePosition(willY));
         p.WriteShort((short)Mathf.Clamp(speed * 10f, -MaxWireSpeed, MaxWireSpeed));
         p.WriteByte(echo);
-        p.WriteUShort(wx); p.WriteUShort(wz); p.WriteUShort(wy);
+        p.WriteUShort(WirePosition(curX)); p.WriteUShort(WirePosition(curZ)); p.WriteUShort(WirePosition(curY));
         _conn.Send(p);
     }
+
+    private static ushort WirePosition(float value) => (ushort)Mathf.Clamp(value * 10f, 0f, ushort.MaxValue);
 
     public void SendTargetHpRequest(int targetId)
     {
@@ -130,7 +145,7 @@ public partial class Net
         _conn.Send(p);
     }
 
-    public void SendAttack(int targetId, short swingDelay, int attackType = 1, bool critical = false)
+    public void SendAttack(int targetId, short swingDelay, int attackType = 1, bool chained = false)
     {
         var p = GenieActionPacket(GameOpcodes.GS_ATTACK, GenieMainAttack);
         p.WriteByte((byte)attackType);
@@ -138,7 +153,7 @@ public partial class Net
         p.WriteInt(targetId);
         p.WriteShort(swingDelay);
         p.WriteShort(0);
-        p.WriteByte(critical ? (byte)1 : (byte)0);
+        p.WriteByte(chained ? (byte)1 : (byte)0);
         p.WriteByte(0);
         _conn.Send(p);
     }
@@ -155,10 +170,40 @@ public partial class Net
         _conn.Send(p);
     }
 
+    public void SendCastFailed(int skillId)
+    {
+        var data = new short[MagicFail.ResultSlot + 1];
+        data[MagicFail.ResultSlot] = MagicFail.Casting;
+        SendMagic(MagicSub.Fail, skillId, MyCharId, data);
+    }
+
+    public const byte RegeneTown = 1;
+    public const byte RegeneResurrectChoice = 4;
+    public const byte RegeneResurrectAccept = 5;
+    public const byte ResurrectInPlace = 1;
+    public const byte ResurrectInTown = 2;
+
     public void SendRegene()
     {
         var p = new Packet(GameOpcodes.GS_REGENE);
-        p.WriteByte(1);
+        p.WriteByte(RegeneTown);
+        _conn.Send(p);
+    }
+
+    public void SendResurrectAccept(int casterId)
+    {
+        var p = new Packet(GameOpcodes.GS_REGENE);
+        p.WriteByte(RegeneResurrectAccept);
+        p.WriteInt(casterId);
+        _conn.Send(p);
+    }
+
+    public void SendResurrectChoice(byte choice, int casterId)
+    {
+        var p = new Packet(GameOpcodes.GS_REGENE);
+        p.WriteByte(RegeneResurrectChoice);
+        p.WriteByte(choice);
+        p.WriteInt(casterId);
         _conn.Send(p);
     }
 
@@ -168,9 +213,14 @@ public partial class Net
         var p = new Packet(GameOpcodes.GS_SKILLDATA);
         p.WriteByte(SkillBarSave);
         p.WriteShort((short)count);
+        var bar = new int[count];
         for (int i = 0; i < count; i++)
-            p.WriteInt(i < slotIds.Length ? slotIds[i] : 0);
+        {
+            bar[i] = i < slotIds.Length ? slotIds[i] : 0;
+            p.WriteInt(bar[i]);
+        }
         _conn.Send(p);
+        SkillBar = bar;
     }
 
     public void SendSkillDataLoad()
@@ -210,12 +260,17 @@ public partial class Net
 
     public void SendItemRemove(byte type, byte position, int itemId)
     {
-        if (!_conn.Connected) { ItemRemoveResultEvent?.Invoke(false); return; }
+        if (!_conn.Connected) { ItemRemoveResultEvent?.Invoke(false, ItemRemoveNoReason); return; }
         var p = new Packet(GameOpcodes.GS_ITEM_REMOVE);
         p.WriteByte(type);
         p.WriteByte(position);
         p.WriteInt(itemId);
-        _pendingRemoveSlot = type == 1 ? position : type is 0 or 2 ? 14 + position : -1;
+        _pendingRemoveSlot = type switch
+        {
+            ItemRemove.FromEquipment => position,
+            ItemRemove.FromMagicBag => InventoryConstants.MagicBagStart + position,
+            _ => InventoryConstants.InventoryStart + position,
+        };
         _conn.Send(p);
     }
 
@@ -249,10 +304,12 @@ public partial class Net
         _conn.Send(new Packet(GameOpcodes.GS_HOME));
     }
 
+    public const int ChatMessageMaxLength = 128;
+
     public void SendChat(string message, byte type = 1)
     {
         if (string.IsNullOrEmpty(message)) return;
-        if (message.Length > 128) message = message.Substring(0, 128);
+        message = Domain.TextRunes.Truncate(message, ChatMessageMaxLength);
         var p = new Packet(GameOpcodes.GS_CHAT);
         p.WriteByte(type);
         p.WriteString(message);
@@ -269,8 +326,14 @@ public partial class Net
         _conn.Send(p);
     }
 
+    public bool WhispersBlocked { get; private set; }
+    public bool TimedItemsOffered { get; set; }
+
+    public bool GmCollisionsOff { get; set; }
+
     public void SendChatBlock(bool block)
     {
+        WhispersBlocked = block;
         var p = new Packet(GameOpcodes.GS_CHAT_TARGET);
         p.WriteByte(SubChatTargetBlock);
         p.WriteByte(block ? (byte)1 : (byte)0);
@@ -291,16 +354,17 @@ public partial class Net
         _conn.Send(p);
     }
 
-    public void SendPartyCreate(string targetName) => SendPartyInviteName(PartyRequest.Create, targetName);
+    public void SendPartyCreate(string targetName, byte boardType = 0) => SendPartyInviteName(PartyRequest.Create, targetName, boardType);
 
-    public void SendPartyInvite(string targetName) => SendPartyInviteName(PartyRequest.Insert, targetName);
+    public void SendPartyInvite(string targetName, byte boardType = 0) => SendPartyInviteName(PartyRequest.Insert, targetName, boardType);
 
-    private void SendPartyInviteName(byte sub, string targetName)
+    private void SendPartyInviteName(byte sub, string targetName, byte boardType)
     {
         if (string.IsNullOrEmpty(targetName)) return;
         var p = new Packet(GameOpcodes.GS_PARTY);
         p.WriteByte(sub);
         p.WriteString(targetName);
+        p.WriteByte(boardType);
         _conn.Send(p);
     }
 
@@ -328,6 +392,33 @@ public partial class Net
         _conn.Send(p);
     }
 
+    public void SendPartyCommander(int memberId)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.CommanderAppoint);
+        p.WriteInt(memberId);
+        _conn.Send(p);
+    }
+
+    public void SendCommanderMark(int targetId, bool clear)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.CommanderMark);
+        p.WriteInt(targetId);
+        p.WriteInt(CommanderOrders.MarkingSkill);
+        p.WriteByte((byte)(clear ? 1 : 0));
+        _conn.Send(p);
+    }
+
+    public void SendCommanderOrder(byte order)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.CommanderOrder);
+        p.WriteByte(order);
+        p.WriteInt(CommanderOrders.OrderSkill);
+        _conn.Send(p);
+    }
+
     public void SendPartyPromote(int newLeaderId)
     {
         var p = new Packet(GameOpcodes.GS_PARTY);
@@ -337,44 +428,70 @@ public partial class Net
     }
 
     private const byte PartyBbsModeNormal = 0;
+    private const byte PartyBbsListSub = 0x0B;
 
-    public void SendPartyBbsRegister()
+    public void SendPartyBbsRegister(byte board = PartyBbsModeNormal)
     {
         var p = new Packet(GameOpcodes.GS_PARTY_BBS);
-        p.WriteByte(PartyBbsModeNormal);
+        p.WriteByte(board);
         p.WriteByte(0x01);
         _conn.Send(p);
     }
 
-    public void SendPartyBbsDelete()
+    public void SendPartyBbsInvite(string name, byte board = PartyBbsModeNormal) =>
+        SendPartyBbsName(PartyBoardInvite.Sub, name, board);
+
+    public void SendPartyBbsAccept(string inviter, byte board = PartyBbsModeNormal) =>
+        SendPartyBbsName(PartyBoardInvite.AcceptSub, inviter, board);
+
+    private void SendPartyBbsName(byte sub, string name, byte board)
     {
         var p = new Packet(GameOpcodes.GS_PARTY_BBS);
-        p.WriteByte(PartyBbsModeNormal);
+        p.WriteByte(board);
+        p.WriteByte(sub);
+        p.WriteString(name);
+        _conn.Send(p);
+    }
+
+    public void SendPartyBbsDelete(byte board = PartyBbsModeNormal)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY_BBS);
+        p.WriteByte(board);
         p.WriteByte(0x02);
         _conn.Send(p);
     }
 
-    public void SendPartyBbsList(int pageIndex)
+    public void SendPartyBbsList(int pageIndex, byte board = PartyBbsModeNormal)
     {
         var p = new Packet(GameOpcodes.GS_PARTY_BBS);
-        p.WriteByte(PartyBbsModeNormal);
-        p.WriteByte(0x03);
+        p.WriteByte(board);
+        p.WriteByte(PartyBbsListSub);
         p.WriteShort((short)System.Math.Max(0, pageIndex));
+        p.WriteByte(0);
+        p.WriteShort(0);
+        p.WriteByte(0);
         _conn.Send(p);
     }
 
-    public void SendPartyBbsWanted(int wantedClass, int pageIndex, string message)
+    public void SendPartyBbsWanted(int wantedClass, int pageIndex, string message, byte board = PartyBbsModeNormal)
     {
-        message ??= "";
-        if (message.Length > 255) message = message.Substring(0, 255);
-        var bytes = System.Text.Encoding.ASCII.GetBytes(message);
         var p = new Packet(GameOpcodes.GS_PARTY_BBS);
-        p.WriteByte(PartyBbsModeNormal);
+        p.WriteByte(board);
         p.WriteByte(0x04);
         p.WriteShort((short)wantedClass);
         p.WriteShort((short)System.Math.Max(0, pageIndex));
-        p.WriteByte((byte)bytes.Length);
-        foreach (var b in bytes) p.WriteByte(b);
+        p.WriteSByteString(message ?? "");
+        _conn.Send(p);
+    }
+
+    public const byte NpcEventTouch = 2;
+
+    public void SendNpcTouch(int npcUniqueId)
+    {
+        var p = new Packet(GameOpcodes.GS_NPC_EVENT);
+        p.WriteByte(NpcEventTouch);
+        p.WriteInt(npcUniqueId);
+        p.WriteInt(-1);
         _conn.Send(p);
     }
 

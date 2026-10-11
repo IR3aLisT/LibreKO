@@ -80,4 +80,28 @@ public class RebirthPickTests
         Assert.Equal(11, sheet.StatBonusAtRow(0));
         Assert.Equal(1, sheet.StatBonusAtRow(2));
     }
+
+    [Fact]
+    public void AResetPlacesEveryPointAgain()
+    {
+        var pick = new RebirthPick();
+        pick.Reset(6);
+        Assert.Equal(6, pick.Remaining);
+        for (int i = 0; i < 6; i++) Assert.True(pick.Add(i % RebirthPick.StatCount));
+        Assert.True(pick.Complete);
+        Assert.False(pick.Add(0));
+        pick.Clear();
+        Assert.Equal(RebirthPick.PointsPerRebirth, pick.Remaining);
+    }
+
+    [Fact]
+    public void ARedistributionReplacesTheRebirthBonus()
+    {
+        var sheet = new CharacterSheet();
+        sheet.SeedRebirth(2, 4, 0, 0, 0, 0);
+        sheet.ApplyRebirthReset(new byte[] { 0, 1, 1, 1, 1 });
+        Assert.Equal(0, sheet.RebirthBonusAtRow(0));
+        Assert.Equal(1, sheet.RebirthBonusAtRow(4));
+        Assert.Equal(2, sheet.RebirthLevel);
+    }
 }

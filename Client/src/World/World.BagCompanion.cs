@@ -32,6 +32,7 @@ public partial class World
     {
         var previous = _bagPairing.Attach(companion, CharTabOpen());
         _bagCompanion = companion;
+        RefreshArrangeButton();
         previous?.Close();
         if (CharTabOpen()) ApplyBagFit();
         else ShowMainWindow("Inventory");
@@ -41,6 +42,7 @@ public partial class World
     {
         if (_bagCompanion != companion) return;
         _bagCompanion = null;
+        RefreshArrangeButton();
         if (_bagPairing.Detach(companion)) HideMainWindow("Inventory");
         else if (CharTabOpen()) ApplyBagFit();
     }

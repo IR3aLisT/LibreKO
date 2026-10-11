@@ -39,6 +39,9 @@ internal static class ModelBuilderExtensions
         Configure<SpecialAuctionLotData>(modelBuilder, "SpecialAuctionLots");
         Configure<ItemCombineRecipeData>(modelBuilder, "ItemCombineRecipes");
         Configure<ItemCombineMaterialData>(modelBuilder, "ItemCombineMaterials");
+        Configure<ItemSmashClassData>(modelBuilder, "ItemSmashClasses");
+        Configure<ItemSmashRewardData>(modelBuilder, "ItemSmashRewards");
+        Configure<ItemGradeBonusData>(modelBuilder, "ItemGradeBonuses");
         Configure<HomeData>(modelBuilder, "Homes");
 
         Configure<ItemData>(modelBuilder, "Items");
@@ -68,6 +71,7 @@ internal static class ModelBuilderExtensions
 
         Configure<EventTriggerData>(modelBuilder, "EventTriggers");
         Configure<GameEventData>(modelBuilder, "GameEvents");
+        Configure<MapObjectData>(modelBuilder, "MapObjects");
         Configure<MonsterSummonData>(modelBuilder, "MonsterSummons");
         Configure<NpcData>(modelBuilder, "Npcs");
         Configure<NpcItemData>(modelBuilder, "NpcItems");

@@ -11,8 +11,12 @@ public class PartyGroup
 
     public short CommandLeaderId { get; set; } = -1;
 
+    public byte BoardType { get; set; }
+
     public bool IsCommandLeader(short charId)
-        => charId == LeaderId || (CommandLeaderId > 0 && charId == CommandLeaderId);
+        => charId == CommanderId;
+
+    public short CommanderId => CommandLeaderId > 0 ? CommandLeaderId : LeaderId;
 
     public PartyGroup(int index)
     {

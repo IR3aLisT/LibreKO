@@ -48,6 +48,7 @@ public partial class World
         Net.I.WarehouseNpcEvent += OnWarehouseOpen;
         Net.I.WarehouseContentsEvent += OnWarehouseContents;
         Net.I.WarehouseResultEvent += OnWarehouseResult;
+        Net.I.WarehouseOpenRefusedEvent += OnWarehouseOpenRefused;
         Net.I.GoldChangeEvent += OnWarehouseGold;
     }
 
@@ -56,8 +57,17 @@ public partial class World
         Net.I.WarehouseNpcEvent -= OnWarehouseOpen;
         Net.I.WarehouseContentsEvent -= OnWarehouseContents;
         Net.I.WarehouseResultEvent -= OnWarehouseResult;
+        Net.I.WarehouseOpenRefusedEvent -= OnWarehouseOpenRefused;
         Net.I.GoldChangeEvent -= OnWarehouseGold;
     }
+
+    private const byte WarehouseRefusedMoney = 2;
+    private const int TextWarehouseRefused = 10411;
+    private const int TextWarehouseNoMoney = 10412;
+
+    private void OnWarehouseOpenRefused(byte result) => CombatNotice(result == WarehouseRefusedMoney
+        ? ItemData.Text(TextWarehouseNoMoney, "Could not access the storage because you didn't have enough money.")
+        : ItemData.Text(TextWarehouseRefused, "Could not access the storage."));
 
     private void OnWarehouseGold(int g) { if (_whShown) RefreshWarehouseGold(); }
 
@@ -91,7 +101,7 @@ public partial class World
         well.AddChild(grid);
         for (int i = 0; i < WhPageSize; i++)
         {
-            var cell = new ItemSlotView(WhCellSize) { Index = i };
+            var cell = new ItemSlotView(WhCellSize) { Index = i, Veiled = true };
             cell.RightClicked += c => WithdrawSlot(WhAbs(c.Index));
             cell.Hovered += c => ShowItemTooltip(-1, c.Item);
             cell.Unhovered += _ => HideItemTooltip();
@@ -139,7 +149,8 @@ public partial class World
             ("Use [VIP] storage", ToggleVipWarehouse),
             ("Create a Clan", CreateClanFromInn),
             ("Seal / Cancel (anti-theft)", () => OpenSealWindow(SealMode.Secret)),
-            ("Seal / Cancel", () => OpenSealWindow(SealMode.Bind)));
+            ("Seal / Cancel", () => OpenSealWindow(SealMode.Bind)),
+            ("Character Seal/Unseal", OpenCharacterSeal));
     }
 
     private void OpenWarehouseStorage()
@@ -170,6 +181,7 @@ public partial class World
         _whPanel.Visible = false;
         HideItemTooltip();
         if (_whCompanion != null) DetachBagCompanion(_whCompanion);
+        PluginNotifyWarehouse();
     }
 
     private void OnWarehouseContents(int money, ItemSlot[] slots)
@@ -216,10 +228,16 @@ public partial class World
         _whStored.Value = _whMoney;
         _whDepositBtn.Disabled = Sheet.Gold <= 0;
         _whWithdrawBtn.Disabled = _whMoney <= 0;
+        PluginNotifyWarehouse();
     }
 
     private static bool WarehouseStorable(int itemId) =>
         ItemData.Get(itemId) is { } def && WarehouseRules.Storable(itemId, def.Race);
+
+    private static int UseRefusal(ItemUse use, ItemSlot slot) =>
+        ItemData.Get(slot.ItemId) is { } def
+            ? ItemUseRules.Refusal(use, slot.ItemId, def.Race, slot.Flag, slot.ExpiresAt > 0)
+            : ItemUseRules.Allowed;
 
     private static bool IsStackable(int itemId) => ItemData.Get(itemId) is { Countable: not 0 };
 
@@ -373,21 +391,30 @@ public partial class World
             WarehouseView.ServerCell(from), WarehouseView.ServerPage(to), WarehouseView.ServerCell(to));
     }
 
+    private long GoldRoom(bool deposit) => CharacterSheet.CoinMax - (long)(deposit ? _whMoney : Sheet.Gold);
+
     private void AskGoldTransfer(bool deposit)
     {
         if (StorageTransferBusy) return;
-        long max = System.Math.Min(deposit ? Sheet.Gold : _whMoney, WarehouseRules.CoinMax - (long)(deposit ? _whMoney : Sheet.Gold));
-        if (max <= 0) return;
+        long have = deposit ? Sheet.Gold : _whMoney;
+        if (have <= 0) return;
+        long max = Math.Min(have, GoldRoom(deposit));
+        if (max <= 0) { _whStatus.Status(GoldRoomRefusal(deposit), bad: true); return; }
+        string note = ItemData.Text(GoldCapNoteText, "You cannot enter if it's more than 2.1 billion.");
         _whAmount.Open(null, deposit ? "Deposit gold" : "Withdraw gold",
-            deposit ? $"You carry {max:n0}" : $"Stored {max:n0}", max, max, n => GoldTransfer(deposit, (int)n),
-            deposit ? "Deposit" : "Withdraw");
+            deposit ? $"You carry {have:n0}" : $"Stored {have:n0}", max, max, n => GoldTransfer(deposit, (int)n),
+            deposit ? "Deposit" : "Withdraw", _ => note);
     }
+
+    private static string GoldRoomRefusal(bool deposit) =>
+        deposit ? "The warehouse can't hold more gold." : "You can't carry more gold.";
 
     private void GoldTransfer(bool deposit, int amount)
     {
         if (StorageTransferBusy || amount <= 0) return;
         if (deposit && amount > Sheet.Gold) { _whStatus.Status("Not enough carried gold.", bad: true); return; }
         if (!deposit && amount > _whMoney) { _whStatus.Status("Not enough stored gold.", bad: true); return; }
+        if (amount > GoldRoom(deposit)) { _whStatus.Status(GoldRoomRefusal(deposit), bad: true); return; }
 
         _whPending = new WhPending { Op = deposit ? WhOpInput : WhOpOutput, Gold = true, Count = amount };
         _whInFlight = true;
@@ -395,13 +422,25 @@ public partial class World
         else Net.I.SendWarehouseOutput(_vendorNpcId, Net.GoldItemId, 0, 0, 0, amount);
     }
 
-    private void OnWarehouseResult(byte op, bool ok)
+    private const byte WhResultOk = 1;
+    private const byte WhResultDuplicate = 2;
+    private const int WhDuplicateText = 10762;
+    private const int WhNoRoomText = 1708;
+    private const int GoldCapNoteText = 6041;
+    private static readonly Color WhRefusalTint = Color.Color8(255, 59, 59);
+
+    private void OnWarehouseResult(byte op, byte result)
     {
         if (!_whInFlight || op != _whPending.Op) return;
         _whInFlight = false;
-        if (!ok)
+        if (result != WhResultOk)
         {
-            _whStatus.Status("Transfer failed.", bad: true);
+            string text = result == WhResultDuplicate
+                ? ItemData.Text(WhDuplicateText, "You are holding a duplicated item.")
+                : op == WhOpOutput ? ItemData.Text(WhNoRoomText, "Your bags are full.") : "Transfer failed.";
+            _whStatus.Status(text, bad: true);
+            if (result == WhResultDuplicate || op == WhOpOutput)
+                CombatLogAdd(text, CombatLogKind.Status, WhRefusalTint);
             if (_whShown) RefreshWarehouse();
             return;
         }

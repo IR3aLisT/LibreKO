@@ -10,7 +10,8 @@ public readonly record struct NpcDebuff(
     short SpeedPercent,
     short Ac,
     short AcPercent,
-    short AttackPercent);
+    short AttackPercent,
+    BuffType Type);
 
 public sealed class NpcDebuffs
 {
@@ -33,7 +34,8 @@ public sealed class NpcDebuffs
             type4.Speed,
             type4.Ac,
             type4.AcPct,
-            type4.Attack);
+            type4.Attack,
+            buffType);
         return true;
     }
 
@@ -67,6 +69,11 @@ public sealed class NpcDebuffs
             : attack;
 
     public void Clear() => _active.Clear();
+
+    public bool IsEmpty => _active.IsEmpty;
+
+    public IReadOnlyList<NpcDebuff> Active(long nowTicks) =>
+        _active.Values.Where(debuff => debuff.ExpireTicks > nowTicks).ToList();
 
     private NpcDebuff? Live(BuffType buffType, long nowTicks)
     {

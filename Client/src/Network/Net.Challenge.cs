@@ -9,13 +9,15 @@ public partial class Net
     private const byte ChallengeSubAccept = 3;
     private const byte ChallengeSubReject = 4;
     private const byte ChallengeSubRequestSent = 5;
-    private const byte ChallengeSubError = 11;
+    public const byte ChallengeSubError = 11;
+    public const byte ChallengeSubZoneError = 12;
+    public const byte ChallengeSubClanError = 13;
 
     public event Action<string>? ChallengeRequestEvent;
     public event Action<string>? ChallengeSentEvent;
     public event Action? ChallengeCancelledEvent;
     public event Action? ChallengeRejectedEvent;
-    public event Action? ChallengeErrorEvent;
+    public event Action<byte>? ChallengeErrorEvent;
 
     private void HandleChallenge(Packet p)
     {
@@ -36,7 +38,9 @@ public partial class Net
                 ChallengeRejectedEvent?.Invoke();
                 break;
             case ChallengeSubError:
-                ChallengeErrorEvent?.Invoke();
+            case ChallengeSubZoneError:
+            case ChallengeSubClanError:
+                ChallengeErrorEvent?.Invoke(sub);
                 break;
         }
     }

@@ -27,7 +27,7 @@ internal static class ItemMovePacketMapper
         for (var slot = start; slot < start + InventoryConstants.HaveMax; slot++)
         {
             var item = session.Inventory[slot];
-            writer.AddInventorySlot(item.ItemId, item.Durability, item.Count, item.Flag);
+            writer.AddInventorySlot(item.ItemId, item.Durability, item.Count, item.Flag, item.ExpiresAt);
         }
 
         return writer.Build();

@@ -11,6 +11,7 @@ public static class ChatType
     public const byte Public = 7;
     public const byte WarSystem = 8;
     public const byte Permanent = 9;
+    public const byte MonumentNotice = 11;
     public const byte GameMaster = 12;
     public const byte Command = 13;
     public const byte Merchant = 14;
@@ -19,6 +20,12 @@ public static class ChatType
     public const byte GameMasterInfo = 21;
     public const byte ClanOfficer = 23;
     public const byte ClanNotice = 24;
+    public const byte KrowazNotice = 25;
+    public const byte ChaosStoneNotice = 27;
+    public const byte BoxItemNotice = 28;
     public const byte ChatRoom = 33;
-    public const byte ClanRecruit = 34;
+    public const byte NoahKnights = 34;
+    public const byte MarqueeNotice = 37;
+    public const byte InfoNotice = 38;
+    public const byte AlarmNotice = 39;
 }

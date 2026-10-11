@@ -15,6 +15,12 @@ public partial class World
     private const int BdwDefeatSound = 340118;
     private const string BdwCentre = "VS";
     private const string BdwAltarStands = "Altar of Manes: Active in Center";
+    private const string BdwCarrierFx = "ft_chr_point_fxqallll";
+    private const string BdwCarrierFxNode = "bdw_carrier_fx";
+    private const string JuraidStatus = "Clear the rooms and slay Devabird";
+    private Node3D? _bdwCarrierFx;
+
+    private static bool IsWarRoomZone(int zone) => zone is BdwZone or JuraidZone;
 
     private void BorderDefenseWarInit()
     {
@@ -31,14 +37,19 @@ public partial class World
         Net.I.AltarFlagEvent += OnBdwAltarFlagReceived;
         Net.I.AltarTimerEvent += OnBdwAltarTimerReceived;
         Net.I.TempleEventFinishEvent += OnBdwFinishReceived;
+        Net.I.BorderWarRankEvent += OnBorderWarRanking;
 
-        if (_zone != BdwZone)
+        if (!IsWarRoomZone(_zone))
         {
             Net.I.BorderWar.Reset();
             return;
         }
+        _bdwScoreBanner.RankingShown = _zone == BdwZone;
         _bdwScoreBanner.Visible = true;
         RefreshBdwHud();
+        RefreshBdwCarrierFx();
+        if (Net.I.BorderWar.Finished && Net.I.BorderWar.HomeSecondsLeft(DateTime.UtcNow) > 0)
+            ShowWarResult();
     }
 
     private void BorderDefenseWarDispose()
@@ -47,6 +58,7 @@ public partial class World
         Net.I.AltarFlagEvent -= OnBdwAltarFlagReceived;
         Net.I.AltarTimerEvent -= OnBdwAltarTimerReceived;
         Net.I.TempleEventFinishEvent -= OnBdwFinishReceived;
+        Net.I.BorderWarRankEvent -= OnBorderWarRanking;
 
         _bdwTick?.Stop();
         if (_bdwHudLayer != null && IsInstanceValid(_bdwHudLayer))
@@ -61,15 +73,47 @@ public partial class World
             MouseFilter = Control.MouseFilterEnum.Ignore,
             Centre = BdwCentre,
         };
+        _bdwScoreBanner.RankingPressed += ToggleWarRanking;
         _bdwHudLayer.AddChild(_bdwScoreBanner);
         AddEventPlate(_bdwScoreBanner);
     }
 
     private void OnBdwScoresReceived(int karus, int elmo) => RefreshBdwHud();
 
-    private void OnBdwAltarFlagReceived(string playerName, byte nation) => RefreshBdwHud();
+    private void OnBdwAltarFlagReceived(string playerName, byte nation)
+    {
+        RefreshBdwHud();
+        RefreshBdwCarrierFx();
+    }
 
-    private void OnBdwAltarTimerReceived(int seconds) => RefreshBdwHud();
+    private void OnBdwAltarTimerReceived(int seconds)
+    {
+        RefreshBdwHud();
+        RefreshBdwCarrierFx();
+    }
+
+    private void RefreshBdwCarrierFx()
+    {
+        string carrier = _zone == BdwZone ? Net.I.BorderWar.Carrier : "";
+        Node3D? body = carrier.Length == 0 ? null : BodyNamed(carrier);
+        if (_bdwCarrierFx != null && IsInstanceValid(_bdwCarrierFx))
+        {
+            if (body != null && _bdwCarrierFx.GetParent() == body) return;
+            Fx.Free(_bdwCarrierFx);
+        }
+        _bdwCarrierFx = null;
+        if (body == null) return;
+        _bdwCarrierFx = Fx.Spawn(BdwCarrierFx, body, Vector3.Zero, oneShot: false);
+        if (_bdwCarrierFx != null) _bdwCarrierFx.Name = BdwCarrierFxNode;
+    }
+
+    private Node3D? BodyNamed(string name)
+    {
+        if (string.Equals(name, Net.I.LastEnter.Name, StringComparison.OrdinalIgnoreCase)) return _self;
+        foreach (var ent in _ents.Values)
+            if (!ent.IsNpc && string.Equals(ent.Name, name, StringComparison.OrdinalIgnoreCase)) return ent.Body;
+        return null;
+    }
 
     private void OnBdwFinishReceived(int eventId, int winnerNation, uint seconds)
     {
@@ -77,6 +121,8 @@ public partial class World
         Audio.PlayUi(won ? BdwVictorySound : BdwDefeatSound);
         CombatNotice(BdwResultLine(winnerNation));
         RefreshBdwHud();
+        RefreshBdwCarrierFx();
+        if (IsWarRoomZone(_zone)) ShowWarResult();
     }
 
     private static string BdwResultLine(int winnerNation) =>
@@ -86,7 +132,7 @@ public partial class World
 
     private void RefreshBdwHud()
     {
-        if (_zone != BdwZone || !IsInstanceValid(_bdwScoreBanner))
+        if (!IsWarRoomZone(_zone) || !IsInstanceValid(_bdwScoreBanner))
         {
             _bdwTick.Stop();
             return;
@@ -95,13 +141,20 @@ public partial class World
         var war = Net.I.BorderWar;
         var now = DateTime.UtcNow;
         _bdwScoreBanner.SetScores(war.KarusScore, war.ElmoradScore);
-        bool counting = false;
+        int end = war.EndSecondsLeft(now);
+        _bdwScoreBanner.SetClock(end > 0 ? $"End  {ClockText(end)}" : "");
+        bool counting = end > 0;
+        RefreshWarResult(now);
         if (war.Winner is { } winner)
         {
             int home = war.HomeSecondsLeft(now);
             var colour = winner == 0 ? UiTheme.TextHi : winner == Net.I.LastEnter.Nation ? UiTheme.Good : UiTheme.Bad;
             _bdwScoreBanner.SetStatus($"{BdwResultLine(winner)}  {home / 60}:{home % 60:00}", colour);
-            counting = home > 0;
+            counting |= home > 0;
+        }
+        else if (_zone == JuraidZone)
+        {
+            _bdwScoreBanner.SetStatus(JuraidStatus, UiTheme.TextHi);
         }
         else if (war.Carrier.Length > 0)
         {

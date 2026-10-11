@@ -23,13 +23,14 @@ public partial class World
     private int _balloonToken;
 
     private const float TalkPickRadius = 70f;
-    private const int OffersPerPage = 10;
-    private const int MenuRowsVisible = OffersPerPage + 1;
+    private const int MenuRowsVisible = 15;
+    private const float NpcTalkMaxHeight = 200f;
     private const float MenuRowHeight = 39f;
     private const int FamiliarShopGroup = 232000;
 
     private System.Collections.Generic.List<QuestData.Offer> _npcOffers = new();
-    private int _npcOfferPage;
+    private PanelContainer _npcBodyPanel = null!;
+    private ScrollContainer _npcBodyScroll = null!;
     private string _npcOfferHeader = "", _npcOfferTitle = "";
     private const float NpcInteractRange = Net.NpcInteractRange;
     private const double NpcRangeInterval = 0.25;
@@ -108,6 +109,8 @@ public partial class World
     {
         if (_selfDead) return;
         if (!_ents.TryGetValue(npcUniqueId, out var e) || !e.IsNpc || e.Dead || e.Attackable) return;
+        if (TryOpenRankerStatue(e)) return;
+        if (TryOperateKeyGate(e, npcUniqueId)) return;
 
         if (FlatDistance(_self.Position, e.Body.Position) > NpcInteractRange) return;
 
@@ -118,7 +121,7 @@ public partial class World
         }
 
         StopForNpcTalk(e);
-        if (e.Anim != null && YawToward(e.Body.Position, _self.Position) is { } towardTalker)
+        if (TurnsToTalker(e) && YawToward(e.Body.Position, _self.Position) is { } towardTalker)
             FaceEntity(e, towardTalker, immediate: false);
 
         _npcTalkId = npcUniqueId;
@@ -131,6 +134,9 @@ public partial class World
         Net.I.SendNpcEvent(npcUniqueId);
         Net.I.SendWarpListRequest(e.NpcId);
     }
+
+    private static bool TurnsToTalker(Ent e) =>
+        e.Anim != null && !e.Statue && e.ObjectType == 0 && !EntityMoving(e);
 
     private void StopForNpcTalk(Ent e)
     {
@@ -176,8 +182,14 @@ public partial class World
         var root = _npcPanel.Body;
         root.AddThemeConstantOverride("separation", 8);
 
-        var bodyPanel = UiTheme.Section();
-        root.AddChild(bodyPanel);
+        _npcBodyPanel = UiTheme.Section();
+        root.AddChild(_npcBodyPanel);
+        _npcBodyScroll = new ScrollContainer
+        {
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        _npcBodyPanel.AddChild(_npcBodyScroll);
 
         _npcBody = new RichTextLabel
         {
@@ -189,7 +201,7 @@ public partial class World
         };
         _npcBody.AddThemeFontSizeOverride("normal_font_size", 14);
         _npcBody.AddThemeColorOverride("default_color", UiTheme.TextLo);
-        bodyPanel.AddChild(_npcBody);
+        _npcBodyScroll.AddChild(_npcBody);
 
         _npcQuestScroll = new ScrollContainer
         {
@@ -222,6 +234,13 @@ public partial class World
             return;
         }
 
+        if (dlg.Flag == NpcDialog.RebirthResetPanelFlag)
+        {
+            CloseNpcDialog();
+            OpenRebirthReset();
+            return;
+        }
+
         if (dlg.Flag == NpcDialog.FamiliarPanelFlag)
         {
             CloseNpcDialog();
@@ -240,6 +259,20 @@ public partial class World
         {
             CloseNpcDialog();
             OpenFortune();
+            return;
+        }
+
+        if (dlg.Flag is ExpSeal.SmallJarFlag or ExpSeal.LargeJarFlag or ExpSeal.RebirthJarFlag)
+        {
+            CloseNpcDialog();
+            UseExpJar(dlg.Flag);
+            return;
+        }
+
+        if (dlg.Flag == NpcDialog.FullMoonBoardFlag)
+        {
+            CloseNpcDialog();
+            OpenFullMoonBoard();
             return;
         }
 
@@ -264,6 +297,14 @@ public partial class World
             return;
         }
 
+        if (dlg.Flag == NpcDialog.DisassemblePanelFlag)
+        {
+            int talkedTo = _npcTalkId;
+            CloseNpcDialog();
+            OpenItemSmash(dlg.NpcId, talkedTo);
+            return;
+        }
+
         if (dlg.Flag == NpcDialog.FamiliarShopFlag)
         {
             OpenVendor(FamiliarShopGroup);
@@ -272,9 +313,7 @@ public partial class World
 
         _npcDialogScript = dlg.ScriptFile;
         if (dlg.HeaderText is { Length: > 0 } body)
-            BeginNpcDialog(
-                GameData.I != null ? GameData.I.NpcName(dlg.NpcId, false) : $"NPC #{dlg.NpcId}",
-                body);
+            BeginNpcDialog(NpcHeaderName(dlg.NpcId), body);
         else
             BeginNpcDialog(dlg.NpcId, dlg.HeaderTextId);
 
@@ -297,13 +336,12 @@ public partial class World
     {
         _npcOffers = QuestData.OffersAtNpc(
             npcId, QuestStateOf, Sheet.Level, _selfClass, Net.I.LastEnter.Nation, _zone);
-        _npcOfferPage = 0;
         _npcOfferHeader = QuestText.Talk(textId, Net.I.LastEnter.Name ?? "");
-        _npcOfferTitle = GameData.I != null ? GameData.I.NpcName(npcId, false) : $"NPC #{npcId}";
-        ShowNpcOfferPage();
+        _npcOfferTitle = NpcHeaderName(npcId);
+        ShowNpcOffers();
     }
 
-    private void ShowNpcOfferPage()
+    private void ShowNpcOffers()
     {
         BeginNpcDialog(_npcOfferTitle, _npcOfferHeader);
         if (_npcOffers.Count == 0)
@@ -314,26 +352,19 @@ public partial class World
             return;
         }
 
-        int pages = (_npcOffers.Count + OffersPerPage - 1) / OffersPerPage;
-        _npcOfferPage = ((_npcOfferPage % pages) + pages) % pages;
-        int first = _npcOfferPage * OffersPerPage;
         int shown = 0;
-        for (int i = first; i < _npcOffers.Count && i < first + OffersPerPage; i++)
+        foreach (var offer in _npcOffers)
         {
-            var offer = _npcOffers[i];
             string name = QuestData.Name(offer.QuestId, Net.I.LastEnter.Name ?? "");
-            string tag = offer.State switch
+            var (icon, tag) = offer.State switch
             {
-                QuestStateActive => "[In progress] ",
-                QuestStateReadyToTurnIn => "[Ready] ",
-                _ => "",
+                QuestStateActive => ("system/clock", "In progress"),
+                QuestStateReadyToTurnIn => ("system/gift", "Ready"),
+                _ => ("system/scroll", ""),
             };
-            AddNpcMenuButton($"{++shown}.   {tag}{name}", () => AcceptNpcOffer(offer));
+            ++shown;
+            AddNpcMenuButton(name, () => AcceptNpcOffer(offer), icon, tag, offer.State == QuestStateReadyToTurnIn);
         }
-        if (pages > 1)
-            AddNpcMenuButton($"{++shown}.   Next page  ({_npcOfferPage + 1}/{pages})",
-                () => { _npcOfferPage++; ShowNpcOfferPage(); });
-
         EndNpcDialog(shown);
     }
 
@@ -344,14 +375,17 @@ public partial class World
     }
 
     private void BeginNpcDialog(int npcId, int textId) =>
-        BeginNpcDialog(
-            GameData.I != null ? GameData.I.NpcName(npcId, false) : $"NPC #{npcId}",
-            QuestText.Talk(textId, Net.I.LastEnter.Name ?? ""));
+        BeginNpcDialog(NpcHeaderName(npcId), QuestText.Talk(textId, Net.I.LastEnter.Name ?? ""));
+
+    private string NpcHeaderName(int npcId) =>
+        NpcTitle.Of(GameData.I?.KnownNpcName(npcId),
+            _ents.TryGetValue(_npcTalkId, out var talker) && talker.NpcId == npcId ? talker.Name : null, npcId);
 
     private void BeginNpcDialog(string title, string body)
     {
         _npcQuestScroll.Visible = false;
-        _npcBody.GetParent<Control>().Visible = body.Length > 0;
+        _npcBodyPanel.Visible = body.Length > 0;
+        _npcBodyScroll.ScrollVertical = 0;
         _npcPanel.Title = QuestMarkup.Plain(title, Net.I?.LastEnter.Name ?? "");
         _npcBody.Visible = body.Length > 0;
         _npcBody.Text = QuestMarkup.Rich(body, Net.I?.LastEnter.Name ?? "");
@@ -373,16 +407,43 @@ public partial class World
         EndNpcDialog(shown);
     }
 
-    private void AddNpcMenuButton(string label, System.Action onPressed)
+    private const int NpcChoiceIconSize = 16;
+    private const int NpcChoiceTagFont = 11;
+    private const int NpcChoiceTagInset = 10;
+    private static readonly string[] NpcReadyColourStates = { "font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "icon_normal_color", "icon_hover_color" };
+
+    private void AddNpcMenuButton(string label, System.Action onPressed, string? icon = null, string tag = "", bool ready = false)
     {
+        var (caption, readyTopic) = NpcChoice.SplitReady(NpcChoice.Caption(QuestMarkup.Plain(label, Net.I?.LastEnter.Name ?? "")));
         var b = new Button
         {
-            Text = QuestMarkup.Plain(label, Net.I?.LastEnter.Name ?? ""),
+            Text = caption,
+            TooltipText = caption,
             FocusMode = Control.FocusModeEnum.None,
-            Alignment = HorizontalAlignment.Left,
+            Alignment = HorizontalAlignment.Center,
+            TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis,
+            ClipText = true,
+            Icon = UiIcons.Get(icon ?? NpcChoice.Icon(NpcChoice.Classify(caption))),
+            IconAlignment = HorizontalAlignment.Left,
+            ExpandIcon = false,
             CustomMinimumSize = new Vector2(0, 34),
         };
         b.AddThemeFontSizeOverride("font_size", 13);
+        b.AddThemeConstantOverride("icon_max_width", NpcChoiceIconSize);
+        b.AddThemeColorOverride("icon_normal_color", UiTheme.Gold);
+        b.AddThemeColorOverride("icon_hover_color", UiTheme.GoldBright);
+        if (ready || readyTopic)
+            foreach (var state in NpcReadyColourStates) b.AddThemeColorOverride(state, UiTheme.Good);
+        if (tag.Length > 0)
+        {
+            var tagLabel = UiTheme.Text(tag, NpcChoiceTagFont, UiTheme.GoldBright, HorizontalAlignment.Right);
+            tagLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+            tagLabel.SetAnchorsPreset(Control.LayoutPreset.RightWide);
+            tagLabel.OffsetRight = -NpcChoiceTagInset;
+            tagLabel.GrowHorizontal = Control.GrowDirection.Begin;
+            tagLabel.VerticalAlignment = VerticalAlignment.Center;
+            b.AddChild(tagLabel);
+        }
         b.Pressed += () => onPressed();
         _npcMenuBox.AddChild(b);
     }
@@ -396,6 +457,14 @@ public partial class World
 
         if (_npcBodyEmpty && shown == 0) { CloseNpcDialog(); return; }
         ShowNpcDialog();
+        Callable.From(FitNpcTalk).CallDeferred();
+    }
+
+    private void FitNpcTalk()
+    {
+        if (!IsInstanceValid(_npcPanel) || !_npcBodyPanel.Visible) return;
+        _npcBodyScroll.CustomMinimumSize = new Vector2(0, Mathf.Min(_npcBody.GetContentHeight(), NpcTalkMaxHeight));
+        _npcPanel.ResetSize();
     }
 
     private void OnNpcMenuClick(int menuIndex)

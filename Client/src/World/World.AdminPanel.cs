@@ -42,6 +42,7 @@ public partial class World
         Net.I.AdminStateEvent += OnAdminState;
         Net.I.AdminResultEvent += OnAdminResult;
         Net.I.AdminSpawnRowEvent += OnAdminSpawnRow;
+        Net.I.AdminCommandsEvent += OnAdminCommands;
         EnableAdminPanel(_isGm ? AdminPanelGrant.GameMaster : Net.I.PanelGrant);
     }
 
@@ -85,6 +86,7 @@ public partial class World
         Net.I.AdminCollectionRacesEvent -= OnAdminCollectionRaces;
         Net.I.AdminFindEvent -= OnAdminFind;
         Net.I.AdminSpawnRowEvent -= OnAdminSpawnRow;
+        Net.I.AdminCommandsEvent -= OnAdminCommands;
     }
 
     private void BuildAdminPanel()
@@ -120,6 +122,8 @@ public partial class World
         {
             AddAdminTab(tabBar, "Find", BuildAdminFindTab());
             AddAdminTab(tabBar, "Races", BuildAdminCollectionRaceTab());
+            AddAdminTab(tabBar, "Commands", BuildAdminCommandsTab());
+            Net.I.SendAdminCommandsRequest();
         }
 
         _admStatusLbl = UiTheme.Text("", 12, UiTheme.TextLo);

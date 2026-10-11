@@ -2265,6 +2265,8 @@ public class CombatTests : GameTestBase
             executionService,
             provider.GetRequiredService<ICombatLifecycleService>(),
             provider.GetRequiredService<ICombatNotificationService>(),
+            provider.GetRequiredService<IControlStateService>(),
+            provider.GetRequiredService<IRespawnBlinkService>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BuffExpiryService>>());
 
         worm.ActiveOverTimeEffects[skillId].NextTickTicks = DateTime.UtcNow.Ticks;
@@ -2545,6 +2547,8 @@ public class CombatTests : GameTestBase
             executionService,
             provider.GetRequiredService<ICombatLifecycleService>(),
             provider.GetRequiredService<ICombatNotificationService>(),
+            provider.GetRequiredService<IControlStateService>(),
+            provider.GetRequiredService<IRespawnBlinkService>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BuffExpiryService>>());
 
         worm.ActiveOverTimeEffects[skillId].NextTickTicks = DateTime.UtcNow.Ticks;

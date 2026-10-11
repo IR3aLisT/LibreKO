@@ -1,4 +1,5 @@
-﻿using Godot;
+﻿using System.Reflection;
+using Godot;
 
 namespace LibreKO.Plugins;
 
@@ -11,7 +12,9 @@ public readonly record struct GameItem(
     int Grade,
     int Kind,
     Texture2D? Icon,
-    bool TwoHanded = false)
+    bool TwoHanded = false,
+    long ExpiresAt = 0,
+    int State = 0)
 {
     public bool IsEmpty => ItemId <= 0;
 
@@ -27,7 +30,8 @@ public readonly record struct HotSlotInfo(
     string Name,
     string Tooltip,
     int Count = -1,
-    bool Enough = true)
+    bool Enough = true,
+    bool SpShort = false)
 {
     public bool IsEmpty => Id <= 0;
 
@@ -55,6 +59,10 @@ public readonly record struct GameSkillInfo(
     string ConsumedItem);
 
 public readonly record struct GameMasteryTree(int Type, string Name, int Points, bool Shown, bool CanSpend, string Hint);
+
+public readonly record struct GameDrop(int ItemId, string Name, Texture2D? Icon, int Band);
+
+public sealed record GameDropTable(int TargetId, int CoinMin, int CoinMax, int Experience, IReadOnlyList<GameDrop> Items);
 
 public interface IGameCharacter
 {
@@ -85,9 +93,25 @@ public interface IGameCharacter
     int Ap { get; }
     int Ac { get; }
     int Np { get; }
+    int Manner { get; }
 
     int Resist(int index);
     void AllocateStat(int statRow);
+
+    int Sp => 0;
+    int MaxSp => 0;
+    int RebirthLevel => 0;
+    int RebirthStat(int statRow) => 0;
+    int StatBonus(int statRow) => 0;
+    string ClanName => "";
+    bool HasRankAura => false;
+    bool RankAuraShown => true;
+    void SetRankAuraShown(bool shown)
+    {
+    }
+
+    Texture2D? Portrait { get; }
+    void SetPortraitShown(bool shown);
 
     event Action? Changed;
 }
@@ -109,6 +133,15 @@ public interface IGameInventory
     event Action? Changed;
 }
 
+public enum TargetHpLook
+{
+    Normal,
+    Lasting,
+    Drop,
+    Slow,
+    Undead,
+}
+
 public interface IGameTarget
 {
     bool Has { get; }
@@ -119,8 +152,18 @@ public interface IGameTarget
     int MaxHp { get; }
     bool Hostile { get; }
     bool IsPlayer { get; }
+    TargetHpLook HpLook { get; }
+
+    bool IsMonster => false;
+    int NpcId => 0;
+    int ClanId => 0;
+    string ClanName => "";
+    GameDropTable? Drops => null;
 
     void Clear();
+    void RequestDrops()
+    {
+    }
 
     event Action? Changed;
 }
@@ -162,7 +205,13 @@ public interface IGameHotbar
     void ShowTooltip(int abs);
     void HideTooltip();
 
+    int Selected => -1;
+    void Select(int abs)
+    {
+    }
+
     event Action? Changed;
+    event Action<IReadOnlyList<int>>? Ready { add { } remove { } }
 }
 
 public interface IGameCommands
@@ -214,7 +263,61 @@ public interface IGameSkills
     event Action? Changed;
 }
 
-public sealed class PluginGame
+public interface IGameVendor
+{
+    bool IsOpen { get; }
+    string Title { get; }
+    bool PaysInNp { get; }
+    int Page { get; }
+    int Pages { get; }
+    IReadOnlyList<GameItem> Items { get; }
+
+    int Price(int index);
+    void Buy(int index);
+    void Sell(int bagSlot);
+    void SetPage(int page);
+    void Search(string text);
+    void ShowTooltip(int index);
+    void HideTooltip();
+    void Close();
+
+    event Action? Changed;
+}
+
+public interface IGameWarehouse
+{
+    bool IsOpen { get; }
+    int Page { get; }
+    int Pages { get; }
+    int Gold { get; }
+    IReadOnlyList<GameItem> Items { get; }
+
+    void Store(int bagSlot);
+    void Take(int index);
+    void SetPage(int page);
+    void ShowTooltip(int index);
+    void HideTooltip();
+    void Close();
+
+    event Action? Changed;
+}
+
+public interface IGameVipVault
+{
+    bool IsOpen { get; }
+    string Expiry { get; }
+    IReadOnlyList<GameItem> Items { get; }
+
+    void Store(int bagSlot);
+    void Take(int index);
+    void ShowTooltip(int index);
+    void HideTooltip();
+    void Close();
+
+    event Action? Changed;
+}
+
+public sealed partial class PluginGame
 {
     public bool Available { get; private set; }
 
@@ -229,6 +332,9 @@ public sealed class PluginGame
     public IGameLog Log => _log;
     public IGameQuests Quests => _quests;
     public IGameSkills Skills => _skills;
+    public IGameVendor Vendor => _vendor;
+    public IGameWarehouse Warehouse => _warehouse;
+    public IGameVipVault VipVault => _vipVault;
 
     public event Action? BecameAvailable;
     public event Action? BecameUnavailable;
@@ -244,6 +350,9 @@ public sealed class PluginGame
     private readonly LogProxy _log = new();
     private readonly QuestsProxy _quests = new();
     private readonly SkillsProxy _skills = new();
+    private readonly VendorProxy _vendor = new();
+    private readonly WarehouseProxy _warehouse = new();
+    private readonly VipVaultProxy _vipVault = new();
 
     internal void Attach(IGameCharacter character, IGameInventory inventory, IGameTarget target,
         IGameWindows windows, IGameChat chat, IGameHotbar hotbar, IGameMap map, IGameCommands commands,
@@ -287,12 +396,57 @@ public sealed class PluginGame
         _log.Source = null;
         _quests.Source = null;
         _skills.Source = null;
+        _vendor.Source = null;
+        _warehouse.Source = null;
+        _vipVault.Source = null;
+        DetachSocial();
+        DetachAppearance();
+        _friends.Source = null;
     }
+
+    internal void AttachServices(IGameVendor vendor, IGameWarehouse warehouse, IGameVipVault vipVault)
+    {
+        _vendor.Source = vendor;
+        _warehouse.Source = warehouse;
+        _vipVault.Source = vipVault;
+        RaiseVendor();
+        RaiseWarehouse();
+        RaiseVipVault();
+    }
+
+    internal int DropHandlersFrom(Assembly owner)
+    {
+        const BindingFlags Instance = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        int dropped = 0;
+        var holders = new List<object> { this };
+        foreach (var field in typeof(PluginGame).GetFields(Instance))
+            if (field.FieldType.DeclaringType == typeof(PluginGame) && field.GetValue(this) is { } proxy)
+                holders.Add(proxy);
+        foreach (var holder in holders)
+            foreach (var field in holder.GetType().GetFields(Instance))
+            {
+                if (!typeof(Delegate).IsAssignableFrom(field.FieldType) || field.GetValue(holder) is not Delegate handlers)
+                    continue;
+                Delegate? kept = null;
+                foreach (var handler in handlers.GetInvocationList())
+                {
+                    if (handler.Method.Module.Assembly == owner) dropped++;
+                    else kept = Delegate.Combine(kept, handler);
+                }
+                field.SetValue(holder, kept);
+            }
+        return dropped;
+    }
+
+    internal void RaiseVendor() => _vendor.Raise();
+    internal void RaiseWarehouse() => _warehouse.Raise();
+    internal void RaiseVipVault() => _vipVault.Raise();
 
     internal void RaiseCharacter() => _character.Raise();
     internal void RaiseInventory() => _inventory.Raise();
     internal void RaiseTarget() => _target.Raise();
     internal void RaiseHotbar() => _hotbar.Raise();
+    internal void RaiseHotbarReady(IReadOnlyList<int> skillIds) => _hotbar.RaiseReady(skillIds);
     internal void RaiseMap() => _map.Raise();
     internal void RaiseQuests() => _quests.Raise();
     internal void RaiseSkills() => _skills.Raise();
@@ -333,8 +487,20 @@ public sealed class PluginGame
         public int Ap => Source?.Ap ?? 0;
         public int Ac => Source?.Ac ?? 0;
         public int Np => Source?.Np ?? 0;
+        public int Manner => Source?.Manner ?? 0;
         public int Resist(int index) => Source?.Resist(index) ?? 0;
         public void AllocateStat(int statRow) => Source?.AllocateStat(statRow);
+        public int Sp => Source?.Sp ?? 0;
+        public int MaxSp => Source?.MaxSp ?? 0;
+        public int RebirthLevel => Source?.RebirthLevel ?? 0;
+        public int RebirthStat(int statRow) => Source?.RebirthStat(statRow) ?? 0;
+        public int StatBonus(int statRow) => Source?.StatBonus(statRow) ?? 0;
+        public string ClanName => Source?.ClanName ?? "";
+        public bool HasRankAura => Source?.HasRankAura ?? false;
+        public bool RankAuraShown => Source?.RankAuraShown ?? true;
+        public void SetRankAuraShown(bool shown) => Source?.SetRankAuraShown(shown);
+        public Texture2D? Portrait => Source?.Portrait;
+        public void SetPortraitShown(bool shown) => Source?.SetPortraitShown(shown);
     }
 
     private sealed class InventoryProxy : IGameInventory
@@ -369,7 +535,14 @@ public sealed class PluginGame
         public int MaxHp => Source?.MaxHp ?? 0;
         public bool Hostile => Source?.Hostile ?? false;
         public bool IsPlayer => Source?.IsPlayer ?? false;
+        public TargetHpLook HpLook => Source?.HpLook ?? TargetHpLook.Normal;
+        public bool IsMonster => Source?.IsMonster ?? false;
+        public int NpcId => Source?.NpcId ?? 0;
+        public int ClanId => Source?.ClanId ?? 0;
+        public string ClanName => Source?.ClanName ?? "";
+        public GameDropTable? Drops => Source?.Drops;
         public void Clear() => Source?.Clear();
+        public void RequestDrops() => Source?.RequestDrops();
     }
 
     private sealed class WindowsProxy : IGameWindows
@@ -399,7 +572,9 @@ public sealed class PluginGame
     {
         public IGameHotbar? Source;
         public event Action? Changed;
+        public event Action<IReadOnlyList<int>>? Ready;
         internal void Raise() => Changed?.Invoke();
+        internal void RaiseReady(IReadOnlyList<int> skillIds) => Ready?.Invoke(skillIds);
 
         public int Pages => Source?.Pages ?? HotbarLayout.Pages;
         public int SlotsPerPage => Source?.SlotsPerPage ?? HotbarLayout.SlotsPerPage;
@@ -415,6 +590,8 @@ public sealed class PluginGame
         public void SetLocked(bool locked) => Source?.SetLocked(locked);
         public void ShowTooltip(int abs) => Source?.ShowTooltip(abs);
         public void HideTooltip() => Source?.HideTooltip();
+        public int Selected => Source?.Selected ?? -1;
+        public void Select(int abs) => Source?.Select(abs);
     }
 
     private sealed class CommandsProxy : IGameCommands
@@ -473,5 +650,62 @@ public sealed class PluginGame
         public GameSkillInfo Info(int skillId) => Source?.Info(skillId) ?? default;
         public void SpendMastery(int type) => Source?.SpendMastery(type);
         public void AddToHotbar(int skillId) => Source?.AddToHotbar(skillId);
+    }
+
+    private sealed class VendorProxy : IGameVendor
+    {
+        public IGameVendor? Source;
+        public event Action? Changed;
+        internal void Raise() => Changed?.Invoke();
+
+        public bool IsOpen => Source?.IsOpen ?? false;
+        public string Title => Source?.Title ?? "";
+        public bool PaysInNp => Source?.PaysInNp ?? false;
+        public int Page => Source?.Page ?? 0;
+        public int Pages => Source?.Pages ?? 0;
+        public IReadOnlyList<GameItem> Items => Source?.Items ?? Array.Empty<GameItem>();
+        public int Price(int index) => Source?.Price(index) ?? 0;
+        public void Buy(int index) => Source?.Buy(index);
+        public void Sell(int bagSlot) => Source?.Sell(bagSlot);
+        public void SetPage(int page) => Source?.SetPage(page);
+        public void Search(string text) => Source?.Search(text);
+        public void ShowTooltip(int index) => Source?.ShowTooltip(index);
+        public void HideTooltip() => Source?.HideTooltip();
+        public void Close() => Source?.Close();
+    }
+
+    private sealed class WarehouseProxy : IGameWarehouse
+    {
+        public IGameWarehouse? Source;
+        public event Action? Changed;
+        internal void Raise() => Changed?.Invoke();
+
+        public bool IsOpen => Source?.IsOpen ?? false;
+        public int Page => Source?.Page ?? 0;
+        public int Pages => Source?.Pages ?? 0;
+        public int Gold => Source?.Gold ?? 0;
+        public IReadOnlyList<GameItem> Items => Source?.Items ?? Array.Empty<GameItem>();
+        public void Store(int bagSlot) => Source?.Store(bagSlot);
+        public void Take(int index) => Source?.Take(index);
+        public void SetPage(int page) => Source?.SetPage(page);
+        public void ShowTooltip(int index) => Source?.ShowTooltip(index);
+        public void HideTooltip() => Source?.HideTooltip();
+        public void Close() => Source?.Close();
+    }
+
+    private sealed class VipVaultProxy : IGameVipVault
+    {
+        public IGameVipVault? Source;
+        public event Action? Changed;
+        internal void Raise() => Changed?.Invoke();
+
+        public bool IsOpen => Source?.IsOpen ?? false;
+        public string Expiry => Source?.Expiry ?? "";
+        public IReadOnlyList<GameItem> Items => Source?.Items ?? Array.Empty<GameItem>();
+        public void Store(int bagSlot) => Source?.Store(bagSlot);
+        public void Take(int index) => Source?.Take(index);
+        public void ShowTooltip(int index) => Source?.ShowTooltip(index);
+        public void HideTooltip() => Source?.HideTooltip();
+        public void Close() => Source?.Close();
     }
 }

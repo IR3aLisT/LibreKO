@@ -1,0 +1,63 @@
+﻿using Godot;
+using LibreKO.Domain;
+
+namespace LibreKO;
+
+public sealed partial class IconVeilView : Control
+{
+    private const string BadgeArt = "res://assets/ui/item_badges/";
+    private static readonly Color ExhaustedWash = Color.Color8(200, 20, 20, 100);
+    private static readonly Color RentedWash = Color.Color8(255, 255, 128, 70);
+    private static readonly Color DuplicateWash = Color.Color8(40, 40, 40, 160);
+    private static readonly Color SealedWash = Color.Color8(20, 20, 255, 70);
+
+    private static Texture2D? _notBound, _bound;
+    private IconWash _wash;
+    private IconBadge _badge;
+
+    public IconVeilView()
+    {
+        MouseFilter = MouseFilterEnum.Ignore;
+        SetAnchorsPreset(LayoutPreset.FullRect);
+    }
+
+    public static IconVeilView Attach(Control parent)
+    {
+        var veil = new IconVeilView();
+        parent.AddChild(veil);
+        return veil;
+    }
+
+    public void Set(ItemSlot slot)
+    {
+        var wash = IconVeil.Wash(slot);
+        var badge = slot.IsEmpty ? IconBadge.None : IconVeil.Badge(ItemData.ShownFlag(slot));
+        if (wash == _wash && badge == _badge) return;
+        _wash = wash;
+        _badge = badge;
+        QueueRedraw();
+    }
+
+    public void Clear() => Set(default);
+
+    public override void _Draw()
+    {
+        var rect = new Rect2(Vector2.Zero, Size);
+        Color? wash = _wash switch
+        {
+            IconWash.Exhausted => ExhaustedWash,
+            IconWash.Rented => RentedWash,
+            IconWash.Duplicate => DuplicateWash,
+            IconWash.Sealed => SealedWash,
+            _ => null,
+        };
+        if (wash is { } colour) DrawRect(rect, colour);
+        var badge = _badge switch
+        {
+            IconBadge.NotBound => _notBound ??= GD.Load<Texture2D>(BadgeArt + "hermetic_seal.png"),
+            IconBadge.Bound => _bound ??= GD.Load<Texture2D>(BadgeArt + "belong.png"),
+            _ => null,
+        };
+        if (badge != null) DrawTextureRect(badge, rect, false);
+    }
+}

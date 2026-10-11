@@ -9,6 +9,28 @@ public class BorderWarStateTests
     private static readonly DateTime Now = new(2026, 10, 2, 20, 0, 0, DateTimeKind.Utc);
 
     [Fact]
+    public void TheRoomClockRunsUntilTheFinish()
+    {
+        var war = new BorderWarState();
+        war.RoomClock(1800, Now);
+        Assert.Equal(1800, war.EndSecondsLeft(Now));
+        Assert.Equal(1790, war.EndSecondsLeft(Now.AddSeconds(10)));
+        war.Finish(1, 20, Now.AddSeconds(30));
+        Assert.Equal(0, war.EndSecondsLeft(Now.AddSeconds(31)));
+        war.Reset();
+        Assert.Null(war.EndUtc);
+    }
+
+    [Theory]
+    [InlineData(1, 1, WarOutcome.Victory)]
+    [InlineData(2, 1, WarOutcome.Defeat)]
+    [InlineData(0, 2, WarOutcome.Draw)]
+    public void TheOutcomeFollowsTheWinner(int winner, int myNation, WarOutcome expected)
+    {
+        Assert.Equal(expected, BorderWarState.OutcomeFor(winner, myNation));
+    }
+
+    [Fact]
     public void TakingTheFragmentStopsTheAltarCountdown()
     {
         var war = new BorderWarState();

@@ -13,7 +13,7 @@ public sealed class KnightsPacketWriter
     public const byte Failed = 0;
     public const byte Succeeded = 1;
     public const byte HandoverLeader = 1;
-    public const byte HandoverNotLeader = 2;
+    public const byte HandoverNotLeader = 4;
 
     public readonly record struct BrowseEntry(short ClanId, string Name);
 

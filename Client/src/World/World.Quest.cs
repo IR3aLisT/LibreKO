@@ -33,6 +33,9 @@ public partial class World
 
     private VBoxContainer _questsContent = null!;
     private VBoxContainer _questListBox = null!;
+    private ScrollContainer _questListScroll = null!;
+    private string _questSearch = "";
+    private bool _questScrollTop;
     private int _questFilter = QuestFilterActive;
     private QuestData.Kind? _questKind;
     private int _questSelected = -1;
@@ -40,13 +43,13 @@ public partial class World
     private readonly Dictionary<string, Button> _questSubBtns = new();
     private readonly Dictionary<string, Button> _questKindBtns = new();
 
-    private Label _questDetailTitle = null!, _questDetailSub = null!;
+    private Label _questDetailTitle = null!, _questDetailSub = null!, _questDetailFacts = null!;
     private RichTextLabel _questDetailDesc = null!;
     private VBoxContainer _questObjectiveBox = null!;
     private readonly HashSet<int> _questTargetNpcs = new();
     private Label _questObjectiveTitle = null!;
     private Label _questRewardTitle = null!;
-    private HBoxContainer _questRewardBox = null!;
+    private HFlowContainer _questRewardBox = null!;
     private Label _questRewardOptionTitle = null!;
     private HBoxContainer _questRewardOptionBox = null!;
     private Control _questDetailBody = null!;
@@ -62,6 +65,14 @@ public partial class World
     private static float TrackerPlatePadY => Platform.Pick(8f, 14f);
     private int _trackerPage;
     private int _trackerPageCount = 1;
+    private const string TrackerLayoutId = "quest_tracker";
+    private const float TrackerHeaderHeight = 24f;
+    private const float TrackerBarHeight = 3f;
+    private PanelContainer? _trackerHeader;
+    private Label _trackerCount = null!;
+    private Button _trackerFold = null!;
+
+    private readonly record struct TrackerGoal(string Text, int Have, int Need);
 
     private void QuestInit()
     {
@@ -96,11 +107,17 @@ public partial class World
         Net.I.QuestRewardRefusedEvent -= OnQuestRewardRefused;
     }
 
-    private void OnQuestRewardRefused(QuestRewardRefusal reason) => CombatNotice(reason switch
+    private const int TextRewardWeight = 7432;
+    private const int TextRewardCoins = 7433;
+    private const int TextRewardBagFull = 7434;
+
+    private void OnQuestRewardRefused(QuestRewardRefusal reason) => Notice.Show(this, reason switch
     {
-        QuestRewardRefusal.WeightExceeded => "You are carrying too much to take the reward.",
-        QuestRewardRefusal.CoinsExceeded => "You are carrying too much gold to take the reward.",
-        _ => "Your inventory is full.",
+        QuestRewardRefusal.WeightExceeded => ItemData.Text(TextRewardWeight,
+            "You are not eligible for a reward as your weight limitation has been exceeded."),
+        QuestRewardRefusal.CoinsExceeded => ItemData.Text(TextRewardCoins,
+            "You are not eligible for a reward as your Noah limitation has been exceeded."),
+        _ => ItemData.Text(TextRewardBagFull, "You are not eligible for a reward as your bag is full."),
     });
 
     private void BuildQuestLog()
@@ -147,6 +164,20 @@ public partial class World
             _questKindBtns[label] = b;
             kindBar.AddChild(b);
         }
+        var search = new LineEdit
+        {
+            PlaceholderText = "Search quests",
+            ClearButtonEnabled = true,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        search.AddThemeFontSizeOverride("font_size", 12);
+        search.TextChanged += text =>
+        {
+            _questSearch = text;
+            _questScrollTop = true;
+            RefreshQuestLog();
+        };
+        kindBar.AddChild(search);
 
         var body = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
         body.AddThemeConstantOverride("separation", 10);
@@ -158,11 +189,17 @@ public partial class World
             HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
         };
         body.AddChild(scroll);
+        _questListScroll = scroll;
         _questListBox = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         _questListBox.AddThemeConstantOverride("separation", 3);
         scroll.AddChild(_questListBox);
 
         body.AddChild(BuildQuestDetail());
+
+        var footer = UiTheme.Text(
+            "Click a quest for its details  ·  tick its box to track it on screen  ·  click a pinned objective to see where it is",
+            11, UiTheme.TextDim);
+        root.AddChild(footer);
 
         SetQuestFilter(QuestFilterActive);
         SetQuestKind(null);
@@ -195,6 +232,11 @@ public partial class World
         _questDetailSub = UiTheme.Text("", 11, UiTheme.TextDim);
         detail.AddChild(_questDetailSub);
 
+        _questDetailFacts = UiTheme.Text("", 11, UiTheme.TextLo);
+        _questDetailFacts.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _questDetailFacts.CustomMinimumSize = new Vector2(QuestDetailWidth, 0);
+        detail.AddChild(_questDetailFacts);
+
         _questDetailDesc = QuestParagraph("", UiTheme.TextLo, QuestDetailWidth);
         _questDetailDesc.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _questDetailDesc.CustomMinimumSize = new Vector2(QuestDetailWidth, 0);
@@ -209,8 +251,9 @@ public partial class World
 
         _questRewardTitle = UiTheme.SectionTitle("Rewards");
         detail.AddChild(_questRewardTitle);
-        _questRewardBox = new HBoxContainer();
-        _questRewardBox.AddThemeConstantOverride("separation", 5);
+        _questRewardBox = new HFlowContainer { CustomMinimumSize = new Vector2(QuestDetailWidth, 0) };
+        _questRewardBox.AddThemeConstantOverride("h_separation", 5);
+        _questRewardBox.AddThemeConstantOverride("v_separation", 5);
         detail.AddChild(_questRewardBox);
         _questRewardOptionTitle = UiTheme.SectionTitle("Choose one");
         detail.AddChild(_questRewardOptionTitle);
@@ -296,25 +339,37 @@ public partial class World
         if (_questKind is { } kind)
             rows.RemoveAll(r => QuestFacts(r.Item1).Kind != kind);
 
-        rows.Sort((a, b) =>
+        if (_questSearch.Length > 0)
         {
-            var fa = QuestFacts(a.Item1);
-            var fb = QuestFacts(b.Item1);
-            int byZone = fa.Zone.CompareTo(fb.Zone);
-            if (byZone != 0) return byZone;
-            int byLevel = fa.Level.CompareTo(fb.Level);
-            return byLevel != 0 ? byLevel : a.Item1.CompareTo(b.Item1);
-        });
+            string selfName = Net.I.LastEnter.Name ?? "";
+            rows.RemoveAll(r => !QuestJournalRules.Matches(QuestName(r.Item1, selfName), _questSearch));
+        }
+
+        rows.Sort((a, b) => QuestJournalRules.Compare(JournalRow(a.Item1, a.Item2), JournalRow(b.Item1, b.Item2)));
         return rows;
+    }
+
+    private QuestJournalRules.Row JournalRow(int questId, int state)
+    {
+        var facts = QuestFacts(questId);
+        return new QuestJournalRules.Row(questId, state, facts.Zone, facts.Level);
     }
 
     private void RefreshQuestLog()
     {
         if (_questListBox == null) return;
+        int keepScroll = _questScrollTop ? 0 : _questListScroll.ScrollVertical;
+        _questScrollTop = false;
         foreach (var c in _questListBox.GetChildren()) { _questListBox.RemoveChild(c); c.QueueFree(); }
         string selfName = Net.I.LastEnter.Name ?? "";
 
         var rows = QuestsInView();
+        var zoneCounts = new Dictionary<int, int>();
+        foreach (var (questId, _) in rows)
+        {
+            int zone = QuestFacts(questId).Zone;
+            zoneCounts[zone] = zoneCounts.GetValueOrDefault(zone) + 1;
+        }
         int lastZone = int.MinValue;
         foreach (var (questId, state) in rows)
         {
@@ -322,7 +377,7 @@ public partial class World
             if (zone != lastZone)
             {
                 lastZone = zone;
-                _questListBox.AddChild(QuestZoneHeader(zone));
+                _questListBox.AddChild(QuestZoneHeader(zone, zoneCounts[zone]));
             }
             _questListBox.AddChild(BuildQuestRow(questId, state, selfName));
         }
@@ -330,7 +385,7 @@ public partial class World
         if (rows.Count == 0)
         {
             var hint = UiTheme.Text(
-                _questFilter switch
+                _questSearch.Length > 0 ? "No quest matches your search." : _questFilter switch
                 {
                     QuestFilterCompleted => "Nothing finished yet.",
                     QuestFilterAvailable => "No quests are open to you right now.",
@@ -346,9 +401,13 @@ public partial class World
             _questSelected = -1;
 
         RefreshQuestDetail();
+        Callable.From(() =>
+        {
+            if (GodotObject.IsInstanceValid(_questListScroll)) _questListScroll.ScrollVertical = keepScroll;
+        }).CallDeferred();
     }
 
-    private Control QuestZoneHeader(int zone)
+    private Control QuestZoneHeader(int zone, int count)
     {
         var panel = new PanelContainer();
         var band = new StyleBoxFlat { BgColor = new Color(0.105f, 0.108f, 0.125f, 0.95f) };
@@ -363,7 +422,7 @@ public partial class World
         var caret = UiTheme.Text("▼", 8, new Color(UiTheme.TextLo, 0.7f));
         caret.VerticalAlignment = VerticalAlignment.Center;
         row.AddChild(caret);
-        row.AddChild(UiTheme.Text(QuestZoneName(zone), 12, UiTheme.TextLo));
+        row.AddChild(UiTheme.Text(QuestJournalRules.GroupTitle(QuestZoneName(zone), count), 12, UiTheme.TextLo));
         return panel;
     }
 
@@ -396,19 +455,26 @@ public partial class World
         glyph.MouseFilter = Control.MouseFilterEnum.Ignore;
         row.AddChild(glyph);
 
+        var text = new VBoxContainer
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        text.AddThemeConstantOverride("separation", -1);
+        row.AddChild(text);
+
         var name = UiTheme.Text(QuestName(questId, selfName), 13,
             selected ? UiTheme.GoldBright : StateColor(state));
-        name.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         name.ClipText = true;
         name.MouseFilter = Control.MouseFilterEnum.Ignore;
-        row.AddChild(name);
+        text.AddChild(name);
 
         var facts = QuestFacts(questId);
-        var level = UiTheme.Text(facts.Level > 0 ? $"Lv. {facts.Level}" : "", 11, UiTheme.TextDim,
-            HorizontalAlignment.Right);
-        level.CustomMinimumSize = new Vector2(46, 0);
-        level.MouseFilter = Control.MouseFilterEnum.Ignore;
-        row.AddChild(level);
+        var status = UiTheme.Text(QuestJournalRules.StatusLine(facts.Level, QuestStatusText(questId, state)), 10,
+            UiTheme.TextDim);
+        status.ClipText = true;
+        status.MouseFilter = Control.MouseFilterEnum.Ignore;
+        text.AddChild(status);
 
         var (current, target) = QuestProgress(questId);
         var progress = UiTheme.Text(target > 0 ? $"{current} / {target}" : "", 11,
@@ -425,6 +491,9 @@ public partial class World
 
         return panel;
     }
+
+    private string QuestStatusText(int questId, int state) =>
+        _questViews.TryGetValue(questId, out var view) ? view.StateLabel : StateName(state);
 
     private (int Current, int Target) QuestProgress(int questId)
     {
@@ -509,6 +578,8 @@ public partial class World
         if (facts.Level > 0) sub.Add($"Lv. {facts.Level}");
         sub.Add(_questViews.TryGetValue(questId, out var view) ? view.StateLabel : StateName(state));
         _questDetailSub.Text = string.Join("  ·  ", sub);
+        _questDetailFacts.Text = QuestPlaceFacts(questId, state, facts.Zone);
+        _questDetailFacts.Visible = _questDetailFacts.Text.Length > 0;
         _questDetailDesc.Text = QuestMarkup.Rich(QuestJournalSource(questId, selfName), selfName);
 
         foreach (var c in _questObjectiveBox.GetChildren()) { _questObjectiveBox.RemoveChild(c); c.QueueFree(); }
@@ -516,14 +587,21 @@ public partial class World
             QuestGroups(questId).Length > 0, QuestHandIns(questId).Any());
         if (_questObjectives.TryGetValue(questId, out var objectives) && objectives.AnyWillDo)
             _questObjectiveBox.AddChild(QuestObjectiveRow("Complete any one:"));
-        var lines = KillProgressLines(questId);
-        for (var group = 0; group < lines.Count; group++)
-            _questObjectiveBox.AddChild(QuestObjectiveTarget(QuestObjectiveRow(lines[group]), questId, group,
-                _questViews.TryGetValue(questId, out var goals) && group < goals.Objectives.Groups.Length
-                && goals.Objectives.Groups[group].HasTarget));
+        var kills = KillProgress(questId);
+        for (var group = 0; group < kills.Count; group++)
+        {
+            bool pinned = _questViews.TryGetValue(questId, out var goals) && group < goals.Objectives.Groups.Length
+                && goals.Objectives.Groups[group].HasTarget;
+            var (mob, current, target) = kills[group];
+            _questObjectiveBox.AddChild(QuestObjectiveTarget(
+                QuestObjectiveProgress($"{mob} {current}/{target}", current, target, pinned), questId, group, pinned));
+        }
         foreach (var want in QuestHandIns(questId))
-            _questObjectiveBox.AddChild(QuestObjectiveRow(
-                $"{ItemData.DisplayName(want.ItemId)} {Mathf.Min(Inv.CountOf(want.ItemId), want.Count)}/{want.Count}"));
+        {
+            int have = Mathf.Min(Inv.CountOf(want.ItemId), want.Count);
+            _questObjectiveBox.AddChild(QuestObjectiveProgress(
+                $"{ItemData.DisplayName(want.ItemId)} {have}/{want.Count}", have, want.Count, false));
+        }
         if (_questObjectiveBox.GetChildCount() == 0)
             _questObjectiveBox.AddChild(QuestObjectiveRow(state switch
             {
@@ -550,6 +628,16 @@ public partial class World
         _questCompleteBtn.Disabled = _questViews.TryGetValue(questId, out var actionView)
             ? !actionView.CanClaim || actionView.Options.Length > 0
             : state != QuestStateReadyToTurnIn;
+    }
+
+    private string QuestPlaceFacts(int questId, int state, int zone)
+    {
+        var parts = new List<string>(2);
+        if (zone != QuestJournalRules.AnywhereZone) parts.Add($"Area: {QuestZoneName(zone)}");
+        var npcs = _questViews.TryGetValue(questId, out var view)
+            ? new[] { view.NpcId } : QuestData.NpcsForState(questId, state);
+        if (npcs.Length > 0 && npcs[0] > 0) parts.Add($"NPC: {NpcDisplayName(npcs[0])}");
+        return string.Join("   ·   ", parts);
     }
 
     private string QuestTalkToLine(int questId, int state)
@@ -582,6 +670,18 @@ public partial class World
             tile.AddChild(rect);
             UpgradeBadge.Show(tile, itemId);
         }
+        else if (QuestVirtualIcon(itemId) is { } virtualIcon)
+        {
+            tile.AddChild(new TextureRect
+            {
+                Texture = UiIcons.Get(virtualIcon),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                SelfModulate = UiTheme.Gold,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+            box.TooltipText = $"{QuestRewardName(itemId)}  {count:n0}";
+        }
         else
         {
             var glyph = UiTheme.Text("?", 15, UiTheme.TextLo, HorizontalAlignment.Center);
@@ -590,12 +690,56 @@ public partial class World
         }
         box.AddChild(tile);
 
-        var caption = UiTheme.Text($"{count:n0}", 10, UiTheme.TextHi, HorizontalAlignment.Center);
+        var caption = UiTheme.Text(QuestJournalRules.CompactCount(count), 10, UiTheme.TextHi, HorizontalAlignment.Center);
         caption.CustomMinimumSize = new Vector2(52, 0);
         caption.ClipText = true;
         box.AddChild(caption);
         return box;
     }
+
+    private static string? QuestVirtualIcon(int itemId) => itemId switch
+    {
+        QuestData.CoinItemId => "system/coins",
+        QuestData.ExpItemId => "system/level",
+        QuestData.LadderPointItemId => "system/medal",
+        QuestData.JobChangeItemId => "system/star",
+        _ => null,
+    };
+
+    private static Control QuestObjectiveProgress(string text, int current, int target, bool pinned)
+    {
+        var box = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Pass };
+        box.AddThemeConstantOverride("separation", 2);
+        var row = QuestObjectiveRow(text);
+        row.MouseFilter = Control.MouseFilterEnum.Pass;
+        if (pinned)
+            row.AddChild(new TextureRect
+            {
+                Texture = UiIcons.Get("system/pin"),
+                CustomMinimumSize = new Vector2(QuestPinSize, QuestPinSize),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                SelfModulate = UiTheme.Gold,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+        box.AddChild(row);
+        var bar = new ProgressBar
+        {
+            MinValue = 0,
+            MaxValue = 1,
+            Value = QuestJournalRules.Fraction(current, target),
+            ShowPercentage = false,
+            CustomMinimumSize = new Vector2(0, QuestObjectiveBarHeight),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        bar.AddThemeStyleboxOverride("background", UiTheme.MeterTrack());
+        bar.AddThemeStyleboxOverride("fill", UiTheme.MeterFill(current >= target ? UiTheme.Good : UiTheme.Gold));
+        box.AddChild(bar);
+        return box;
+    }
+
+    private const float QuestPinSize = 12f;
+    private const float QuestObjectiveBarHeight = 3f;
 
     private static Control QuestObjectiveRow(string text)
     {
@@ -633,8 +777,55 @@ public partial class World
         };
         _trackerBox.AddThemeConstantOverride("separation", 5);
         _trackerPanel.AddChild(_trackerBox);
-        HudPlacement.QuestTracker.ApplyTo(_trackerPanel);
+        if (Platform.TouchUi)
+            HudPlacement.QuestTracker.ApplyTo(_trackerPanel);
+        else
+        {
+            _trackerHeader = BuildTrackerHeader();
+            HudLayout.Attach(_trackerPanel, TrackerLayoutId, _trackerHeader, TrackerDefaultPosition);
+        }
         RefreshTracker();
+    }
+
+    private Vector2 TrackerDefaultPosition()
+    {
+        var viewport = _trackerPanel.GetViewportRect().Size;
+        return new Vector2(viewport.X - HudAnchor.Edge - _trackerPanel.Size.X,
+            Mathf.Max(HudAnchor.Edge, (viewport.Y - _trackerPanel.Size.Y) * 0.5f));
+    }
+
+    private PanelContainer BuildTrackerHeader()
+    {
+        var header = new PanelContainer
+        {
+            CustomMinimumSize = new Vector2(MiniMap.SquareSize, TrackerHeaderHeight),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            TooltipText = "Drag to move",
+        };
+        header.AddThemeStyleboxOverride("panel", UiTheme.HeaderBand(2));
+        var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        row.AddThemeConstantOverride("separation", 6);
+        header.AddChild(row);
+        var title = TrackerText("Quests", 12, UiTheme.GoldBright);
+        title.VerticalAlignment = VerticalAlignment.Center;
+        title.MouseFilter = Control.MouseFilterEnum.Ignore;
+        row.AddChild(title);
+        _trackerCount = TrackerText("", 11, UiTheme.TextLo);
+        _trackerCount.VerticalAlignment = VerticalAlignment.Center;
+        _trackerCount.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _trackerCount.MouseFilter = Control.MouseFilterEnum.Ignore;
+        row.AddChild(_trackerCount);
+        _trackerFold = UiTheme.IconButton(Config.QuestTrackerCollapsed ? "▸" : "▾", "Collapse or expand");
+        _trackerFold.CustomMinimumSize = new Vector2(22, 20);
+        _trackerFold.Pressed += () =>
+        {
+            Config.SetQuestTrackerCollapsed(!Config.QuestTrackerCollapsed);
+            _trackerFold.Text = Config.QuestTrackerCollapsed ? "▸" : "▾";
+            RefreshTracker();
+        };
+        row.AddChild(_trackerFold);
+        return header;
     }
 
     private List<QuestEntry> TrackedQuests()
@@ -668,7 +859,11 @@ public partial class World
     {
         PluginNotifyQuests();
         if (_trackerBox == null) return;
-        foreach (var c in _trackerBox.GetChildren()) c.QueueFree();
+        foreach (var c in _trackerBox.GetChildren())
+        {
+            _trackerBox.RemoveChild(c);
+            if (c != _trackerHeader) c.QueueFree();
+        }
         string selfName = Net.I.LastEnter.Name ?? "";
 
         var active = TrackedQuests();
@@ -678,19 +873,37 @@ public partial class World
         _trackerPageCount = Math.Max(1, (active.Count + TrackerPageSize - 1) / TrackerPageSize);
         _trackerPage = Math.Clamp(_trackerPage, 0, _trackerPageCount - 1);
 
+        if (_trackerHeader != null)
+        {
+            _trackerCount.Text = $"({active.Count})";
+            _trackerBox.AddChild(_trackerHeader);
+            if (Config.QuestTrackerCollapsed)
+            {
+                _trackerPanel.Visible = active.Count > 0;
+                return;
+            }
+        }
+
         int start = _trackerPage * TrackerPageSize;
         int end = Math.Min(active.Count, start + TrackerPageSize);
         for (int i = start; i < end; i++)
             _trackerBox.AddChild(Platform.TouchUi
                 ? BuildTouchTrackerQuest(active[i], selfName)
-                : BuildTrackerQuest(active[i], selfName, i == start));
+                : BuildTrackerQuest(active[i], selfName));
 
         if (!Platform.TouchUi && _trackerPageCount > 1)
         {
             _trackerBox.AddChild(BuildTrackerPager());
         }
         _trackerPanel.Visible = active.Count > 0;
+        Callable.From(FitTracker).CallDeferred();
+    }
 
+    private void FitTracker()
+    {
+        if (!GodotObject.IsInstanceValid(_trackerPanel) || _trackerPanel.GetParent() != _trackerLayer) return;
+        if (Platform.TouchUi) HudPlacement.QuestTracker.ApplyTo(_trackerPanel);
+        else _trackerPanel.ResetSize();
     }
 
     private Control BuildTouchTrackerQuest(QuestEntry q, string selfName)
@@ -742,19 +955,30 @@ public partial class World
     {
         var kills = KillProgressLines(questId);
         if (kills.Count > 0) return Clip($"Kill {kills[0]}");
+        return Clip(QuestGoalLines(questId, selfName)[0]);
+    }
 
+    private List<string> QuestGoalLines(int questId, string selfName)
+    {
+        var lines = new List<string>();
         foreach (var want in QuestHandIns(questId))
-            return Clip($"Bring {ItemData.DisplayName(want.ItemId)} "
-                        + $"{Mathf.Min(Inv.CountOf(want.ItemId), want.Count)}/{want.Count}");
+            lines.Add($"Bring {ItemData.DisplayName(want.ItemId)} "
+                      + $"{Mathf.Min(Inv.CountOf(want.ItemId), want.Count)}/{want.Count}");
+        if (lines.Count > 0) return lines;
 
         var npcs = _questViews.TryGetValue(questId, out var view)
             ? new[] { view.NpcId } : QuestData.NpcsForState(questId, QuestStateActive);
         if (npcs.Length > 0)
-            return Clip($"Talk to {NpcDisplayName(npcs[0])}");
+        {
+            lines.Add($"Talk to {NpcDisplayName(npcs[0])}");
+            return lines;
+        }
 
         string text = QuestJournal(questId, selfName);
         if (string.IsNullOrWhiteSpace(text)) text = QuestName(questId, selfName);
-        return Clip(text.Trim());
+        int newline = text.IndexOf('\n');
+        lines.Add((newline >= 0 ? text[..newline] : text).Trim());
+        return lines;
     }
 
     private static string NpcDisplayName(int npcId) =>
@@ -769,7 +993,7 @@ public partial class World
             : text;
     }
 
-    private Control BuildTrackerQuest(QuestEntry q, string selfName, bool primary)
+    private Control BuildTrackerQuest(QuestEntry q, string selfName)
     {
         var box = new VBoxContainer
         {
@@ -785,7 +1009,17 @@ public partial class World
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
-        titlePanel.AddThemeStyleboxOverride("panel", primary ? UiTheme.HeaderBand(2) : UiTheme.Row(q.State == 3, true));
+        titlePanel.AddThemeStyleboxOverride("panel", UiTheme.Row(q.State == 3, true));
+        int questId = q.QuestId;
+        titlePanel.MouseFilter = Control.MouseFilterEnum.Stop;
+        titlePanel.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+        titlePanel.TooltipText = "Open in the quest journal";
+        titlePanel.GuiInput += ev =>
+        {
+            if (ev is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) return;
+            ShowMainWindow("Quests");
+            SelectQuest(questId);
+        };
         box.AddChild(titlePanel);
 
         var titleRow = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -821,21 +1055,42 @@ public partial class World
         }
         else
         {
-            var lines = KillProgressLines(q.QuestId);
-            if (lines.Count == 0)
+            foreach (var goal in TrackerGoals(q.QuestId, selfName))
             {
-                string obj = QuestJournal(q.QuestId, selfName);
-                if (!string.IsNullOrWhiteSpace(obj))
-                    objectiveBox.AddChild(TrackerObjective(obj, Colors.White));
-            }
-            else
-            {
-                foreach (var line in lines)
-                    objectiveBox.AddChild(TrackerObjective(line, Colors.White));
+                if (string.IsNullOrWhiteSpace(goal.Text)) continue;
+                objectiveBox.AddChild(TrackerObjective(goal.Text, goal.Need > 0 && goal.Have >= goal.Need ? UiTheme.Good : Colors.White));
+                if (goal.Need > 0) objectiveBox.AddChild(TrackerBar(goal.Have, goal.Need));
             }
         }
 
         return box;
+    }
+
+    private List<TrackerGoal> TrackerGoals(int questId, string selfName)
+    {
+        var goals = new List<TrackerGoal>();
+        foreach (var (mob, current, target) in KillProgress(questId))
+            goals.Add(new TrackerGoal($"Kill {mob} {current}/{target}", current, target));
+        if (goals.Count > 0) return goals;
+        foreach (var want in QuestHandIns(questId))
+        {
+            int have = Mathf.Min(Inv.CountOf(want.ItemId), want.Count);
+            goals.Add(new TrackerGoal($"Bring {ItemData.DisplayName(want.ItemId)} {have}/{want.Count}", have, want.Count));
+        }
+        if (goals.Count > 0) return goals;
+        foreach (var line in QuestGoalLines(questId, selfName))
+            goals.Add(new TrackerGoal(line.StartsWith("Talk to") ? line : $"Note: {line}", 0, 0));
+        return goals;
+    }
+
+    private static Control TrackerBar(int have, int need)
+    {
+        var margin = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        margin.AddThemeConstantOverride("margin_left", (int)TrackerPlatePadX / 2);
+        margin.AddThemeConstantOverride("margin_right", (int)TrackerPlatePadX / 2);
+        margin.AddChild(QuestHuntBar(have, need));
+        margin.GetChild<Control>(0).CustomMinimumSize = new Vector2(0, TrackerBarHeight);
+        return margin;
     }
 
     private Control BuildTrackerPager()
@@ -900,8 +1155,15 @@ public partial class World
 
     private List<string> KillProgressLines(int questId)
     {
+        var lines = new List<string>();
+        foreach (var (mob, current, target) in KillProgress(questId)) lines.Add($"{mob} {current}/{target}");
+        return lines;
+    }
+
+    private List<(string Mob, int Current, int Target)> KillProgress(int questId)
+    {
         var groups = QuestGroups(questId);
-        var lines = new List<string>(groups.Length);
+        var lines = new List<(string, int, int)>(groups.Length);
         _questKills.TryGetValue(questId, out var counts);
         for (int g = 0; g < groups.Length; g++)
         {
@@ -912,7 +1174,7 @@ public partial class World
                 ? named
                 : firstNpc is Nations.Karus or Nations.ElMorad ? $"{Nations.Name(firstNpc)} players"
                 : GameData.I != null ? GameData.I.NpcName(firstNpc, true) : $"#{firstNpc}";
-            lines.Add($"{mob} {Mathf.Min(cur, target)}/{target}");
+            lines.Add((mob, Mathf.Min(cur, target), target));
         }
         return lines;
     }
@@ -945,7 +1207,29 @@ public partial class World
     private void RefreshNpcQuestMarkers()
     {
         RebuildQuestTargets();
+        RebuildViewMarkers();
         foreach (var ent in _ents.Values) RefreshNpcQuestMarker(ent);
+    }
+
+    private readonly Dictionary<int, string> _viewMarkerByNpc = new();
+    private readonly HashSet<int> _questsWithViews = new();
+
+    private void RebuildViewMarkers()
+    {
+        _viewMarkerByNpc.Clear();
+        _questsWithViews.Clear();
+        foreach (var quest in _quests)
+        {
+            if (!_questViews.TryGetValue(quest.QuestId, out var view)) continue;
+            _questsWithViews.Add(quest.QuestId);
+            if (view.ZoneId != 0 && view.ZoneId != _zone) continue;
+            _viewMarkerByNpc.TryGetValue(view.NpcId, out string? current);
+            if (current == QuestMarkerFx("readyToTurnIn")) continue;
+            if (view.State == QuestViewState.Claimable)
+                _viewMarkerByNpc[view.NpcId] = QuestMarkerFx("readyToTurnIn");
+            else if (string.IsNullOrEmpty(current) && view.State is QuestViewState.Available or QuestViewState.InProgress)
+                _viewMarkerByNpc[view.NpcId] = QuestMarkerFx(view.State == QuestViewState.Available ? "available" : "inProgress");
+        }
     }
 
     private void RebuildQuestTargets()
@@ -975,22 +1259,11 @@ public partial class World
         if (!ent.IsNpc || ent.IsMonster || ent.NpcId <= 0) return;
         _npcRoleFx ??= LoadNpcRoleFx();
         if (_npcRoleFx.ContainsKey(ent.NpcId)) return;
-        string desired = "";
+        string desired = _viewMarkerByNpc.TryGetValue(ent.NpcId, out string? fromView) ? fromView : "";
 
-        foreach (var quest in _quests)
+        foreach (var quest in Config.LegacyQuestFallback && desired != QuestMarkerFx("readyToTurnIn") ? _quests : [])
         {
-            if (_questViews.TryGetValue(quest.QuestId, out var view))
-            {
-                if (view.NpcId != ent.NpcId || view.ZoneId != 0 && view.ZoneId != _zone) continue;
-                if (view.State == QuestViewState.Claimable)
-                {
-                    desired = QuestMarkerFx("readyToTurnIn");
-                    break;
-                }
-                if (desired.Length == 0 && view.State is QuestViewState.Available or QuestViewState.InProgress)
-                    desired = QuestMarkerFx(view.State == QuestViewState.Available ? "available" : "inProgress");
-                continue;
-            }
+            if (_questsWithViews.Contains(quest.QuestId)) continue;
             if (quest.State == 3
                 && (QuestData.NpcForState(quest.QuestId, 2, ent.NpcId)
                     || QuestData.NpcForState(quest.QuestId, 3, ent.NpcId)))

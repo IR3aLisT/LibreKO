@@ -5,4 +5,5 @@ public enum GameServerState : byte
     Open = 0,
     PremiumOnly = 1,
     SecurityCheckFailed = 2,
+    ClientOutOfDate = 3,
 }

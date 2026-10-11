@@ -73,6 +73,9 @@ public partial class World
         body.AddChild(close);
     }
 
+    private const int QuestReceiptWidth = 300;
+    private const float QuestReceiptCheckSide = 16f;
+
     private void OnQuestReceipt(QuestReceipt receipt)
     {
         _questRewardSelection.TurnedIn(receipt.QuestId);
@@ -81,16 +84,20 @@ public partial class World
         {
             var layer = new CanvasLayer { Layer = 76 };
             AddChild(layer);
-            _questReceiptWindow = new HudWindow("quest_receipt", "Reward", new Vector2(480, 220), 300) { Visible = false };
+            _questReceiptWindow = new HudWindow("quest_receipt", "Reward", QuestReceiptWidth) { Visible = false };
             layer.AddChild(_questReceiptWindow);
         }
 
         var body = _questReceiptWindow.Body;
         foreach (var child in body.GetChildren()) { body.RemoveChild(child); child.QueueFree(); }
         body.AddThemeConstantOverride("separation", 8);
-        body.AddChild(UiTheme.Text(
+        var heading = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        heading.AddThemeConstantOverride("separation", 6);
+        heading.AddChild(new CheckGlyph(QuestReceiptCheckSide, UiTheme.Good));
+        heading.AddChild(UiTheme.Text(
             _questStrings.TryGetValue(receipt.QuestId, out var strings) ? strings.Title : "Quest complete",
             13, UiTheme.Gold));
+        body.AddChild(heading);
 
         var rewards = UiTheme.Section();
         body.AddChild(rewards);

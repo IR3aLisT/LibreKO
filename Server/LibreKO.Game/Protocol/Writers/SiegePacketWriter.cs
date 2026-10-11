@@ -4,10 +4,7 @@ namespace LibreKO.Game.Protocol.Writers;
 
 public sealed class SiegePacketWriter
 {
-    public const byte NoMasterClan = 0;
     public const short Accepted = 1;
-
-    public readonly record struct ClanBanner(ushort ClanId, ushort MarkVersion, byte Flag, byte Grade);
 
     public readonly record struct WarSchedule(byte WarType, byte Weekday, byte Hour, byte Minute);
 
@@ -29,26 +26,17 @@ public sealed class SiegePacketWriter
         return packet;
     }
 
-    public static Packet CastleFlag(byte sub, ClanBanner? banner)
+    public static Packet WarStatus(byte state, short ownerClan, short ownerMark, short ownerAlliance,
+        int holdSeconds, int warSeconds, string ownerName)
     {
-        var packet = Sub(sub);
-        packet.WriteByte(0);
-
-        if (banner is { } clan)
-        {
-            packet.WriteUShort(clan.ClanId);
-            packet.WriteUShort(clan.MarkVersion);
-            packet.WriteByte(clan.Flag);
-            packet.WriteByte(clan.Grade);
-        }
-        else
-        {
-            packet.WriteUShort(0);
-            packet.WriteUShort(0);
-            packet.WriteByte(NoMasterClan);
-            packet.WriteByte(NoMasterClan);
-        }
-
+        var packet = Sub(SiegePacketConstants.CastleFlag);
+        packet.WriteByte(state);
+        packet.WriteShort(ownerClan);
+        packet.WriteShort(ownerMark);
+        packet.WriteShort(ownerAlliance);
+        packet.WriteInt(holdSeconds);
+        packet.WriteShort((short)Math.Clamp(warSeconds, 0, short.MaxValue));
+        packet.WriteSByteString(ownerName);
         return packet;
     }
 

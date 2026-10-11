@@ -53,6 +53,11 @@ public class ScriptDialogService(
         queuedPackets.Add(NpcDialogPacketWriter.RebirthPanel(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));
     }
 
+    public void SendRebirthResetPanel()
+    {
+        queuedPackets.Add(NpcDialogPacketWriter.RebirthResetPanel(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));
+    }
+
     public void SendGenderChangePanel()
     {
         queuedPackets.Add(NpcDialogPacketWriter.GenderChangePanel(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));
@@ -76,6 +81,11 @@ public class ScriptDialogService(
     public void SendCombineRecipeBook()
     {
         queuedPackets.Add(NpcDialogPacketWriter.CombineRecipeBook(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));
+    }
+
+    public void SendDisassemblePanel()
+    {
+        queuedPackets.Add(NpcDialogPacketWriter.DisassemblePanel(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));
     }
 
     public void SendFamiliarPanel()

@@ -24,19 +24,26 @@ public partial class Net
 
     public void RetryLogin() => Login(_account, _password);
 
+    private const int TextServerFull = 6950;
+
+    private void LeaveToLogin(string message)
+    {
+        Evicted = true;
+        AutoReconnect = false;
+        CancelReconnect();
+        MyCharId = 0;
+        Disconnect(expected: true);
+        LibreKO.Login.PendingNotice = message;
+        GetTree().ChangeSceneToFile("res://scenes/Login.tscn");
+    }
+
     private void HandleKickOut(Packet p)
     {
         var code = p.RemainingBytes > 0 ? (AccountKickCode)p.ReadByte() : AccountKickCode.Evicted;
 
         if (RemovalMessage(code) is { } message)
         {
-            Evicted = true;
-            AutoReconnect = false;
-            CancelReconnect();
-            MyCharId = 0;
-            Disconnect(expected: true);
-            LibreKO.Login.PendingNotice = message;
-            GetTree().ChangeSceneToFile("res://scenes/Login.tscn");
+            LeaveToLogin(message);
             return;
         }
 

@@ -15,12 +15,13 @@ public partial class SettingsPanel : CanvasLayer
     private void BuildPluginsTab(VBoxContainer tab)
     {
         var intro = UiTheme.Text(
-            $"Plugins are folders inside \"{PluginHost.PrimaryRoot}\". Each one carries a plugin.json; " +
-            "only one UI theme can be enabled at a time.", PluginDescriptionFontSize, UiTheme.TextLo);
+            $"Plugins are folders inside \"{PluginHost.PrimaryRoot}\". Each one carries a plugin.json.",
+            PluginDescriptionFontSize, UiTheme.TextLo);
         intro.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         tab.AddChild(intro);
 
-        _pluginRestartNote = UiTheme.Text("Changes take effect after the game restarts.", PluginDescriptionFontSize, UiTheme.Warning);
+        _pluginRestartNote = UiTheme.Text("Some changes take effect after the game restarts.",
+            PluginDescriptionFontSize, UiTheme.Warning);
         _pluginRestartNote.Visible = PluginHost.RestartRequired;
         tab.AddChild(_pluginRestartNote);
 

@@ -17,7 +17,8 @@ public interface IItemTradeService
 public class ItemTradeService(
     SessionManager sessionManager,
     IGameDataService gameDataService,
-    IUserNotificationService userNotificationService) : IItemTradeService
+    IUserNotificationService userNotificationService,
+    IKingSystemRuntimeService kingSystemRuntimeService) : IItemTradeService
 {
     private const int ItemNoTrade = 900000001;
     private const int LoyaltyMerchantSellingGroup = 249000;
@@ -25,6 +26,7 @@ public class ItemTradeService(
     private const int SaleTypeNoRepair = 2;
     private const int SellPriceDivisor = 6;
     private const int ItemBaseIdStep = 1000;
+    private static readonly HashSet<int> UnsellableRaces = [12, 20, 50, 70, 71, 73, 74, 76];
 
     public async Task HandleRepairAsync(IClient client, Packet packet)
     {
@@ -210,6 +212,9 @@ public class ItemTradeService(
         List<NpcTradeEntry> entries)
     {
         var loyaltyShop = npc.SellingGroup == LoyaltyMerchantSellingGroup;
+        var kingData = kingSystemRuntimeService.GetKingData(session.Nation);
+        var tariff = type == 1 && !loyaltyShop ? kingData?.TerritoryTariff ?? 0 : 0;
+        var tax = 0;
         var outcome = session.WithLock(s =>
         {
             if (type == 2 && loyaltyShop)
@@ -227,7 +232,7 @@ public class ItemTradeService(
                     || entry.Count == 0
                     || entry.Count > 9999
                     || (type == 1 && !usedPositions.Add(entry.Position))
-                    || (type == 2 && (entry.ItemId >= ItemNoTrade || itemData.Race == 20)))
+                    || (type == 2 && (entry.ItemId >= ItemNoTrade || UnsellableRaces.Contains(itemData.Race))))
                 {
                     return (Error: ItemTradeRefusal.CannotTrade, Price: 0, Money: 0, Loyalty: 0, SellingGroup: (byte)0, HasItems: false);
                 }
@@ -246,7 +251,7 @@ public class ItemTradeService(
                     }
 
                     var entryPrice = checked(itemData.BuyPrice * entry.Count);
-                    if ((loyaltyShop ? s.Loyalty : s.Money) < totalPrice + entryPrice)
+                    if ((loyaltyShop ? s.Loyalty : s.Money) < NpcTariff.WithTax((long)totalPrice + entryPrice, tariff))
                         return (Error: ItemTradeRefusal.NotEnoughCoins, Price: 0, Money: 0, Loyalty: 0, SellingGroup: (byte)0, HasItems: false);
 
                     var totalWeight = s.Stats.ItemWeight + entries.Sum(candidate =>
@@ -287,6 +292,8 @@ public class ItemTradeService(
             if (lastItemData == null)
                 return (Error: ItemTradeRefusal.None, Price: 0, Money: 0, Loyalty: 0, SellingGroup: (byte)0, HasItems: false);
 
+            tax = NpcTariff.Tax(totalPrice, tariff);
+            totalPrice += tax;
             if (type == 1 && loyaltyShop)
                 s.Loyalty -= totalPrice;
             else if (type == 1)
@@ -309,11 +316,35 @@ public class ItemTradeService(
             return null;
 
         await userNotificationService.SendWeightChangeAsync(session);
+        if (tax > 0)
+            await AccrueTariffAsync(session, kingData, tax);
 
         return ItemTradePacketWriter.Traded(
             loyaltyShop ? outcome.Loyalty : outcome.Money,
             outcome.Price,
             loyaltyShop ? outcome.SellingGroup : null);
+    }
+
+    private async Task AccrueTariffAsync(UserSession session, KingSystemData? kingData, int tax)
+    {
+        var siege = gameDataService.SiegeWarfare;
+        if (session.ZoneId == (byte)ZoneId.Moradon && siege != null)
+        {
+            siege.MoradonTax = (int)Math.Min((long)siege.MoradonTax + tax, ExchangePacketConstants.CoinMax);
+            return;
+        }
+        if (session.ZoneId == (byte)ZoneId.Delos && siege != null)
+        {
+            siege.DellosTax = (int)Math.Min((long)siege.DellosTax + tax, ExchangePacketConstants.CoinMax);
+            return;
+        }
+        if (kingData == null || string.IsNullOrWhiteSpace(kingData.KingName))
+            return;
+        var (treasury, territory) = NpcTariff.KingSplit(tax);
+        kingData.NationalTreasury = (int)Math.Min((long)kingData.NationalTreasury + treasury, ExchangePacketConstants.CoinMax);
+        kingData.TerritoryTax = (int)Math.Min((long)kingData.TerritoryTax + territory, ExchangePacketConstants.CoinMax);
+        await kingSystemRuntimeService.PersistKingPropertyAsync(kingData, entry => entry.NationalTreasury);
+        await kingSystemRuntimeService.PersistKingPropertyAsync(kingData, entry => entry.TerritoryTax);
     }
 
     private int SellUnitPrice(ItemData itemData)

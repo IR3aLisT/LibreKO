@@ -316,9 +316,7 @@ public partial class World
     private void OnWarpList(List<Net.WarpListEntry> warps)
     {
         _warpEntries.Clear();
-        foreach (var w in warps)
-            if (WarpData.TryGet(w.WarpId, out _))
-                _warpEntries.Add(w);
+        _warpEntries.AddRange(warps);
 
         if (_warpEntries.Count == 0)
         {
@@ -329,15 +327,17 @@ public partial class World
 
         CloseNpcDialog();
         if (_openGate == null) _warpSourceId = _vendorNpcId;
-        _warpPanel.Title = _openGate != null ? _openGate.Tag.Text : _vendorNpcName;
+        _warpTitle = _openGate != null ? _openGate.Tag.Text : _vendorNpcName;
+        _warpPanel.Title = _warpTitle;
         _warpSelected = -1;
         SetWarpStatus("", false);
         RefreshWarpGold();
         RefreshWarpList();
-        SelectWarpRow(0);
+        SelectWarpRow(WarpRows.FirstUsable(_warpEntries.ConvertAll(e => WarpBlockReason(e, WarpInfo(e)))));
 
         _warpPanel.Visible = true;
         _warpShown = true;
+        PluginNotifyWarp();
     }
 
     private void CloseWarp()
@@ -346,6 +346,7 @@ public partial class World
         _warpShown = false;
         _openGate = null;
         _warpPanel.Visible = false;
+        PluginNotifyWarp();
     }
 
     private void RefreshWarpList()
@@ -360,11 +361,21 @@ public partial class World
         }
     }
 
+    private string _warpTitle = "";
+    private const int WarpRowThumbSize = 26;
+    private const int WarpRowLockSize = 14;
+    private const int WarpRowSideFont = 11;
+    private const float WarpRowBlockedAlpha = 0.55f;
+
+    private static WarpData.Destination WarpInfo(Net.WarpListEntry entry) =>
+        WarpData.TryGet(entry.WarpId, out var info) ? info : new WarpData.Destination(entry.Name, entry.Announce, "", 0, 0);
+
     private PanelContainer BuildWarpRow(int index, Net.WarpListEntry entry)
     {
-        WarpData.TryGet(entry.WarpId, out var info);
+        var info = WarpInfo(entry);
+        string? blocked = WarpBlockReason(entry, info);
 
-        var row = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Stop };
+        var row = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Stop, TooltipText = blocked ?? "" };
         row.AddThemeStyleboxOverride("panel", UiTheme.Row());
 
         var margin = new MarginContainer();
@@ -372,9 +383,45 @@ public partial class World
         margin.MouseFilter = Control.MouseFilterEnum.Ignore;
         row.AddChild(margin);
 
+        var line = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        line.AddThemeConstantOverride("separation", 8);
+        line.Modulate = new Color(1f, 1f, 1f, blocked != null ? WarpRowBlockedAlpha : 1f);
+        margin.AddChild(line);
+
+        line.AddChild(new TextureRect
+        {
+            Texture = WarpData.Image(info.Image) ?? UiIcons.Get("system/door"),
+            CustomMinimumSize = new Vector2(WarpRowThumbSize, WarpRowThumbSize),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCovered,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        });
+        if (blocked != null)
+            line.AddChild(new TextureRect
+            {
+                Texture = UiIcons.Get("system/lock"),
+                CustomMinimumSize = new Vector2(WarpRowLockSize, WarpRowLockSize),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                Modulate = UiTheme.Bad,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            });
+
         var label = UiTheme.Text(info.Name, 13, WarpRowColor(info, false));
         label.MouseFilter = Control.MouseFilterEnum.Ignore;
-        margin.AddChild(label);
+        label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        label.VerticalAlignment = VerticalAlignment.Center;
+        label.Name = "name";
+        line.AddChild(label);
+
+        var side = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        side.AddThemeConstantOverride("separation", 0);
+        line.AddChild(side);
+        string levels = WarpRows.LevelText(info.MinLevel, info.MaxLevel);
+        if (levels.Length > 0) side.AddChild(UiTheme.Text(levels, WarpRowSideFont, UiTheme.TextDim, HorizontalAlignment.Right));
+        side.AddChild(UiTheme.Text(WarpRows.FeeText(entry.Fee), WarpRowSideFont,
+            entry.Fee > 0 ? UiTheme.Gold : UiTheme.Good, HorizontalAlignment.Right));
 
         row.GuiInput += e =>
         {
@@ -399,10 +446,10 @@ public partial class World
 
         for (int i = 0; i < _warpRows.Count; i++)
         {
-            WarpData.TryGet(_warpEntries[i].WarpId, out var rowInfo);
+            var rowInfo = WarpInfo(_warpEntries[i]);
             bool selected = i == index;
             _warpRows[i].AddThemeStyleboxOverride("panel", UiTheme.Row(selected));
-            if (_warpRows[i].GetChild(0).GetChild(0) is Label label)
+            if (_warpRows[i].FindChild("name", true, false) is Label label)
                 label.AddThemeColorOverride("font_color", WarpRowColor(rowInfo, selected));
         }
 
@@ -410,26 +457,24 @@ public partial class World
         Callable.From(() => _warpScroll.EnsureControlVisible(selectedRow)).CallDeferred();
 
         var entry = _warpEntries[index];
-        WarpData.TryGet(entry.WarpId, out var info);
+        var info = WarpInfo(entry);
         _warpImage.Texture = WarpData.Image(info.Image);
-        _warpLevels.Text = info.MinLevel > 0 || info.MaxLevel > 0
-            ? $"lv{info.MinLevel}  ~  lv{info.MaxLevel}"
-            : "";
+        _warpLevels.Text = WarpRows.LevelText(info.MinLevel, info.MaxLevel);
         _warpDesc.Text = info.Description;
         string? blocked = WarpBlockReason(entry, info);
-        SetWarpStatus(blocked ?? $"Fee  {entry.Fee:n0} Noahs", blocked != null);
+        SetWarpStatus(blocked ?? $"Fee  {WarpRows.FeeText(entry.Fee)}", blocked != null);
         _warpTravel.Disabled = blocked != null;
+        PluginNotifyWarp();
     }
 
-    private string? WarpBlockReason(Net.WarpListEntry entry, WarpData.Destination info)
+    private string? WarpBlockReason(Net.WarpListEntry entry, WarpData.Destination info) =>
+        WarpRows.BlockReason(Sheet.Level, Sheet.Gold, info.MinLevel, info.MaxLevel, entry.Fee);
+
+    private bool TryEnterWarp()
     {
-        if (info.MinLevel > 0 && Sheet.Level < info.MinLevel)
-            return $"Requires level {info.MinLevel}.";
-        if (info.MaxLevel > 0 && Sheet.Level > info.MaxLevel)
-            return $"Level {info.MaxLevel} and below only.";
-        if (entry.Fee > Sheet.Gold)
-            return $"Need {entry.Fee:n0} Noahs.";
-        return null;
+        if (!_warpShown || _warpTravel.Disabled) return false;
+        TravelSelectedWarp();
+        return true;
     }
 
     private void TravelSelectedWarp()
@@ -438,7 +483,7 @@ public partial class World
         if (_warpSelected < 0 || _warpSelected >= _warpEntries.Count) return;
 
         var entry = _warpEntries[_warpSelected];
-        WarpData.TryGet(entry.WarpId, out var info);
+        var info = WarpInfo(entry);
         if (WarpBlockReason(entry, info) is { } reason)
         {
             SetWarpStatus(reason, true);
@@ -447,7 +492,7 @@ public partial class World
 
         Net.I.SendWarpSelect(_warpSourceId, entry.WarpId);
         CombatNotice(entry.Fee > 0
-            ? $"Travelling to {info.Name} (−{entry.Fee:n0} Noahs)…"
+            ? $"Travelling to {info.Name} (−{entry.Fee:n0} gold)…"
             : $"Travelling to {info.Name}…");
         CloseWarp();
     }
@@ -455,15 +500,18 @@ public partial class World
     private void OnWarpFail(byte result, int detail)
     {
         _openGate = null;
-        string reason = WarpRefusalText(result, detail);
+        if (WarpRefusalText(result, detail) is not { } reason) return;
         if (_warpShown) SetWarpStatus(reason, true);
         else CombatNotice(reason);
     }
 
-    private static string WarpRefusalText(byte result, int detail) => result switch
+    private string? WarpRefusalText(byte result, int detail) => result switch
     {
         Net.WarpResultLevelTooLow => ItemData.Text(6610, "You need to be at least level %d.").Replace("%d", detail.ToString()),
         Net.WarpResultCastleSiege => ItemData.Text(6612, "You cannot enter during the Castle Siege War."),
+        Net.WarpResultLunarWar => ItemData.Text(6611, "You cannot enter during the Lunar War."),
+        Net.WarpResultQuestCompleted => ItemData.Text(7668, "You can't enter beause you completed %s quest.")
+            .Replace("%s", QuestData.Name(detail, Net.I.LastEnter.Name ?? "")),
         Net.WarpResultNoNationalPoints => ItemData.Text(6613, "You cannot enter when you have 0 national points."),
         Net.WarpResultLevelRangeOnly => ItemData.Text(7657, "Only characters with level 30~50 can enter."),
         Net.WarpResultNotQualified => ItemData.Text(7659, "You cannot enter because you do not qualify."),
@@ -472,7 +520,7 @@ public partial class World
         Net.WarpResultClanGrade => ItemData.Text(7669, "You cannot enter because your clan grade is too low"),
         Net.WarpResultSameAddress => ItemData.Text(6621, "Attending event with multiple characters from the same IP, is not allowed."),
         Net.WarpResultCaptcha => ItemData.Text(6622, "Failed to enter (Reason: Captcha penalty)"),
-        _ => "The gatekeeper won't send you there.",
+        _ => null,
     };
 
     private void OnWarpGold(int total)
@@ -482,7 +530,7 @@ public partial class World
         SelectWarpRow(_warpSelected);
     }
 
-    private void RefreshWarpGold() => _warpGoldLbl.Text = $"Noahs  {Sheet.Gold:n0}";
+    private void RefreshWarpGold() => _warpGoldLbl.Text = $"Gold  {Sheet.Gold:n0}";
 
     private void SetWarpStatus(string text, bool warn)
     {

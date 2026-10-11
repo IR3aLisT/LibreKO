@@ -14,4 +14,7 @@ public static class ActionClip
     public static double Hold(double clipLength, double blend) =>
         IsStaticPose(clipLength) ? System.Math.Max(MinPoseHold, blend * PoseBlendInOut)
                                  : clipLength;
+
+    public static double Duration(double clipLength, double blend) =>
+        IsStaticPose(clipLength) ? Hold(clipLength, blend) : System.Math.Max(0, blend) + clipLength;
 }

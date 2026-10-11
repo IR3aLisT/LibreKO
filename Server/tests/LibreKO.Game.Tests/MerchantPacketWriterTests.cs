@@ -11,6 +11,38 @@ public class MerchantPacketWriterTests
     private const int StallSlots = 12;
 
     [Fact]
+    public void ASoldOutShowcaseSlotIsNamedInTheRetailShape()
+    {
+        var packet = MerchantPacketWriter.ShowcaseSlotEmptied(characterId: 70123, flags: 0, slot: 2);
+        packet.ResetOffset();
+
+        packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_MERCHANT_INOUT);
+        packet.ReadByte().Should().Be(MerchantPacketWriter.ShowcaseChangedSub);
+        packet.ReadInt().Should().Be(70123);
+        packet.ReadByte().Should().Be(1);
+        packet.ReadByte().Should().Be(0);
+        packet.ReadByte().Should().Be(2);
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void APremiumShowcaseSendsAllEightItems()
+    {
+        var packet = MerchantPacketWriter.ShowcaseRefreshed(characterId: 70123, flags: 1, itemIds: [900, 0, 902]);
+        packet.ResetOffset();
+
+        packet.ReadByte().Should().Be(MerchantPacketWriter.ShowcaseChangedSub);
+        packet.ReadInt().Should().Be(70123);
+        packet.ReadByte().Should().Be(1);
+        packet.ReadByte().Should().Be(1);
+        packet.ReadInt().Should().Be(900);
+        packet.ReadInt().Should().Be(0);
+        packet.ReadInt().Should().Be(902);
+        for (var slot = 3; slot < 8; slot++) packet.ReadInt().Should().Be(0);
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
     public void StallInsertedIsTheReplyTheClientWaitsFor()
     {
         var packet = MerchantPacketWriter.StallInserted(

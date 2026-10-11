@@ -69,7 +69,7 @@ public sealed class ChatColors
         ChatType.SeekingParty => SeekingParty,
         ChatType.ClanOfficer => ClanOfficer,
         ChatType.ChatRoom => this[ChatColorSlot.ChatRoom],
-        ChatType.ClanRecruit => nation switch
+        ChatType.NoahKnights => nation switch
         {
             Nations.Karus => this[ChatColorSlot.NoahKnightKarus],
             Nations.ElMorad => this[ChatColorSlot.NoahKnightElMorad],
@@ -80,8 +80,8 @@ public sealed class ChatColors
 
     public Color ForTab(ChatTabSpec tab) => ForLine(tab.Tint, WhisperSide.Sent);
 
-    public Color ForInput(byte channel, bool gameMasterMode) =>
-        gameMasterMode && channel == ChatType.General ? Announcement : ForLine(channel, WhisperSide.Sent);
+    public Color ForInput(byte channel, bool gameMasterMode, int nation = 0) =>
+        gameMasterMode && channel == ChatType.General ? Announcement : ForLine(channel, WhisperSide.Sent, nation);
 
     public string Format() => string.Join(Separator, _slots.Select(c => c.ToHtml(false)));
 

@@ -97,20 +97,32 @@ public static class PetWire
         short count = p.ReadShort();
         byte flag = p.ReadByte();
         p.ReadShort();
-        int uniqueId = p.ReadInt();
-        pet = null;
-        if (uniqueId != 0)
+        int uniqueId = ReadUniqueId(p, out pet);
+        int expiresAt = p.ReadInt();
+        return new ItemSlot
         {
-            string name = p.ReadString();
-            int attack = p.ReadByte();
-            int level = p.ReadByte();
-            int expPercent = p.ReadUShort();
-            int satisfaction = p.ReadShort();
-            p.ReadByte();
-            pet = new PetItemInfo(uniqueId, name, attack, level, expPercent, satisfaction);
-        }
-        p.ReadInt();
-        return new ItemSlot { ItemId = itemId, Durability = durability, Count = count, Flag = flag, UniqueId = uniqueId };
+            ItemId = itemId, Durability = durability, Count = count, Flag = flag, UniqueId = uniqueId, ExpiresAt = expiresAt,
+        };
+    }
+
+    public static int ReadUniqueId(Packet p, out PetItemInfo? summary)
+    {
+        summary = null;
+        if (p.RemainingBytes < sizeof(int)) return 0;
+        int uniqueId = p.ReadInt();
+        if (uniqueId != 0) summary = ReadUniqueBlock(p, uniqueId);
+        return uniqueId;
+    }
+
+    public static PetItemInfo ReadUniqueBlock(Packet p, int uniqueId)
+    {
+        string name = p.ReadString();
+        int attack = p.ReadByte();
+        int level = p.ReadByte();
+        int expPercent = p.ReadUShort();
+        int satisfaction = p.ReadShort();
+        int tail = p.ReadByte();
+        return new PetItemInfo(uniqueId, name, attack, level, expPercent, satisfaction, tail);
     }
 
     public static PetSheet ReadSheet(Packet p)

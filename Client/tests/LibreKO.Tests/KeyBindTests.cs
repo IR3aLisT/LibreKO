@@ -18,16 +18,17 @@ public class KeyBindTests
     [Fact]
     public void DefaultsAreAssignedAndUnique()
     {
-        var seen = new Dictionary<KeyChord, KeyAction>();
+        var seen = new Dictionary<(int, KeyChord), KeyAction>();
         foreach (var entry in KeyBinds.All)
         {
             var optional = entry.Action is KeyAction.PotionHp or KeyAction.PotionMp
-                or KeyAction.CameraTurn or KeyAction.GameMenu or KeyAction.HotPageNext;
+                or KeyAction.CameraTurn or KeyAction.GameMenu or KeyAction.HotPageNext or KeyAction.NamePlates;
             Assert.Equal(!optional, entry.Default.Assigned);
             if (optional) continue;
-            Assert.False(seen.TryGetValue(entry.Default, out var owner),
+            var key = (KeyBinds.LayerOf(entry.Action), entry.Default);
+            Assert.False(seen.TryGetValue(key, out var owner),
                 $"{entry.Action} and {owner} both default to the same key");
-            seen[entry.Default] = entry.Action;
+            seen[key] = entry.Action;
         }
     }
 
@@ -52,6 +53,16 @@ public class KeyBindTests
 
         Assert.Equal(second.Default, bound[first.Action]);
         Assert.Equal(KeyChord.Unbound, bound[second.Action]);
+    }
+
+    [Fact]
+    public void CommanderKeysShareDigitsWithTheHotbarWithoutUnbindingEitherSide()
+    {
+        var bound = KeyBinds.Resolve(KeyBinds.All, action => action == KeyAction.HotSlot1 ? KeyBinds.All.First(e => e.Action == KeyAction.CommanderSlot1).Default : null);
+
+        Assert.Equal(bound[KeyAction.HotSlot1], bound[KeyAction.CommanderSlot1]);
+        Assert.True(bound[KeyAction.CommanderHold].Assigned);
+        Assert.True(bound[KeyAction.ToggleRunAlt].Assigned);
     }
 
     [Fact]

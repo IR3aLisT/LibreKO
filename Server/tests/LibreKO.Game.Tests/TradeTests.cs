@@ -792,6 +792,40 @@ public class TradeTests : GameTestBase
     }
 
     [Fact]
+    public async Task ExchangeTransferService_AddAsync_SaysWhenTheOfferedItemIsADuplicate()
+    {
+        const int itemId = 700001000;
+        using var provider = CreateProvider(
+            _ => { },
+            gameData => gameData.GetItem(itemId).Returns(new ItemData { Num = itemId, Countable = 0, Duration = 30 }));
+
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var (giver, giverPackets) = CreateTradingSession(sessionManager, 8105, 8205);
+        var (taker, _) = CreateTradingSession(sessionManager, 8106, 8206);
+        PairForTrade(giver, taker);
+
+        giver.Inventory[InventoryConstants.SlotMax].ItemId = itemId;
+        giver.Inventory[InventoryConstants.SlotMax].Count = 1;
+        giver.Inventory[InventoryConstants.SlotMax].Flag = (byte)ItemFlag.Duplicate;
+
+        var packet = new Packet(GameOpcodes.GS_EXCHANGE);
+        packet.WriteByte(0);
+        packet.WriteInt(itemId);
+        packet.WriteInt(1);
+
+        await provider.GetRequiredService<IExchangeTransferService>().AddAsync(giver, packet);
+
+        var replies = giverPackets.Where(p => p.GetOpcode() == (byte)GameOpcodes.GS_EXCHANGE).ToList();
+        replies.Should().HaveCount(2);
+        replies[0].ResetOffset();
+        replies[0].ReadByte().Should().Be(ExchangePacketConstants.ExchangeDuplicate);
+        replies[1].ResetOffset();
+        replies[1].ReadByte().Should().Be(ExchangeAddSub);
+        replies[1].ReadByte().Should().Be(0);
+        giver.Trade.ExchangeItemList.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ExchangeTransferService_AddAsync_CancelsWhenPartnerWalkedOutOfRange()
     {
         const int itemId = 700001000;

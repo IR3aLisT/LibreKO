@@ -24,7 +24,7 @@ public static class ChatCategories
         return type switch
         {
             ChatType.General or ChatType.GameMaster or ChatType.SeekingParty or ChatType.ChatRoom
-                or ChatType.ClanRecruit => ChatCategory.General,
+                or ChatType.NoahKnights => ChatCategory.General,
             ChatType.Private => ChatCategory.Whisper,
             ChatType.Party or ChatType.Forced => ChatCategory.Party,
             ChatType.Clan or ChatType.ClanOfficer or ChatType.ClanNotice => ChatCategory.Clan,

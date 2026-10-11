@@ -31,7 +31,7 @@ public static class WeaponAnimation
 
     private const int BreathBareHands = 86;
     private const int BreathBash = 98;
-    private const int AttackStaff = 39;
+    public const int AttackStaff = 39;
     private const int AttackAxe1A = 72;
     private const int AttackTwoblunt0 = 63;
 

@@ -35,6 +35,7 @@ public partial class CharSelect
     private Terrain? _stageTerrain;
     private Sky? _stageSky;
     private Camera3D _stageCamera = null!;
+    private FxLayer? _stageFxLayer;
     private float _stageStandYaw;
     private Vector3 _stageFacing = Vector3.Back;
 
@@ -91,6 +92,7 @@ public partial class CharSelect
         };
         AddChild(_stageCamera);
         _stageCamera.LookAtFromPosition(eye, aim, Vector3.Up);
+        _stageFxLayer = FxLayer.Attach(GetViewport());
 
         _stageStandYaw = -Coord.KoHeading(StageEyeKo.X - StageStandKo.X, StageEyeKo.Z - StageStandKo.Z);
 

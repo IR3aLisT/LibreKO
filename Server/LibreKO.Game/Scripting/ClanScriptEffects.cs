@@ -35,11 +35,7 @@ public static class ClanScriptEffects
 
         await PersistAsync(provider, logger, clan, "premium");
 
-        var notice = ClanBroadcastPacketWriter.ClanPremium(
-            KnightsBroadcastBuilders.ClanPremiumStatusChange,
-            clan.HasPremium
-                ? KnightsBroadcastBuilders.ClanPremiumActive
-                : KnightsBroadcastBuilders.ClanPremiumInactive);
+        var notice = KnightsBroadcastBuilders.BuildClanPremium(KnightsBroadcastBuilders.ClanPremiumStatusChange, clan);
         await SendToMembersAsync(sessions, clan.Id, notice);
 
         logger.LogInformation("Clan {Clan} premium now runs to {Expiry}", clan.Name, clan.PremiumExpiry);

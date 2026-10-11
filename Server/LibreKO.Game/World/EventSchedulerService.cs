@@ -18,8 +18,11 @@ public class EventSchedulerService(
     ILotteryService lotteryService,
     IJuraidMountainService juraidMountainService,
     IBorderDefenseWarService borderDefenseWarService,
+    IChaosDungeonService chaosDungeonService,
     IUnderTheCastleService underTheCastleService,
     IForgottenTempleService forgottenTempleService,
+    IKrowazService krowazService,
+    INereidMonumentService nereidMonuments,
     IGameDataService gameDataService,
     ILogger<EventSchedulerService> logger) : BackgroundService
 {
@@ -41,6 +44,9 @@ public class EventSchedulerService(
     public bool IsTempleEventJoinOpen => _templeEventJoinOpen;
     public TempleEvent CurrentTempleEvent => _templeEvent;
     public int TempleRemainingJoinSeconds => _templeEventJoinOpen ? (int)Math.Max(0, (_templeEventStart - DateTime.UtcNow).TotalSeconds) : 0;
+    public int TempleRemainingSeconds => _templeEvent != TempleEvent.None ? (int)Math.Max(0, (_templeEventEnd - DateTime.UtcNow).TotalSeconds) : 0;
+    public byte TempleMinLevel => _templeEventMinLevel;
+    public byte TempleMaxLevel => _templeEventMaxLevel;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -58,8 +64,10 @@ public class EventSchedulerService(
                 await lotteryService.TickAsync();
                 await juraidMountainService.TickAsync();
                 await borderDefenseWarService.TickAsync();
+                await chaosDungeonService.TickAsync();
                 await underTheCastleService.TickAsync();
                 await forgottenTempleService.TickAsync();
+                await krowazService.TickAsync();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -90,6 +98,7 @@ public class EventSchedulerService(
 
                 // Broadcast result to all online players
                 await BroadcastBattleResult(winner);
+                await nereidMonuments.AnnounceResultAsync(winner);
 
                 battle.CloseBattleZone();
                 _banishPending = true;
@@ -348,6 +357,12 @@ public class EventSchedulerService(
             return;
         }
 
+        if (_templeEvent == TempleEvent.Chaos)
+        {
+            await chaosDungeonService.StartMatchesAsync(_templeParticipants.ToList(), TempleEventRules.ChaosDurationSeconds);
+            return;
+        }
+
         if (_templeEvent == TempleEvent.UnderTheCastle)
         {
             underTheCastleService.Start();
@@ -404,6 +419,11 @@ public class EventSchedulerService(
             await borderDefenseWarService.FinishAllMatchesAsync();
         }
 
+        if (_templeEvent == TempleEvent.Chaos || chaosDungeonService.HasActiveMatches)
+        {
+            await chaosDungeonService.FinishAllMatchesAsync();
+        }
+
         if (_templeEvent == TempleEvent.UnderTheCastle || underTheCastleService.IsActive)
         {
             await underTheCastleService.CloseAsync();
@@ -433,37 +453,35 @@ public class EventSchedulerService(
         }
     }
 
-    public bool TryJoinTempleEvent(UserSession session) => TryJoinTempleEvent(session, out _);
-
-    public bool TryJoinTempleEvent(UserSession session, out string? reason)
+    public TempleJoinResult TryJoinTempleEvent(UserSession session)
     {
-        reason = null;
         if (_templeEventZone == 0 || !_templeEventJoinOpen)
-        {
-            reason = "Registration is not currently open.";
-            return false;
-        }
-
+            return TempleJoinResult.NotOpen;
         if (_templeParticipants.Contains(session.CharacterId))
-        {
-            reason = "You have already registered for this event.";
-            return false;
-        }
-
+            return TempleJoinResult.AlreadyJoined;
         if (_templeEventMinLevel > 0 && session.Level < _templeEventMinLevel)
-        {
-            reason = $"Your level ({session.Level}) is too low. Minimum level is {_templeEventMinLevel}.";
-            return false;
-        }
-
+            return TempleJoinResult.LevelTooLow;
         if (_templeEventMaxLevel > 0 && session.Level > _templeEventMaxLevel)
-        {
-            reason = $"Your level ({session.Level}) is too high. Maximum level is {_templeEventMaxLevel}.";
-            return false;
-        }
+            return TempleJoinResult.LevelTooHigh;
+        if (_templeEvent == TempleEvent.Chaos && settings.Value.Events.ChaosNeedsMap
+            && !JobChangeRules.HasItemInBag(session, TempleEventRules.MapOfChaos))
+            return TempleJoinResult.NeedsMapOfChaos;
 
         _templeParticipants.Add(session.CharacterId);
-        return true;
+        return TempleJoinResult.Joined;
+    }
+
+    public (ushort Karus, ushort ElMorad) TempleSignUps()
+    {
+        ushort karus = 0, elMorad = 0;
+        foreach (var characterId in _templeParticipants)
+        {
+            var player = sessionManager.GetByCharacterId(characterId);
+            if (player == null) continue;
+            if (player.Nation == AccountNation.Karus) karus++;
+            else elMorad++;
+        }
+        return (karus, elMorad);
     }
 
     public void LeaveTempleEvent(int characterId)
@@ -563,6 +581,11 @@ public class EventSchedulerService(
         if (_templeEvent == TempleEvent.BorderDefenseWar || borderDefenseWarService.HasActiveMatches)
         {
             await borderDefenseWarService.CancelAllMatchesAsync();
+        }
+
+        if (_templeEvent == TempleEvent.Chaos || chaosDungeonService.HasActiveMatches)
+        {
+            await chaosDungeonService.CancelAllMatchesAsync();
         }
 
         if (_templeEvent == TempleEvent.UnderTheCastle || underTheCastleService.IsActive)

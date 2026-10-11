@@ -24,6 +24,7 @@ public partial class Login : Control
     private VBoxContainer _serverBox = null!;
     private Label _serverStatus = null!;
     private Notice? _busy;
+    private LoginNet.ServerEntry? _onlyServer;
     private bool _loginPending;
     private bool _resuming;
     private bool _serversReady;
@@ -306,6 +307,7 @@ public partial class Login : Control
         var chosen = s;
         var pick = Ui.MenuButton("Select", height: 30, fontSize: 15);
         pick.CustomMinimumSize = new Vector2(96, 30);
+        if (_onlyServer is { } only && only.Name == s.Name) pick.TooltipText = "Enter";
         pick.Pressed += () => Pick(chosen);
         Audio.HookButton(pick);
         row.AddChild(pick);
@@ -313,6 +315,14 @@ public partial class Login : Control
     }
 
     private void OpenSettings() => SettingsPanel.Open(this);
+
+    public override void _UnhandledKeyInput(InputEvent e)
+    {
+        if (e is not InputEventKey { Pressed: true, Echo: false } key || key.Keycode is not (Key.Enter or Key.KpEnter)) return;
+        if (_onlyServer is not { } only || !_serverPanel.Visible || _busy != null) return;
+        GetViewport().SetInputAsHandled();
+        Pick(only);
+    }
 
     private void OnLoginPressed()
     {
@@ -459,6 +469,7 @@ public partial class Login : Control
     {
         foreach (Node c in _serverBox.GetChildren()) c.QueueFree();
         _serversReady = servers.Count > 0;
+        _onlyServer = servers.Count == 1 && servers[0].Players >= 0 ? servers[0] : null;
         if (servers.Count == 0)
         {
             _serverStatus.Text = "No servers online.";

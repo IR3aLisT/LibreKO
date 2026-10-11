@@ -7,6 +7,7 @@ public partial class Water : Node3D
 {
     private readonly List<MeshInstance3D> _patches = new();
     private ShaderMaterial? _riverMat, _stillMat;
+    private readonly Dictionary<string, ShaderMaterial?> _surfaceMats = new();
 
     public bool HasWater => _patches.Count > 0;
 
@@ -31,7 +32,8 @@ public partial class Water : Node3D
             var mi = new MeshInstance3D
             {
                 Mesh = BuildPatchMesh(terrain, p),
-                MaterialOverride = IsStill(p.Tex) ? _stillMat : _riverMat,
+                MaterialOverride = (p.Uv != null ? SurfaceMaterial(p.Tex) : null)
+                    ?? (IsStill(p.Tex) ? _stillMat : _riverMat),
                 GIMode = GeometryInstance3D.GIModeEnum.Disabled,
             };
             AddChild(mi);
@@ -83,7 +85,10 @@ public partial class Water : Node3D
                 var pos = a.Lerp(b, fz);
                 int idx = R * nc + C;
                 verts[idx] = pos;
-                uvs[idx] = new Vector2(pos.X, pos.Z) * 0.25f;
+                uvs[idx] = p.Uv is { } uv
+                    ? uv[rr * cols + cc].Lerp(uv[rr * cols + cc + 1], fx)
+                        .Lerp(uv[(rr + 1) * cols + cc].Lerp(uv[(rr + 1) * cols + cc + 1], fx), fz)
+                    : new Vector2(pos.X, pos.Z) * 0.25f;
                 normals[idx] = Vector3.Up;
             }
         }
@@ -138,6 +143,21 @@ public partial class Water : Node3D
         mat.SetShaderParameter("deep_color", new Color(0.05f, 0.16f, 0.21f));
         mat.SetShaderParameter("shallow_color", new Color(0.10f, 0.30f, 0.36f));
         mat.SetShaderParameter("foam_color", new Color(0.92f, 0.96f, 0.98f));
+        return mat;
+    }
+
+    private ShaderMaterial? SurfaceMaterial(string tex)
+    {
+        if (_surfaceMats.TryGetValue(tex, out var cached)) return cached;
+        string path = $"res://assets/water/{tex}.png";
+        ShaderMaterial? mat = null;
+        if (ResourceLoader.Exists(path))
+        {
+            mat = new ShaderMaterial { Shader = Shaders.Get("molten_water") };
+            mat.SetShaderParameter("surface_tex", ResourceLoader.Load<Texture2D>(path));
+            mat.SetShaderParameter("wave_normal", WaveNormals().Item1);
+        }
+        _surfaceMats[tex] = mat;
         return mat;
     }
 

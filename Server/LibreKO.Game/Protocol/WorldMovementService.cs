@@ -24,6 +24,7 @@ public interface IWorldMovementService
     Task HandleStateChangeAsync(IClient client, Packet packet);
     Task HandleHomeAsync(IClient client);
     Task WarpAsync(UserSession session, ushort posX, ushort posZ);
+    Task DisplaceAsync(UserSession session, float x, float z);
     Task HandleRecvWarpAsync(IClient client, Packet packet);
     Task HandleWarpListAsync(IClient client, Packet packet);
     Task HandleZoneChangeAsync(IClient client, Packet packet);
@@ -44,13 +45,15 @@ public class WorldMovementService(
     IStealthService stealthService,
     ICollectionRaceService collectionRaceService,
     IBorderDefenseWarService borderDefenseWarService,
+    IRespawnBlinkService respawnBlinkService,
+    ISoccerService soccerService,
+    IKrowazTrapService krowazTrapService,
     ILogger<WorldMovementService> logger) : IWorldMovementService
 {
     private const byte MoveEchoFinish = 0;
     private const byte MoveEchoStart = 1;
     private const byte MoveEchoMove = 3;
 
-    private const float MoveSpeedScale = 100f;
     private const float PositionScale = 10f;
 
     private const short DamageZoneHp = 10;
@@ -78,25 +81,27 @@ public class WorldMovementService(
         if (echo is not MoveEchoFinish and not MoveEchoStart and not MoveEchoMove)
             return;
 
-        if (speed != 0 && echo != MoveEchoFinish)
-            (willX, willZ) = LeadDestination(willX, willZ, curX, curZ, speed);
-
         if (speed is > 90 or < -90)
         {
             logger.LogWarning("Speed hack detected for {Name}: speed={Speed}", session.Name, speed);
             return;
         }
 
-        var newX = willX / 10.0f;
-        var newZ = willZ / 10.0f;
+        var newX = curX / PositionScale;
+        var newZ = curZ / PositionScale;
         if (sessionManager.Maps != null && !sessionManager.Maps.IsValidPosition(session.ZoneId, newX, newZ))
             return;
+
+        if (echo == MoveEchoFinish
+            || (sessionManager.Maps != null
+                && !sessionManager.Maps.IsValidPosition(session.ZoneId, willX / PositionScale, willZ / PositionScale)))
+            (willX, willZ, willY) = (curX, curZ, curY);
 
         if (willX != session.MoveOldWillX || willZ != session.MoveOldWillZ)
             await stealthService.RevealAsync(session, InvisibilityType.DispelOnMove);
 
         session.X = newX;
-        session.Y = willY / 10.0f;
+        session.Y = curY / PositionScale;
         session.Z = newZ;
         session.MoveOldEcho = echo;
         session.MoveOldSpeed = speed;
@@ -108,6 +113,13 @@ public class WorldMovementService(
             await borderDefenseWarService.CheckCarrierBaseDeliveryAsync(session);
 
         await zoneTransitionService.RefreshArenaAsync(session);
+
+        var ground = ZoneTerrain.At(session.ZoneId, newX, newZ);
+        if (ground != session.Ground)
+        {
+            session.Ground = ground;
+            await session.Client.SendPacket(ZoneTerrainPacketWriter.Effect((byte)ground));
+        }
 
         if (session.IsGathering)
             await miningPacketCoordinator.StopGatheringAsync(session);
@@ -130,6 +142,8 @@ public class WorldMovementService(
             await worldVisibilityService.SendNpcRegionListAsync(session);
         }
 
+        await krowazTrapService.OnMovedAsync(session);
+
         if (sessionManager.Maps == null)
             return;
 
@@ -150,23 +164,6 @@ public class WorldMovementService(
                     await combatLifecycleService.HandlePlayerDeathAsync(session, killer: null);
                 break;
         }
-    }
-
-    private static (ushort X, ushort Z) LeadDestination(
-        ushort willX, ushort willZ, ushort curX, ushort curZ, short speed)
-    {
-        var stepX = (willX - curX) / PositionScale;
-        var stepZ = (willZ - curZ) / PositionScale;
-        var length = MathF.Sqrt(stepX * stepX + stepZ * stepZ);
-        if (length <= 0f)
-            return (willX, willZ);
-
-        var lead = speed / MoveSpeedScale;
-        var leadX = willX + stepX / length * lead * PositionScale;
-        var leadZ = willZ + stepZ / length * lead * PositionScale;
-
-        return ((ushort)Math.Clamp(leadX, 0f, ushort.MaxValue),
-                (ushort)Math.Clamp(leadZ, 0f, ushort.MaxValue));
     }
 
     public async Task HandleRotateAsync(IClient client, Packet packet)
@@ -199,6 +196,9 @@ public class WorldMovementService(
         if (type == (byte)StateChangeType.CombatStance)
             session.InCombatStance = value != (byte)CombatStanceState.Relaxed;
 
+        if (type == (byte)StateChangeType.NeedParty)
+            session.SeekingParty = value == UserInfoPacketWriter.SeekingParty && !session.IsInParty;
+
         var result = MovementPacketWriter.StateChange(session.CharacterId, type, value);
         await sessionManager.Regions.SendToRegion(session, result, excludeSender: false);
     }
@@ -206,7 +206,7 @@ public class WorldMovementService(
     public async Task HandleHomeAsync(IClient client)
     {
         var session = sessionManager.GetByClientId(client.Id);
-        if (session == null || session.Hp <= 0 || session.Hp < session.MaxHp / 2)
+        if (session == null || session.Hp <= 0 || session.Hp < session.MaxHp / 2 || session.ZoneId == ChaosRules.Zone)
             return;
 
         if (session.ActiveBuffs.Values.Any(b => b.BuffType == BuffType.FragmentOfManes && !b.IsExpired))
@@ -223,6 +223,7 @@ public class WorldMovementService(
 
         var (x, z) = startPos.RandomSpawn(session.Nation);
 
+        await soccerService.LeaveAsync(session);
         await WarpAsync(session, (ushort)(x * 10), (ushort)(z * 10));
     }
 
@@ -247,6 +248,27 @@ public class WorldMovementService(
         await worldVisibilityService.BroadcastUserInOutAsync(session, InOutType.Warp);
         await worldVisibilityService.SendNpcRegionListAsync(session);
         await worldVisibilityService.SendRegionUserListAsync(session);
+    }
+
+    public async Task DisplaceAsync(UserSession session, float x, float z)
+    {
+        session.X = x;
+        session.Y = ResolveTargetHeight(session.ZoneId, x, z);
+        session.Z = z;
+        session.SpeedLastX = 0f;
+        session.SpeedLastZ = 0f;
+        session.MoveOldWillX = (ushort)(x * PositionScale);
+        session.MoveOldWillZ = (ushort)(z * PositionScale);
+        await zoneTransitionService.RefreshArenaAsync(session);
+
+        var oldRegionX = session.RegionX;
+        var oldRegionZ = session.RegionZ;
+        if (!sessionManager.Regions.UpdateRegion(session))
+            return;
+
+        await worldVisibilityService.BroadcastRegionTransitionAsync(session, oldRegionX, oldRegionZ);
+        await worldVisibilityService.SendRegionUserListAsync(session);
+        await worldVisibilityService.SendNpcRegionListAsync(session);
     }
 
     public async Task HandleRecvWarpAsync(IClient client, Packet packet)
@@ -385,6 +407,14 @@ public class WorldMovementService(
         {
             session.IsWarping = false;
             await worldVisibilityService.BroadcastUserInOutAsync(session, InOutType.Warp);
+            if (session.TransformSkillId != 0)
+                await sessionManager.Regions.SendToRegion(session, MovementPacketWriter.Transformation(
+                    session.CharacterId, (byte)StateChangeType.Transformation, session.TransformSkillId), excludeSender: false);
+            if (session.BlinkOnArrival)
+            {
+                session.BlinkOnArrival = false;
+                await respawnBlinkService.StartAsync(session);
+            }
             await collectionRaceService.SyncPlayerAsync(session);
         }
     }

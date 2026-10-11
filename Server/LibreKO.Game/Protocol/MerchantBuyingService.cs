@@ -24,6 +24,7 @@ public class MerchantBuyingService(
     IGameDataService gameDataService,
     IUserNotificationService userNotificationService,
     IMarketPriceService marketPriceService,
+    IDailyRankService dailyRankService,
     ILogger<MerchantBuyingService> logger) : IMerchantBuyingService
 {
     public async Task OpenAsync(UserSession session)
@@ -216,6 +217,7 @@ public class MerchantBuyingService(
         await userNotificationService.SendWeightChangeAsync(session);
         await userNotificationService.SendWeightChangeAsync(merchant);
         await marketPriceService.RecordAsync(merchant, session, merchantItem.ItemId, unitPrice, stackSize);
+        await dailyRankService.CountMerchantSaleAsync(session, price);
 
         if (merchant.Trade.BuyMerchantItems.All(entry => entry == null || entry.IsEmpty))
             await CloseAsync(merchant, broadcast: true);

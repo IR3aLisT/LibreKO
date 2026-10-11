@@ -3,19 +3,11 @@ using LibreKO.Common.Enums;
 
 namespace LibreKO.Common.Domain.Services;
 
-public readonly record struct CharacterRankRow(
-    int Id,
-    string Name,
-    AccountNation Nation,
-    short KnightsId,
-    int Loyalty,
-    int LoyaltyMonthly,
-    int LoyaltyDaily);
-
 public interface ICharacterRepository
 {
     Task<Character?> GetById(int id);
     Task<IEnumerable<Character>> GetCharactersByAccount(int accountId);
+    Task<IReadOnlyList<Character>> GetByIds(IReadOnlyCollection<int> ids);
     Task CreateAsync(Character character);
     Task UpdateAsync(Character character);
 
@@ -23,10 +15,6 @@ public interface ICharacterRepository
 
     Task<bool> IsNameTaken(string name);
     Task<Character?> GetByName(string name);
-
-    Task<IReadOnlyList<CharacterRankRow>> GetTopByLoyalty(AccountNation nation, int count);
-
-    Task<int> GetLoyaltyRank(AccountNation nation, int loyalty);
 
     Task<IReadOnlyList<int>> GetPlayerIdsByLoyalty(AccountNation nation, int count, bool monthly);
 

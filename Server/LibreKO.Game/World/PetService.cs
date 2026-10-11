@@ -47,8 +47,6 @@ public sealed class PetService(
     public static readonly TimeSpan RegenInterval = TimeSpan.FromSeconds(10);
     public const int RegenPercent = 10;
     private const int PercentScale = 100;
-    private const char FirstNameCharacter = '!';
-    private const char LastNameCharacter = '~';
 
     private readonly ConcurrentDictionary<int, Pet> _pets = new();
 
@@ -56,7 +54,7 @@ public sealed class PetService(
 
     public async Task<IReadOnlyDictionary<int, PetItemInfo>> DescribeAsync(IEnumerable<ItemSlot> slots)
     {
-        var linked = slots.Where(slot => slot.IsLinked).ToArray();
+        var linked = slots.Where(slot => slot.IsPetLink).ToArray();
         await CacheAsync(linked);
         var described = new Dictionary<int, PetItemInfo>();
         foreach (var slot in linked)
@@ -67,7 +65,7 @@ public sealed class PetService(
 
     private async Task CacheAsync(IEnumerable<ItemSlot> slots)
     {
-        var ids = slots.Where(slot => slot.IsLinked).Select(slot => slot.UniqueId)
+        var ids = slots.Where(slot => slot.IsPetLink).Select(slot => slot.UniqueId)
             .Where(id => !_pets.ContainsKey(id)).Distinct().ToArray();
         if (ids.Length == 0)
             return;
@@ -80,7 +78,7 @@ public sealed class PetService(
 
     public PetItemInfo? ItemInfo(UserSession session, ItemSlot slot)
     {
-        if (!slot.IsLinked || !_pets.TryGetValue(slot.UniqueId, out var pet))
+        if (!slot.IsPetLink || !_pets.TryGetValue(slot.UniqueId, out var pet))
             return null;
 
         return PetItemInfo.From(pet, LevelOf(pet.Level));
@@ -632,5 +630,5 @@ public sealed class PetService(
 
     public static bool IsValidName(string name) =>
         name.Length is > 0 and <= Pet.NameMaxLength
-        && name.All(c => c is >= FirstNameCharacter and <= LastNameCharacter);
+        && NameRules.IsPlain(name);
 }

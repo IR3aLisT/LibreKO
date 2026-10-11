@@ -19,6 +19,7 @@ public class ExchangeTransferService(
     IGameDataService gameDataService,
     IUserNotificationService userNotificationService,
     IExchangeLifecycleService exchangeLifecycleService,
+    ICharacterSealService characterSeal,
     ILogger<ExchangeTransferService> logger) : IExchangeTransferService
 {
     public async Task AddAsync(UserSession session, Packet packet)
@@ -51,6 +52,15 @@ public class ExchangeTransferService(
 
         var itemData = itemId != InventoryConstants.ItemGold ? gameDataService.GetItem(itemId) : null;
 
+        if (itemId != InventoryConstants.ItemGold && pos < InventoryConstants.HaveMax
+            && session.Inventory[InventoryConstants.SlotMax + pos] is { } offered
+            && offered.ItemId == itemId && offered.State == ItemFlag.Duplicate)
+        {
+            await session.Client.SendPacket(ExchangePacketWriter.Sub(ExchangePacketConstants.ExchangeDuplicate));
+            await SendAddFailAsync(session);
+            return;
+        }
+
         if (itemId != InventoryConstants.ItemGold && !IsTradableItem(itemData, itemId, pos))
         {
             await SendAddFailAsync(session);
@@ -60,24 +70,26 @@ public class ExchangeTransferService(
         var outcome = session.WithLock(s =>
         {
             if (s.Trade.ExchangeOk)
-                return (Success: false, Duration: (short)0);
+                return (Success: false, Duration: (short)0, UniqueId: 0);
 
             var isGold = itemId == InventoryConstants.ItemGold;
             var duration = (short)0;
+            var uniqueId = 0;
             ItemSlot? slot = null;
 
             if (isGold)
             {
                 if (count > s.Money)
-                    return (Success: false, Duration: (short)0);
+                    return (Success: false, Duration: (short)0, UniqueId: 0);
             }
             else
             {
                 slot = s.Inventory[InventoryConstants.SlotMax + pos];
                 if (slot.ItemId != itemId || slot.Count < count || !slot.IsTradable)
-                    return (Success: false, Duration: (short)0);
+                    return (Success: false, Duration: (short)0, UniqueId: 0);
 
                 duration = slot.Durability;
+                uniqueId = slot.UniqueId;
             }
 
             var existing = isGold || itemData!.Countable != 0
@@ -88,7 +100,7 @@ public class ExchangeTransferService(
             if (addNew && !isGold
                 && s.Trade.ExchangeItemList.Count(entry => entry.ItemId != InventoryConstants.ItemGold)
                     >= ExchangePacketConstants.MaxOfferedItems)
-                return (Success: false, Duration: (short)0);
+                return (Success: false, Duration: (short)0, UniqueId: 0);
 
             if (existing != null)
                 existing.Count += count;
@@ -105,11 +117,12 @@ public class ExchangeTransferService(
                     ItemId = itemId,
                     Durability = duration,
                     Count = count,
+                    UniqueId = uniqueId,
                     SrcPos = (byte)(InventoryConstants.SlotMax + pos)
                 });
             }
 
-            return (Success: true, Duration: duration);
+            return (Success: true, Duration: duration, UniqueId: uniqueId);
         });
 
         if (!outcome.Success)
@@ -121,8 +134,10 @@ public class ExchangeTransferService(
         await session.Client.SendPacket(ExchangePacketWriter.Result(
             ExchangePacketConstants.ExchangeAdd, ExchangePacketWriter.Succeeded));
 
+        var rings = await characterSeal.DescribeAsync([new ItemSlot { ItemId = itemId, UniqueId = outcome.UniqueId }]);
         await target.Client.SendPacket(ExchangePacketWriter.ItemOffered(
-            ExchangePacketConstants.ExchangeOtherAdd, itemId, count, outcome.Duration));
+            ExchangePacketConstants.ExchangeOtherAdd, itemId, count, outcome.Duration,
+            outcome.UniqueId, rings.TryGetValue(outcome.UniqueId, out var ring) ? ring : null));
     }
 
     public async Task DecideAsync(UserSession session)
@@ -211,13 +226,15 @@ public class ExchangeTransferService(
 
     private enum DecideOutcome { Wait, Fail, Done }
 
-    private static async Task SendDoneCapturedAsync(UserSession receiver, int money, List<ExchangeItem> items)
+    private async Task SendDoneCapturedAsync(UserSession receiver, int money, List<ExchangeItem> items)
     {
+        var rings = await characterSeal.DescribeAsync(items.Select(item => new ItemSlot { ItemId = item.ItemId, UniqueId = item.UniqueId }));
         var transferred = new List<ExchangePacketWriter.TransferredItem>(items.Count);
         foreach (var item in items)
         {
             transferred.Add(new ExchangePacketWriter.TransferredItem(
-                item.DstPos, item.ItemId, (ushort)item.Count, item.Durability));
+                item.DstPos, item.ItemId, (ushort)item.Count, item.Durability,
+                item.UniqueId, rings.TryGetValue(item.UniqueId, out var ring) ? ring : null));
         }
 
         await receiver.Client.SendPacket(ExchangePacketWriter.Completed(
@@ -286,6 +303,7 @@ public class ExchangeTransferService(
             if (dst.Count > 9999)
                 dst.Count = 9999;
             dst.Durability = item.Durability;
+            dst.UniqueId = item.UniqueId;
 
             item.DstPos = (byte)(slot - InventoryConstants.SlotMax);
 

@@ -1,0 +1,7 @@
+
+Bind Npc 32288
+
+On greeting
+    Say "Good job. I'll see you next time. I must check on Karus' movements, so..."
+    Topic "Confirm" goto close
+    Goto close

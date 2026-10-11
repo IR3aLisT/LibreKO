@@ -16,11 +16,30 @@ public partial class World
         EquipmentView,
         ClanInvite,
         CopyName,
+        ClanBattle,
+        ClanSurrender,
     }
+
+    private static readonly System.Collections.Generic.Dictionary<PlayerMenuAction, (string Key, string Caption)> PlayerMenuRows = new()
+    {
+        [PlayerMenuAction.RequestParty] = ("party", "Request a party"),
+        [PlayerMenuAction.Report] = ("report", "Report"),
+        [PlayerMenuAction.UserTrade] = ("trade", "User trade"),
+        [PlayerMenuAction.Whisper] = ("whisper", "Whisper"),
+        [PlayerMenuAction.AddFriend] = ("friend", "Add friend"),
+        [PlayerMenuAction.UserInformation] = ("info", "User Information"),
+        [PlayerMenuAction.Duel] = ("duel", "Duel"),
+        [PlayerMenuAction.EquipmentView] = ("equipment", "Equipment View"),
+        [PlayerMenuAction.ClanInvite] = ("clan_invite", "Clan invite"),
+        [PlayerMenuAction.CopyName] = ("copy_name", "Copy name"),
+        [PlayerMenuAction.ClanBattle] = ("clan_battle", "Clan battle"),
+        [PlayerMenuAction.ClanSurrender] = ("clan_surrender", "Surrender the clan battle"),
+    };
 
     private PopupMenu _playerMenu = null!;
     private int _playerMenuId = -1;
     private string _playerMenuName = "";
+    private CanvasLayer? _playerMenuSkinLayer;
 
     private void PlayerMenuInit()
     {
@@ -50,21 +69,53 @@ public partial class World
         _playerMenuId = id;
         _playerMenuName = target.Name;
 
+        var rows = new System.Collections.Generic.List<PlayerMenuAction>
+        {
+            PlayerMenuAction.RequestParty, PlayerMenuAction.Report, PlayerMenuAction.UserTrade, PlayerMenuAction.Whisper,
+            PlayerMenuAction.AddFriend, PlayerMenuAction.UserInformation, PlayerMenuAction.Duel, PlayerMenuAction.EquipmentView,
+        };
+        if (MyClan.CanInvite && target.KnightsId == 0) rows.Add(PlayerMenuAction.ClanInvite);
+        if (CanChallengeClan(target)) rows.Add(PlayerMenuAction.ClanBattle);
+        if (MyClan.IsChief && Net.I.EnemyClanId > 0 && target.KnightsId == Net.I.EnemyClanId)
+            rows.Add(PlayerMenuAction.ClanSurrender);
+        rows.Add(PlayerMenuAction.CopyName);
+        PresentPlayerMenu(rows, at);
+    }
+
+    private void PresentPlayerMenu(System.Collections.Generic.List<PlayerMenuAction> rows, Vector2 at)
+    {
+        ClosePlayerMenuSkin();
+        if (PluginHost.Ui.PlayerMenuBuilder is { } build)
+        {
+            var request = new LibreKO.Plugins.PlayerMenuRequest(_playerMenuName, at,
+                rows.ConvertAll(action => new LibreKO.Plugins.PlayerMenuRow(PlayerMenuRows[action].Key, PlayerMenuRows[action].Caption,
+                    () => { ClosePlayerMenuSkin(); OnPlayerMenuAction((long)action); })),
+                ClosePlayerMenuSkin);
+            _playerMenuSkinLayer = new CanvasLayer { Layer = PlayerMenuSkinLayer };
+            AddChild(_playerMenuSkinLayer);
+            _playerMenuSkinLayer.AddChild(build(request));
+            return;
+        }
         _playerMenu.Clear();
-        _playerMenu.AddItem("Request a party", (int)PlayerMenuAction.RequestParty);
-        _playerMenu.AddItem("Report", (int)PlayerMenuAction.Report);
-        _playerMenu.AddItem("User trade", (int)PlayerMenuAction.UserTrade);
-        _playerMenu.AddItem("Whisper", (int)PlayerMenuAction.Whisper);
-        _playerMenu.AddItem("Add friend", (int)PlayerMenuAction.AddFriend);
-        _playerMenu.AddItem("User Information", (int)PlayerMenuAction.UserInformation);
-        _playerMenu.AddItem("Duel", (int)PlayerMenuAction.Duel);
-        _playerMenu.AddItem("Equipment View", (int)PlayerMenuAction.EquipmentView);
-        if (MyClan.CanInvite && target.KnightsId == 0)
-            _playerMenu.AddItem("Clan invite", (int)PlayerMenuAction.ClanInvite);
-        _playerMenu.AddItem("Copy name", (int)PlayerMenuAction.CopyName);
-        _playerMenu.ResetSize();
-        _playerMenu.Position = (Vector2I)at;
-        _playerMenu.Popup();
+        foreach (var action in rows) _playerMenu.AddItem(PlayerMenuRows[action].Caption, (int)action);
+        PopupAtCursor(_playerMenu, at);
+    }
+
+    private const int PlayerMenuSkinLayer = 90;
+    private const float MenuCursorGap = 2f;
+
+    private void PopupAtCursor(Popup menu, Vector2 cursor)
+    {
+        menu.ResetSize();
+        var screen = GetViewport().GetVisibleRect().Size;
+        menu.Position = (Vector2I)TooltipPlacement.AroundCursor(cursor, menu.Size, screen, MenuCursorGap, 0f);
+        menu.Popup();
+    }
+
+    private void ClosePlayerMenuSkin()
+    {
+        if (_playerMenuSkinLayer != null && IsInstanceValid(_playerMenuSkinLayer)) _playerMenuSkinLayer.QueueFree();
+        _playerMenuSkinLayer = null;
     }
 
     private void ShowPlayerMenuByName(string name, Vector2 at)
@@ -79,17 +130,11 @@ public partial class World
 
         _playerMenuId = -1;
         _playerMenuName = name;
-        _playerMenu.Clear();
-        _playerMenu.AddItem("Whisper", (int)PlayerMenuAction.Whisper);
-        _playerMenu.AddItem("Add friend", (int)PlayerMenuAction.AddFriend);
-        _playerMenu.AddItem("Request a party", (int)PlayerMenuAction.RequestParty);
-        _playerMenu.AddItem("User Information", (int)PlayerMenuAction.UserInformation);
-        _playerMenu.AddItem("Equipment View", (int)PlayerMenuAction.EquipmentView);
-        _playerMenu.AddItem("Report", (int)PlayerMenuAction.Report);
-        _playerMenu.AddItem("Copy name", (int)PlayerMenuAction.CopyName);
-        _playerMenu.ResetSize();
-        _playerMenu.Position = (Vector2I)at;
-        _playerMenu.Popup();
+        PresentPlayerMenu(new System.Collections.Generic.List<PlayerMenuAction>
+        {
+            PlayerMenuAction.Whisper, PlayerMenuAction.AddFriend, PlayerMenuAction.RequestParty,
+            PlayerMenuAction.UserInformation, PlayerMenuAction.EquipmentView, PlayerMenuAction.Report, PlayerMenuAction.CopyName,
+        }, at);
     }
 
     private bool HasNearbyPlayerForUserInfo()
@@ -162,7 +207,7 @@ public partial class World
                 break;
 
             case PlayerMenuAction.AddFriend:
-                Net.I.SendFriendAdd(name);
+                RequestFriend(name);
                 break;
 
             case PlayerMenuAction.UserInformation:
@@ -185,6 +230,14 @@ public partial class World
             case PlayerMenuAction.CopyName:
                 DisplayServer.ClipboardSet(name);
                 CombatNotice($"Copied {name}.");
+                break;
+
+            case PlayerMenuAction.ClanBattle:
+                Net.I.SendClanBattleChallenge(id);
+                break;
+
+            case PlayerMenuAction.ClanSurrender:
+                Notice.Confirm(this, "Surrender the clan battle?", "Surrender", "Cancel", Net.I.SendClanBattleSurrender);
                 break;
         }
     }

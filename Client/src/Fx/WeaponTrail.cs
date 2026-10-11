@@ -3,8 +3,10 @@ using LibreKO.Domain;
 
 namespace LibreKO;
 
-public partial class WeaponTrail : Node3D
+public partial class WeaponTrail : Node3D, IFxTicked
 {
+    public int FxSlot { get; set; } = FxTickLane.Unlisted;
+
     public const int Steps = 30;
     private const float FrameStep = 0.111f;
     private const float TeleportJump = 6f;
@@ -79,11 +81,27 @@ public partial class WeaponTrail : Node3D
         FxLayer.Users += shown ? 1 : -1;
     }
 
-    public override void _ExitTree() => SetShown(false);
+    public override void _EnterTree() => FxDriver.Lane(this, FxLane.Gear)?.Join(this);
+
+    internal bool BladeSegment(out Vector3 from, out Vector3 to)
+    {
+        from = to = Vector3.Zero;
+        if (!GodotObject.IsInstanceValid(_skel) || !_skel.IsInsideTree()) return false;
+        var edge = _skel.GlobalTransform * _skel.GetBoneGlobalPose(_bone) * _plug;
+        from = edge * new Vector3(0f, _tr0, 0f);
+        to = edge * new Vector3(0f, _tr1, 0f);
+        return true;
+    }
+
+    public override void _ExitTree()
+    {
+        FxDriver.Lane(this, FxLane.Gear)?.Leave(this);
+        SetShown(false);
+    }
 
     private const float TraceLeadFrames = 2f;
 
-    public override void _Process(double delta)
+    public void FxTick(double delta)
     {
         using var scope = Perf.Measure(Perf.Section.Gear);
         if (_anim == null || !GodotObject.IsInstanceValid(_anim)

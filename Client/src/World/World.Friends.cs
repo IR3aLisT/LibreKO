@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using Godot;
+using LibreKO.Domain;
 using LibreKO.Network;
 
 namespace LibreKO;
@@ -12,6 +13,8 @@ public partial class World
     private Label _friendHeader = null!, _friendStatus = null!;
     private bool _friendsLoaded;
     private readonly List<FriendEntry> _friends = new();
+    private static readonly Color FriendNoticeColour = new("ffff00");
+    private static readonly Color FriendRefusalColour = new("ff0000");
 
 
     private bool FriendsPageVisible =>
@@ -23,6 +26,9 @@ public partial class World
         Net.I.FriendListEvent += OnFriendList;
         Net.I.FriendAddResultEvent += OnFriendAdd;
         Net.I.FriendRemoveResultEvent += OnFriendRemove;
+        Net.I.FriendLoggedInEvent += OnFriendLoggedIn;
+        Net.I.FriendRequestEvent += OnFriendRequest;
+        Net.I.FriendRequestResultEvent += OnFriendRequestResult;
     }
 
     private void FriendsDispose()
@@ -30,6 +36,52 @@ public partial class World
         Net.I.FriendListEvent -= OnFriendList;
         Net.I.FriendAddResultEvent -= OnFriendAdd;
         Net.I.FriendRemoveResultEvent -= OnFriendRemove;
+        Net.I.FriendLoggedInEvent -= OnFriendLoggedIn;
+        Net.I.FriendRequestEvent -= OnFriendRequest;
+        Net.I.FriendRequestResultEvent -= OnFriendRequestResult;
+    }
+
+    private void RequestFriend(string name)
+    {
+        Net.I.SendFriendAdd(name);
+        FriendLine(ItemData.Text(FriendTexts.RequestSentText, "You have sent a friend request to %s.").Replace("%s", name), FriendNoticeColour);
+    }
+
+    private void FriendLine(string text, Color colour)
+    {
+        if (text.Length == 0) return;
+        CombatLogAdd(text, CombatLogKind.Status, colour);
+        if (FriendsPageVisible) SetFriendStatus(text, colour == FriendRefusalColour);
+    }
+
+    private void OnFriendLoggedIn(string name)
+    {
+        FriendLine(ItemData.Text(FriendTexts.LoggedInText, "%s has logged in.").Replace("%s", name), FriendNoticeColour);
+        Net.I.SendFriendListRequest();
+    }
+
+    private void OnFriendRequest(string requester)
+    {
+        bool answered = false;
+        var ask = Notice.Confirm(this,
+            ItemData.Text(FriendTexts.RequestAskText, "[%s] sent a friend request. Will you accept?").Replace("%s", requester),
+            "OK", "Cancel",
+            () => { answered = true; Net.I.SendFriendAnswer(requester, true); },
+            () => { answered = true; Net.I.SendFriendAnswer(requester, false); },
+            title: "Friends");
+        GetTree().CreateTimer(FriendTexts.RequestSeconds).Timeout += () =>
+        {
+            if (answered || !IsInstanceValid(ask)) return;
+            answered = true;
+            Net.I.SendFriendAnswer(requester, false);
+            ask.QueueFree();
+        };
+    }
+
+    private void OnFriendRequestResult(byte code)
+    {
+        if (FriendTexts.RequestResultText(code) is { } textId)
+            FriendLine(ItemData.Text(textId, ""), FriendRefusalColour);
     }
 
     private void BuildFriendsPanel()
@@ -85,7 +137,7 @@ public partial class World
         string name = _friendAddInput.Text.Trim();
         if (name.Length == 0) return;
         if (name == (Net.I.LastEnter.Name ?? "")) { SetFriendStatus("You can't add yourself.", true); return; }
-        Net.I.SendFriendAdd(name);
+        RequestFriend(name);
         _friendAddInput.Clear();
     }
 
@@ -94,39 +146,30 @@ public partial class World
         _friends.Clear();
         _friends.AddRange(list);
         RefreshFriends();
+        RefreshFriendNameColours();
     }
 
     private void OnFriendAdd(byte code, string name, FriendEntry entry)
     {
-        string outcome;
-        if (code == 0)
+        if (code == FriendTexts.Succeeded && name.Length > 0)
         {
             _friends.RemoveAll(f => string.Equals(f.Name, name, System.StringComparison.OrdinalIgnoreCase));
-            _friends.Add(entry.Name.Length > 0 ? entry : new FriendEntry { Name = name, CharId = entry.CharId, Status = entry.Status });
+            _friends.Add(entry);
             RefreshFriends();
-            outcome = $"Added {name}.";
-            SetFriendStatus(outcome, false);
         }
-        else
-        {
-            outcome = code == 2 ? "Friend list is full." : $"Couldn't add {name}.";
-            SetFriendStatus(outcome, true);
-        }
-        if (!FriendsPageVisible) CombatNotice(outcome);
+        if (FriendTexts.AddResultText(code) is { } textId)
+            FriendLine(ItemData.Text(textId, ""), code == FriendTexts.Succeeded ? FriendNoticeColour : FriendRefusalColour);
     }
 
     private void OnFriendRemove(byte code, string name)
     {
-        if (code == 0)
+        if (code == FriendTexts.Succeeded)
         {
             _friends.RemoveAll(f => string.Equals(f.Name, name, System.StringComparison.OrdinalIgnoreCase));
             RefreshFriends();
-            SetFriendStatus($"Removed {name}.", false);
         }
-        else
-        {
-            SetFriendStatus(code == 2 ? $"{name} isn't on your list." : "Couldn't remove.", true);
-        }
+        if (FriendTexts.RemoveResultText(code) is { } textId)
+            FriendLine(ItemData.Text(textId, ""), FriendRefusalColour);
     }
 
     private void RefreshFriends()
@@ -142,6 +185,7 @@ public partial class World
         if (_friends.Count == 0)
             _friendsList.AddChild(UiTheme.Text("No friends yet. Add one above.", 12, UiTheme.TextLo, HorizontalAlignment.Center));
         _friendHeader.Text = $"Friends  ({online} online)";
+        PluginHost.Game.RaiseFriends();
     }
 
     private Control BuildFriendRow(FriendEntry f)
@@ -174,6 +218,17 @@ public partial class World
         whisper.AddThemeFontSizeOverride("font_size", 10);
         whisper.Pressed += () => OpenWhisperWith(n);
         hb.AddChild(whisper);
+
+        var party = new Button
+        {
+            Text = "Party",
+            TooltipText = f.InParty ? $"{f.Name} is already in a party" : $"Invite {f.Name} to your party",
+            FocusMode = Control.FocusModeEnum.None,
+            Disabled = !f.IsOnline || f.InParty,
+        };
+        party.AddThemeFontSizeOverride("font_size", 10);
+        party.Pressed += () => InvitePlayerToParty(n);
+        hb.AddChild(party);
 
         var rm = UiTheme.IconButton("×", $"Remove {f.Name}");
         rm.CustomMinimumSize = new Vector2(22, 22);

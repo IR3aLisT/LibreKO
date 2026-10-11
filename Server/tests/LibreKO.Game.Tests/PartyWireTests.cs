@@ -2,6 +2,7 @@
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol;
+using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
@@ -92,12 +93,128 @@ public class PartyWireTests : GameTestBase
         party.FindMember((short)member.CharacterId).Should().BeLessThan(0);
     }
 
-    private static UserSession CreateMember(SessionManager sessionManager, int characterId)
+    [Theory]
+    [InlineData((byte)ZoneId.RonarkLand, AccountNation.ElMorad, (byte)ZoneId.RonarkLand, PartyInviteError.OtherNation)]
+    [InlineData((byte)ZoneId.RonarkLand, AccountNation.Karus, (byte)ZoneId.Ardream, PartyInviteError.OtherZone)]
+    [InlineData((byte)ZoneId.Moradon, AccountNation.ElMorad, (byte)ZoneId.Moradon2, PartyInviteError.OtherZone)]
+    [InlineData((byte)ZoneId.ChaosDungeon, AccountNation.Karus, (byte)ZoneId.ChaosDungeon, PartyInviteError.RegionBarred)]
+    public async Task AnInviteIsRefusedWithTheRetailCode(byte zone, AccountNation targetNation, byte targetZone, short expected)
+    {
+        using var provider = CreateProvider(_ => { });
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var coordinator = provider.GetRequiredService<IPartyPacketCoordinator>();
+
+        var sent = new List<Packet>();
+        var leader = CreateMember(sessionManager, 510, sent);
+        leader.ZoneId = zone;
+        var target = CreateMember(sessionManager, 511);
+        target.Nation = targetNation;
+        target.ZoneId = targetZone;
+
+        await coordinator.HandleAsync(leader.Client, InviteOf(target));
+
+        RejectionsIn(sent).Should().Equal(expected);
+        target.PartyIndex.Should().Be(-1);
+    }
+
+    [Fact]
+    public async Task TheOtherNationCanBeInvitedInMoradon()
+    {
+        using var provider = CreateProvider(_ => { });
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var coordinator = provider.GetRequiredService<IPartyPacketCoordinator>();
+
+        var sent = new List<Packet>();
+        var leader = CreateMember(sessionManager, 512, sent);
+        var target = CreateMember(sessionManager, 513);
+        target.Nation = AccountNation.ElMorad;
+
+        await coordinator.HandleAsync(leader.Client, InviteOf(target));
+
+        RejectionsIn(sent).Should().BeEmpty();
+        target.PartyIndex.Should().Be(leader.PartyIndex);
+    }
+
+    [Fact]
+    public async Task ABoardInviteRelaysTheInviterToTheTargetWithoutJoiningThem()
+    {
+        using var provider = CreateProvider(_ => { });
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var board = provider.GetRequiredService<IPartyBbsPacketCoordinator>();
+
+        var inviter = CreateMember(sessionManager, 520);
+        var targetSent = new List<Packet>();
+        var target = CreateMember(sessionManager, 521, targetSent);
+
+        await board.HandleAsync(inviter.Client, BoardPacket(PartyBbsPacketWriter.SubInvite, target.Name));
+
+        target.PartyIndex.Should().Be(-1);
+        var prompt = targetSent.Single(p => p.GetOpcode() == (byte)GameOpcodes.GS_PARTY_BBS);
+        prompt.ResetOffset();
+        prompt.ReadByte().Should().Be(PartyBbsPacketWriter.ModeNormal);
+        prompt.ReadByte().Should().Be(PartyBbsPacketWriter.SubInvite);
+        prompt.ReadByte().Should().Be(PartyBbsPacketWriter.Succeeded);
+        prompt.ReadString().Should().Be(inviter.Name);
+        prompt.ReadByte().Should().Be(inviter.Level);
+        prompt.ReadShort().Should().Be((short)inviter.Class);
+    }
+
+    [Fact]
+    public async Task AcceptingABoardInviteFormsThePartyUnderTheInviter()
+    {
+        using var provider = CreateProvider(_ => { });
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var board = provider.GetRequiredService<IPartyBbsPacketCoordinator>();
+
+        var inviter = CreateMember(sessionManager, 522);
+        var target = CreateMember(sessionManager, 523);
+
+        await board.HandleAsync(target.Client, BoardPacket(PartyBbsPacketWriter.SubInviteAccept, inviter.Name));
+
+        inviter.IsPartyLeader.Should().BeTrue();
+        var party = sessionManager.Parties.GetParty(inviter.PartyIndex);
+        party.Should().NotBeNull();
+        party!.FindMember((short)target.CharacterId).Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    private static Packet BoardPacket(byte sub, string name)
+    {
+        var packet = new Packet(GameOpcodes.GS_PARTY_BBS);
+        packet.WriteByte(PartyBbsPacketWriter.ModeNormal);
+        packet.WriteByte(sub);
+        packet.WriteString(name);
+        return packet;
+    }
+
+    private static Packet InviteOf(UserSession target)
+    {
+        var invite = new Packet(GameOpcodes.GS_PARTY);
+        invite.WriteByte((byte)PartyRequest.Create);
+        invite.WriteString(target.Name);
+        return invite;
+    }
+
+    private static List<short> RejectionsIn(List<Packet> sent)
+    {
+        var codes = new List<short>();
+        foreach (var packet in sent)
+        {
+            packet.ResetOffset();
+            if (packet.ReadByte() != (byte)PartySubOpcode.MemberInfo || packet.RemainingBytes != 2) continue;
+            codes.Add(packet.ReadShort());
+        }
+        return codes;
+    }
+
+    private static UserSession CreateMember(SessionManager sessionManager, int characterId, List<Packet>? sent = null)
     {
         var client = Substitute.For<IClient>();
         client.Id.Returns(Guid.NewGuid());
         client.CharacterId.Returns(characterId);
-        client.SendPacket(Arg.Any<Packet>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        if (sent != null)
+            client.SendPacket(Arg.Do<Packet>(sent.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        else
+            client.SendPacket(Arg.Any<Packet>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var session = sessionManager.CreateSession(client, characterId, accountId: characterId + 100);
         session.Name = $"Player{characterId}";

@@ -44,4 +44,11 @@ public class SkillFxPlacementTests
         Assert.Equal(ImpactFxPlacement.None,
             SkillFxTarget.Placement(BonePart, SkillFxTarget.AreaImpactTarget, areaCast));
     }
+
+    [Fact]
+    public void AMeleeAreaSkillDrawsItsBoneEffectAtTheImpactPointAsRetailDoes()
+    {
+        Assert.Equal(ImpactFxPlacement.AtImpactPoint,
+            SkillFxTarget.Placement(BonePart, SkillFxTarget.AreaImpactTarget, areaCast: true, melee: true));
+    }
 }

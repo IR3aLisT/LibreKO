@@ -21,6 +21,10 @@ public sealed class EntitySnapshot
     public int CapeId;
     public int CapeR, CapeG, CapeB;
     public int KnightsId;
+    public int AllianceId;
+    public int ClanMarkVersion;
+    public byte ClanFlag;
+    public byte ClanFame;
     public string ClanName = "";
     public int ClanGrade;
     public int ClanRanking;
@@ -30,9 +34,16 @@ public sealed class EntitySnapshot
     public bool IsGm;
     public bool Invisible;
     public int Invisibility;
+    public int SoccerTeam;
     public bool HelmetHidden;
+    public bool CostumeHidden;
+    public bool GenieActive;
     public bool Sitting;
     public bool Dead;
+    public byte Appearance;
+    public int TransformSkill;
+    public byte NeedParty;
+    public bool PartyLeader;
     public bool Vacant;
     public bool Gathering;
     public bool GatherFishing;

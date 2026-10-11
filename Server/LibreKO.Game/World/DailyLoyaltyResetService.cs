@@ -11,6 +11,7 @@ public class DailyLoyaltyResetService(
     ILogger<DailyLoyaltyResetService> logger) : BackgroundService
 {
     private const int IntervalSeconds = 3600;
+    private const int ResetEveryHours = 12;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -19,6 +20,9 @@ public class DailyLoyaltyResetService(
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(IntervalSeconds));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            if (DateTime.Now.Hour % ResetEveryHours != 0)
+                continue;
+
             try
             {
                 await TickAsync();
@@ -35,7 +39,10 @@ public class DailyLoyaltyResetService(
         // 1. Persist online sessions' DailyLoyalty back to DB before bulk-reset, so the
         //    DB row reflects the current accumulated value at reset time.
         foreach (var session in sessionManager.GetAll())
+        {
             session.DailyLoyalty = 0;
+            session.DailyPremiumLoyalty = 0;
+        }
 
         // 2. Bulk reset all DB rows.
         using var scope = serviceProvider.CreateScope();

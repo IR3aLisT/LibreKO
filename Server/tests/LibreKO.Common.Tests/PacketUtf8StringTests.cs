@@ -21,13 +21,35 @@ public class PacketUtf8StringTests
         packet.ReadUtf8String().Should().Be(text);
     }
 
-    [Fact]
-    public void WriteString_StaysAsciiSoRetailLayoutsDoNotShift()
+    [Theory]
+    [InlineData("Dónde 😀")]
+    [InlineData("⚔️ gg 👍")]
+    public void WriteString_RoundTripsUtf8Text(string text)
     {
         var packet = new Packet(GameOpcodes.GS_SELECT_MSG);
-        packet.WriteString("Dónde");
+        packet.WriteString(text);
+        packet.WriteSByteString(text);
 
-        packet.ReadString().Should().Be("D?nde");
+        packet.ReadString().Should().Be(text);
+        packet.ReadSByteString().Should().Be(text);
+    }
+
+    [Fact]
+    public void WriteString_KeepsAsciiBytesUnchanged()
+    {
+        var packet = new Packet(GameOpcodes.GS_SELECT_MSG);
+        packet.WriteSByteString("Zeus");
+
+        packet.GetData().Should().Equal(4, (byte)'Z', (byte)'e', (byte)'u', (byte)'s');
+    }
+
+    [Fact]
+    public void WriteSByteString_CutsLongTextOnACharacterBoundary()
+    {
+        var packet = new Packet(GameOpcodes.GS_SELECT_MSG);
+        packet.WriteSByteString(string.Concat(Enumerable.Repeat("😀", 100)));
+
+        packet.ReadSByteString().Should().Be(string.Concat(Enumerable.Repeat("😀", 63)));
     }
 
     [Fact]

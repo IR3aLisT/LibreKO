@@ -1,5 +1,7 @@
 ﻿using System.Collections.Concurrent;
+using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Game.Protocol.Writers;
 
 namespace LibreKO.Game.World;
 
@@ -30,6 +32,7 @@ public class SessionManager
         var session = new UserSession(client, characterId, accountId);
         _sessionsByCharacterId[characterId] = session;
         _sessionsByClientId[client.Id] = session;
+        session.PartyLeaderChanged += BroadcastPartyLeader;
         return session;
     }
 
@@ -37,7 +40,13 @@ public class SessionManager
     {
         _sessionsByCharacterId[session.CharacterId] = session;
         _sessionsByClientId[session.Client.Id] = session;
+        session.PartyLeaderChanged -= BroadcastPartyLeader;
+        session.PartyLeaderChanged += BroadcastPartyLeader;
     }
+
+    private void BroadcastPartyLeader(UserSession session) =>
+        _ = Regions.SendToRegion(session, MovementPacketWriter.StateChange(
+            session.CharacterId, (byte)StateChangeType.PartyLeader, session.IsPartyLeader ? 1 : 0), excludeSender: false);
 
     public void RemoveSession(UserSession session)
     {

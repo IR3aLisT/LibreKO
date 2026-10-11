@@ -9,6 +9,9 @@ public sealed partial class Flinch : SkeletonModifier3D
     private bool[] _upper = System.Array.Empty<bool>();
     private int[] _bones = System.Array.Empty<int>();
     private Quaternion[] _target = System.Array.Empty<Quaternion>();
+    private int[] _tracks = System.Array.Empty<int>();
+    private Animation? _motion;
+    private double _length;
     private int _count;
     private int _clip = -1;
     private ulong _startMsec;
@@ -32,6 +35,7 @@ public sealed partial class Flinch : SkeletonModifier3D
             _upper = upper,
             _bones = new int[room],
             _target = new Quaternion[room],
+            _tracks = new int[room],
             _skeleton = skel,
             _holder = holder,
         };
@@ -47,9 +51,13 @@ public sealed partial class Flinch : SkeletonModifier3D
         {
             if (!Active || _ramp <= 0.0) return 0f;
             double t = Elapsed;
+            if (_motion != null)
+                return Mathf.Clamp((float)System.Math.Min(t / _ramp, (_length - t) / _ramp), 0f, 1f);
             return Mathf.Clamp((float)(t < _ramp ? t / _ramp : 2.0 - t / _ramp), 0f, 1f);
         }
     }
+
+    private double Duration => _motion != null ? _length : _ramp * 2.0;
 
     private double Elapsed => (Time.GetTicksMsec() - _startMsec) / 1000.0;
 
@@ -57,7 +65,27 @@ public sealed partial class Flinch : SkeletonModifier3D
     {
         if (Active && clipIndex == _clip) return;
         var skel = GodotObject.IsInstanceValid(_skeleton) ? _skeleton : null;
-        if (skel == null || clip.GetTrackCount() == 0) return;
+        if (skel == null || !BindTracks(skel, clip)) return;
+        for (int i = 0; i < _count; i++)
+            _target[i] = clip.RotationTrackInterpolate(_tracks[i], 0.0).Normalized();
+
+        _motion = null;
+        Start(skel, clipIndex, ActionClip.Hold(0.0, blend) * 0.5);
+    }
+
+    public void PlayThrough(int clipIndex, Animation clip, double blend)
+    {
+        var skel = GodotObject.IsInstanceValid(_skeleton) ? _skeleton : null;
+        if (skel == null || clip.Length <= 0f || !BindTracks(skel, clip)) return;
+
+        _motion = clip;
+        _length = clip.Length;
+        Start(skel, clipIndex, System.Math.Min(System.Math.Max(blend, ActionClip.DefaultBlend), _length * 0.5));
+    }
+
+    private bool BindTracks(Skeleton3D skel, Animation clip)
+    {
+        if (clip.GetTrackCount() == 0) return false;
         string node = clip.TrackGetPath(0).GetConcatenatedNames();
 
         _count = 0;
@@ -67,14 +95,17 @@ public sealed partial class Flinch : SkeletonModifier3D
             int track = clip.FindTrack($"{node}:{skel.GetBoneName(bone)}", Animation.TrackType.Rotation3D);
             if (track < 0) continue;
             _bones[_count] = bone;
-            _target[_count] = clip.RotationTrackInterpolate(track, 0.0).Normalized();
+            _tracks[_count] = track;
             _count++;
         }
-        if (_count == 0) return;
+        return _count > 0;
+    }
 
+    private void Start(Skeleton3D skel, int clipIndex, double ramp)
+    {
         _clip = clipIndex;
         _startMsec = Time.GetTicksMsec();
-        _ramp = ActionClip.Hold(0.0, blend) * 0.5;
+        _ramp = ramp;
         Active = true;
         Engage(skel);
     }
@@ -101,6 +132,7 @@ public sealed partial class Flinch : SkeletonModifier3D
     {
         Active = false;
         _clip = -1;
+        _motion = null;
         if (_parkQueued || !GodotObject.IsInstanceValid(_skeleton) || GetParent() != _skeleton) return;
         _parkQueued = true;
         Callable.From(Park).CallDeferred();
@@ -110,11 +142,15 @@ public sealed partial class Flinch : SkeletonModifier3D
     {
         using var scope = Perf.Measure(Perf.Section.Flinch);
         var skel = GetSkeleton();
-        if (skel == null || _count == 0 || _ramp <= 0.0 || Elapsed >= _ramp * 2.0) { Stop(); return; }
+        double t = Elapsed;
+        if (skel == null || _count == 0 || _ramp <= 0.0 || t >= Duration) { Stop(); return; }
         float w = Weight;
         if (w <= 0f) return;
         for (int i = 0; i < _count; i++)
-            skel.SetBonePoseRotation(_bones[i], skel.GetBonePoseRotation(_bones[i]).Slerp(_target[i], w));
+        {
+            var target = _motion != null ? _motion.RotationTrackInterpolate(_tracks[i], t).Normalized() : _target[i];
+            skel.SetBonePoseRotation(_bones[i], skel.GetBonePoseRotation(_bones[i]).Slerp(target, w));
+        }
     }
 
     private static bool[]? UpperMask(Skeleton3D skel, out int count)

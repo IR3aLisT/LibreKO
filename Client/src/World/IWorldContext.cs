@@ -12,5 +12,7 @@ internal interface IWorldContext
 
     float HeadHeight(int charId);
 
+    PlateStack? PlateOf(int charId);
+
     double Now { get; }
 }

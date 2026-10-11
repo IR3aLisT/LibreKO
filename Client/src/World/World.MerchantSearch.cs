@@ -36,6 +36,7 @@ public partial class World
         public HBoxContainer Root = null!;
         public Button Whisper = null!, Move = null!, View = null!;
         public TextureRect Icon = null!;
+        public UpgradeBadge Plus = null!;
         public Label Name = null!, Price = null!;
         public MerchantSearchRow? Row;
     }
@@ -188,6 +189,7 @@ public partial class World
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
         };
         line.Root.AddChild(line.Icon);
+        line.Plus = UpgradeBadge.Attach(line.Icon);
         line.Name = HudStyle.Label(13);
         line.Name.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         line.Name.ClipText = true;
@@ -301,6 +303,8 @@ public partial class World
             line.Row = shown ? visible[i] : null;
             line.Whisper.Visible = line.Move.Visible = line.View.Visible = shown;
             line.Icon.Texture = shown ? ItemData.Icon(visible[i].ItemId) : null;
+            if (shown) line.Plus.Set(visible[i].ItemId);
+            else line.Plus.Clear();
             line.Name.Text = shown ? visible[i].ItemName : "";
             if (shown) line.Name.AddThemeColorOverride("font_color", ItemGrade.Tint(visible[i].ItemId));
             line.Price.Text = shown ? visible[i].Price.ToString("n0") : "";

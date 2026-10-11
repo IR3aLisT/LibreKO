@@ -1,6 +1,7 @@
 ﻿using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
+using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
 
 namespace LibreKO.Game.Protocol;
@@ -213,22 +214,29 @@ public class ItemInventoryRuleService(IGameDataService gameDataService) : IItemI
         absoluteIndex = -1;
         affectsEquipment = false;
 
-        switch (type)
+        switch ((ItemRemoveSource)type)
         {
-            case 0:
-            case 2:
+            case ItemRemoveSource.Inventory:
+            case ItemRemoveSource.Bag:
                 if (position >= InventoryConstants.HaveMax)
                     return false;
 
                 absoluteIndex = InventoryConstants.InventoryStart + position;
                 return true;
 
-            case 1:
+            case ItemRemoveSource.Equipment:
                 if (position >= InventoryConstants.SlotMax)
                     return false;
 
                 absoluteIndex = position;
                 affectsEquipment = true;
+                return true;
+
+            case ItemRemoveSource.MagicBag:
+                if (position >= InventoryConstants.MagicBagTotal)
+                    return false;
+
+                absoluteIndex = InventoryConstants.MagicBagStart + position;
                 return true;
 
             default:

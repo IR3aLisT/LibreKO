@@ -38,3 +38,6 @@ assets/terrain/*/*
 /plugins/*
 !/plugins/PUT_PLUGINS_HERE.txt
 !/plugins/.gdignore
+override.cfg
+lootfilter.cfg
+*.csproj.old

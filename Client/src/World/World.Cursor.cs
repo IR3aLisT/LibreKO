@@ -23,6 +23,8 @@ public partial class World
     {
         GameCursor.SetNation(Net.I.LastEnter.Nation);
 
+        if (_continuanceSkill != 0 && Input.IsMouseButtonPressed(MouseButton.Right)) CancelContinuance();
+
         _cursorHoverAccum += delta;
         if (_cursorHoverAccum >= CursorHoverInterval)
         {
@@ -36,6 +38,8 @@ public partial class World
     private GameCursorKind CurrentCursorKind()
     {
         if (_repairShown) return _repairInFlight ? GameCursorKind.RepairAlt : GameCursorKind.Repair;
+
+        if (_continuanceSkill != 0) return GameCursorKind.Held;
 
         if (_autoAttack || _cursorHoverAttackable) return GameCursorKind.Attack;
 

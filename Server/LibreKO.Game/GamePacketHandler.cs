@@ -25,9 +25,11 @@ public class GamePacketHandler(
     IWorldPacketCoordinator worldPacketCoordinator,
     IShoppingMallPacketCoordinator shoppingMallPacketCoordinator,
     ISavedMagicService savedMagicService,
+    IClanBattleService clanBattleService,
     IInGameOpcodeRouter opcodeRouter,
     ICollectionRaceService collectionRaceService,
     IMailService mailService,
+    IRespawnBlinkService respawnBlinkService,
     ILogger<GamePacketHandler> logger) : IPacketHandler
 {
     private const byte LoginFollowUpOpcode = 0xC0;
@@ -90,11 +92,17 @@ public class GamePacketHandler(
             if (opcode == GameOpcodes.GS_VERSION_CHECK)
             {
                 var settings = scope.ServiceProvider.GetRequiredService<IOptions<GameServerSettings>>();
-                await HandleVersionCheckAsync(client, settings);
+                await HandleVersionCheckAsync(client, packet, settings);
                 return;
             }
             if (opcode == GameOpcodes.GS_LOGIN)
             {
+                var cap = scope.ServiceProvider.GetRequiredService<IOptions<GameServerSettings>>().Value.Player.MaxOnline;
+                if (cap > 0 && scope.ServiceProvider.GetRequiredService<SessionManager>().OnlineCount >= cap)
+                {
+                    await client.SendPacket(SessionPacketWriter.ServerFull());
+                    return;
+                }
                 var preGameService = scope.ServiceProvider.GetRequiredService<IPreGameService>();
                 var response = await preGameService.LoginAsync(packet.ReadString(), packet.ReadString());
                 await HandleLoginAsync(client, response);
@@ -273,9 +281,11 @@ public class GamePacketHandler(
             if (session.AccountStatus != 0 || session.PremiumType != 0 || session.PremiumTime > 0)
                 await miscPacketCoordinator.SendPremiumInfoAsync(session);
             await worldPacketCoordinator.BroadcastUserInOutAsync(session, InOutType.Respawn);
+            await respawnBlinkService.StartAsync(session);
             await shoppingMallPacketCoordinator.SendBalanceAsync(session);
             await shoppingMallPacketCoordinator.SendUnreadAsync(session);
             await savedMagicService.RecastAsync(session);
+            await clanBattleService.RestoreAsync(session);
             await collectionRaceService.SyncPlayerAsync(session);
             await mailService.SendUnreadAsync(session);
 
@@ -290,8 +300,24 @@ public class GamePacketHandler(
             session.CharacterId, DeathPacketWriter.NoKiller));
     }
 
-    private static async Task HandleVersionCheckAsync(IClient client, IOptions<GameServerSettings> settings)
+    private static async Task HandleVersionCheckAsync(IClient client, Packet packet, IOptions<GameServerSettings> settings)
     {
+        string? clientVersion = null;
+        if (packet.RemainingBytes >= sizeof(ushort))
+            _ = packet.ReadUShort();
+        if (packet.RemainingBytes >= sizeof(ushort))
+            clientVersion = packet.ReadString();
+
+        if (!ClientVersionGate.Accepts(settings.Value.MinimumClientVersion, clientVersion))
+        {
+            await client.SendPacket(SessionPacketWriter.VersionCheck(
+                (short)settings.Value.Version, GameServerState.ClientOutOfDate));
+            client.ExpectedClose = true;
+            await Task.Delay(ClientVersionGate.CloseDelay);
+            client.Disconnect();
+            return;
+        }
+
         await client.SendPacket(SessionPacketWriter.VersionCheck((short)settings.Value.Version));
     }
 
@@ -303,6 +329,7 @@ public class GamePacketHandler(
 
         var chatType = packet.ReadByte();
         var message = packet.ReadString();
+        ushort roomId = chatType == (byte)ChatType.ChatRoom && packet.RemainingBytes >= 2 ? packet.ReadUShort() : (ushort)0;
 
         logger.LogDebug("Chat from {Name}: IsGM={IsGM}, message={Message}", session.Name, session.IsGM, message);
         if (message.StartsWith('+') && (session.IsGM || adminPacketCoordinator.IsOpenToEveryone(message)))
@@ -311,6 +338,6 @@ public class GamePacketHandler(
             await adminPacketCoordinator.HandleGmCommandAsync(session, message);
             return;
         }
-        await chatPacketCoordinator.HandleAsync(session, chatType, message);
+        await chatPacketCoordinator.HandleAsync(session, chatType, message, roomId);
     }
 }

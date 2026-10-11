@@ -94,7 +94,7 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
         var tex0 = Fx.FirstTexture(p);
         if (tex0 == null) return null;
         bool flat = p.ContainsKey("flat") && p["flat"].AsBool();
-        var rv = Fx.ReadVec3(p, "rotVel");
+        var rv = Fx.ReadSpinRate(p);
         float spin = flat ? rv.Y : rv.X;
         bool autoSpin = p.ContainsKey("autoSpin") && p["autoSpin"].AsBool();
         if (autoSpin && Mathf.Abs(spin) < 1e-4f) spin = Mathf.DegToRad(50f);
@@ -315,6 +315,7 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
             Transform = local;
         }
 
+        if (FlipbookEnded(t)) a = 0f;
         var want = new Color(1f, 1f, 1f, a);
         if (want != _lastColor) { _mat.SetShaderParameter(FxShading.TintParam, want); _lastColor = want; }
 
@@ -336,6 +337,9 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
             if (_frames[f] is { } texture) _mat.SetShaderParameter(FxShading.TextureParam, texture);
         }
     }
+
+    private bool FlipbookEnded(float t) =>
+        _life > 0f && !_wrap && _texFps > 0f && (int)(_texFps * t) >= Mathf.Max(_frameCount, _atlasFrames);
 
     private int AtlasCell(float t)
     {
@@ -380,7 +384,7 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
         }
         else if (_layers > 1 && _texFps > 0f)
             frame = FrameIndex(t);
-        if (!visible || a <= 0f || keep <= 0f) return;
+        if (!visible || a <= 0f || keep <= 0f || FlipbookEnded(t)) return;
         _batcher ??= FxBoardBatch.For(this);
         if (_batcher == null) return;
         if (_batch == null || _batch.Pruned) _batch = _batcher.Resolve(_key, _sequence!);

@@ -65,6 +65,21 @@ public class ItemCombineMaterialSeed : SnapshotJsonSeed<ItemCombineMaterialData>
     protected override string JsonFileName => "ItemCombineMaterials.json";
 }
 
+public class ItemSmashClassSeed : SnapshotJsonSeed<ItemSmashClassData>
+{
+    protected override string JsonFileName => "ItemSmashClasses.json";
+}
+
+public class ItemSmashRewardSeed : SnapshotJsonSeed<ItemSmashRewardData>
+{
+    protected override string JsonFileName => "ItemSmashRewards.json";
+}
+
+public class ItemGradeBonusSeed : SnapshotJsonSeed<ItemGradeBonusData>
+{
+    protected override string JsonFileName => "ItemGradeBonuses.json";
+}
+
 public class CoefficientSeed : SnapshotJsonSeed<CoefficientData>
 {
     protected override string JsonFileName => "Coefficients.json";
@@ -381,6 +396,11 @@ public class MonsterSummonSeed : SnapshotJsonSeed<MonsterSummonData>
 public class ZoneInfoSeed : SnapshotJsonSeed<ZoneInfoData>
 {
     protected override string JsonFileName => "ZoneInfos.json";
+}
+
+public class MapObjectSeed : SnapshotJsonSeed<MapObjectData>
+{
+    protected override string JsonFileName => "MapObjects.json";
 }
 
 public class GameEventSeed : SnapshotJsonSeed<GameEventData>

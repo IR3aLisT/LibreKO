@@ -11,6 +11,7 @@ internal sealed partial class ChatSystem
 {
     private const int StoreMax = 500;
     private const int PublishedMax = 200;
+    private const int TrimBlock = 60;
     private const float BottomSlack = 4f;
     private const float PageScrollShare = 0.85f;
     private const int LineSpacing = 2;
@@ -20,6 +21,7 @@ internal sealed partial class ChatSystem
     private const string PlayerMeta = "p:";
     private const string ItemMeta = "i:";
     private const string TimestampColour = "8d939b";
+    private const string RankSymbolSize = "48x12";
     private static readonly Color ShadowColour = new(0, 0, 0, 0.85f);
 
     private readonly record struct ChatEntry(
@@ -27,6 +29,8 @@ internal sealed partial class ChatSystem
     {
         public long Seq { get; init; }
         public DateTime Time { get; init; }
+        public int Rank { get; init; } = NationRankAura.Unranked;
+        public bool Masked { get; init; }
 
         public static ChatEntry Raw(ChatCategory category, string bbcode) =>
             new(category, 0, WhisperSide.None, "", 0, false, "", bbcode);
@@ -46,6 +50,11 @@ internal sealed partial class ChatSystem
     private long _seq;
     private int _missed;
     private int _shown;
+    private readonly StringBuilder _pendingLog = new();
+    private int _pendingShown;
+    private int _pendingTrim;
+    private bool _logFlushQueued;
+    private bool _pendingAtBottom;
     private Button _jumpPill = null!;
     private Control _logBody = null!;
     private int _hoverItem;
@@ -146,9 +155,9 @@ internal sealed partial class ChatSystem
         _jumpPill.Visible = false;
     }
 
-    private void NoteMissed()
+    private void NoteMissed(int count)
     {
-        _missed++;
+        _missed += count;
         _jumpPill.Text = _missed == 1 ? "1 new message ↓" : $"{_missed} new messages ↓";
         _jumpPill.Visible = true;
     }
@@ -164,7 +173,6 @@ internal sealed partial class ChatSystem
     private void AddEntry(ChatEntry entry)
     {
         entry = entry with { Seq = ++_seq, Time = DateTime.Now };
-        bool atBottom = AtBottom();
         string bbcode = Render(entry);
         Publish(bbcode);
 
@@ -175,20 +183,59 @@ internal sealed partial class ChatSystem
             _store.RemoveFirst();
             if ((dropped.Category & CurrentFilter) != 0 && _shown > 0)
             {
-                for (int lines = Paragraphs(Render(dropped)); lines > 0; lines--)
-                    _scroll.RemoveParagraph(0, true);
+                _pendingTrim += Paragraphs(Render(dropped));
                 _shown--;
             }
         }
 
         if ((entry.Category & CurrentFilter) != 0)
         {
-            if (_shown > 0) _scroll.AppendText("\n");
-            _scroll.AppendText(bbcode);
+            if (_shown > 0) _pendingLog.Append('\n');
+            if (_pendingShown == 0) _pendingAtBottom = !_scroll.IsInsideTree() || AtBottom();
+            _pendingLog.Append(bbcode);
             _shown++;
-            if (!atBottom) NoteMissed();
+            _pendingShown++;
+            QueueLogFlush();
         }
         MarkUnread(entry.Category);
+    }
+
+    private void QueueLogFlush()
+    {
+        if (_logFlushQueued) return;
+        _logFlushQueued = true;
+        Callable.From(FlushLog).CallDeferred();
+    }
+
+    private void FlushLog()
+    {
+        _logFlushQueued = false;
+        if (!GodotObject.IsInstanceValid(_scroll)) return;
+        if (_pendingTrim >= TrimBlock && !TrimLog(_pendingTrim))
+        {
+            RebuildLog();
+            return;
+        }
+        if (_pendingLog.Length == 0) return;
+        _scroll.AppendText(_pendingLog.ToString());
+        if (!_pendingAtBottom) NoteMissed(_pendingShown);
+        ClearPendingLog(keepTrim: true);
+    }
+
+    private bool TrimLog(int paragraphs)
+    {
+        if (paragraphs >= _scroll.GetParagraphCount()) return false;
+        for (; paragraphs > 0; paragraphs--)
+            if (!_scroll.RemoveParagraph(0, true)) return false;
+        _pendingTrim = 0;
+        return true;
+    }
+
+    private void ClearPendingLog(bool keepTrim)
+    {
+        _pendingLog.Clear();
+        _pendingShown = 0;
+        if (!keepTrim) _pendingTrim = 0;
     }
 
     private void Publish(string bbcode)
@@ -210,6 +257,7 @@ internal sealed partial class ChatSystem
     {
         var filter = CurrentFilter;
         var text = new StringBuilder();
+        ClearPendingLog(keepTrim: false);
         _shown = 0;
         foreach (var entry in _store)
         {
@@ -250,7 +298,8 @@ internal sealed partial class ChatSystem
             _ => ChanTag(entry.Type),
         };
         if (tag.Length > 0) line.Append($"[color=#{hex}][lb]{tag}[rb][/color] ");
-        line.Append(NameLink(entry.Name, hex));
+        if (RankSymbol.TexturePath(entry.Rank) is { } symbol) line.Append($"[img={RankSymbolSize}]{symbol}[/img] ");
+        line.Append(entry.Masked ? $"[color=#{hex}]{BbCode.Esc(entry.Name)}[/color]" : NameLink(entry.Name, hex));
         line.Append($"[color=#{hex}]: [/color]");
         line.Append(RenderText(entry.Text, hex));
         return line.ToString();
@@ -262,14 +311,17 @@ internal sealed partial class ChatSystem
         return name.IndexOfAny(new[] { '[', ']' }) >= 0 ? coloured : $"[url={PlayerMeta}{name}]{coloured}[/url]";
     }
 
-    private static string RenderText(string text, string colour)
+    internal static string RenderText(string text, string colour)
     {
         var line = new StringBuilder();
         foreach (var segment in ChatItemLink.Split(text))
         {
             if (segment.ItemId == 0)
             {
-                line.Append($"[color=#{colour}]{BbCode.Esc(segment.Text)}[/color]");
+                foreach (var part in Emoticons.Split(segment.Text))
+                    line.Append(part.Emoticon > 0 && Emoticons.Get(part.Emoticon) is { } emoticon
+                        ? EmoticonPicker.InlineImage(emoticon)
+                        : $"[color=#{colour}]{BbCode.Esc(part.Text)}[/color]");
                 continue;
             }
             if (ItemData.Get(segment.ItemId) == null) continue;
@@ -288,7 +340,7 @@ internal sealed partial class ChatSystem
         return plain.ToString();
     }
 
-    private static int ItemOf(Variant meta)
+    internal static int ItemOf(Variant meta)
     {
         string text = meta.AsString();
         return text.StartsWith(ItemMeta, StringComparison.Ordinal)
@@ -334,6 +386,7 @@ internal sealed partial class ChatSystem
     {
         _store.Clear();
         _scroll.Clear();
+        ClearPendingLog(keepTrim: false);
         _shown = 0;
         HideJump();
     }

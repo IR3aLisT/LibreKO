@@ -22,4 +22,5 @@ public struct MyInfo
     public int MarkVersion;
     public int KnightsRank;
     public int PersonalRank;
+    public bool IsKing;
 }

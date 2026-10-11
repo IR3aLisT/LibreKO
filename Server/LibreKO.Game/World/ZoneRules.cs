@@ -56,7 +56,7 @@ public static class ZoneRules
         [(byte)ZoneId.IsiloonArena] = new(ZoneAbilityType.PvpNeutralNpcs, Instance),
         [(byte)ZoneId.FelankorArena] = new(ZoneAbilityType.PvpNeutralNpcs, Instance),
 
-        [(byte)ZoneId.Arena] = new(ZoneAbilityType.Neutral, Instance | ZoneFlags.AttackSameNation),
+        [(byte)ZoneId.Arena] = new(ZoneAbilityType.FreeForAll, Instance | ZoneFlags.AttackSameNation),
         [(byte)ZoneId.CaitharosArena] = new(ZoneAbilityType.CaitharosArena, Instance),
         [(byte)ZoneId.DrakiTower] = new(ZoneAbilityType.SiegeType2,
             Instance | ZoneFlags.AttackSameNation),
@@ -107,6 +107,17 @@ public static class ZoneRules
     ];
 
     public static bool AllowsPets(byte zoneId) => !PetsBarred.Contains(zoneId);
+
+    private static readonly HashSet<byte> MixedNationParty =
+    [
+        (byte)ZoneId.Moradon, (byte)ZoneId.Moradon2, (byte)ZoneId.Moradon3, (byte)ZoneId.Moradon4,
+        (byte)ZoneId.Moradon5, (byte)ZoneId.DelosCastellan, (byte)ZoneId.Arena, (byte)ZoneId.OrcArena,
+        (byte)ZoneId.BloodDonArena, (byte)ZoneId.GoblinArena, (byte)ZoneId.ForgottenTemple,
+        (byte)ZoneId.MonsterStone1, (byte)ZoneId.MonsterStone2, (byte)ZoneId.MonsterStone3,
+        (byte)ZoneId.UnderCastle, (byte)ZoneId.DrakiTower,
+    ];
+
+    public static bool AllowsMixedNationParty(byte zoneId) => MixedNationParty.Contains(zoneId);
 
     public static bool BarsReborn(byte zoneId) => zoneId is (byte)ZoneId.Ardream or (byte)ZoneId.RonarkLandBase;
 

@@ -25,7 +25,7 @@ public sealed class GenieSystemPacketWriter
     public const byte Inactive = 0;
     public const byte Active = 1;
 
-    public const int OptionBytes = 100;
+    public const int OptionBytes = 128;
 
     public static Packet HammerResult(bool repaired)
     {
@@ -72,10 +72,10 @@ public sealed class GenieSystemPacketWriter
         return packet;
     }
 
-    public static Packet ActivationState(ushort characterId, bool active)
+    public static Packet ActivationState(int characterId, bool active)
     {
         var packet = Info(Activated);
-        packet.WriteUShort(characterId);
+        packet.WriteInt(characterId);
         packet.WriteByte(active ? Active : Inactive);
         return packet;
     }

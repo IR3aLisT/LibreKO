@@ -56,7 +56,7 @@ public sealed class ItemMovePacketWriter
     public static ItemMovePacketWriter ArrangeRefused() =>
         new() { Command = (byte)ItemMoveSubOpcode.ArrangeInventory, SubCommand = (byte)ArrangeResult.Failed };
 
-    public ItemMovePacketWriter AddInventorySlot(int itemId, short durability, ushort count, byte flag)
+    public ItemMovePacketWriter AddInventorySlot(int itemId, short durability, ushort count, byte flag, long expiresAt = 0)
     {
         _inventory.Add(new InventoryEntry(
             itemId,
@@ -65,7 +65,7 @@ public sealed class ItemMovePacketWriter
             flag,
             RentalMinutes: 0,
             Serial: 0,
-            ExpiresAt: 0));
+            ExpiresAt: ItemRecordWriter.ExpiryOnWire(expiresAt)));
 
         return this;
     }

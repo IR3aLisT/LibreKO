@@ -10,6 +10,7 @@ namespace LibreKO;
 public partial class World
 {
     private const int MailBodyWidth = 440;
+    private const int MailDeleteConfirmText = 1732;
     private const int MailListHeight = 240;
     private const int MailListHeightMax = 760;
     private const float MailListScreenShare = 0.6f;
@@ -28,6 +29,8 @@ public partial class World
     private ScrollContainer _mailListScroll = null!;
     private Label _mailUnreadPill = null!;
     private CheckButton _mailUnreadOnly = null!;
+    private CheckButton _mailParcelsOnly = null!;
+    private Label _mailFill = null!;
     private Label _mailStatus = null!;
     private HudWindow _mailReadWindow = null!;
     private Label _mailReadSubject = null!;
@@ -104,6 +107,15 @@ public partial class World
             Callable.From(_mailWindow.ResetSize).CallDeferred();
         };
         head.AddChild(_mailUnreadOnly);
+        _mailParcelsOnly = new CheckButton { Text = "Parcels", FocusMode = Control.FocusModeEnum.None,
+            TooltipText = "Only letters with attachments waiting to be claimed" };
+        _mailParcelsOnly.AddThemeFontSizeOverride("font_size", 12);
+        _mailParcelsOnly.Toggled += _ =>
+        {
+            RenderMailList();
+            Callable.From(_mailWindow.ResetSize).CallDeferred();
+        };
+        head.AddChild(_mailParcelsOnly);
         var spacer = new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         head.AddChild(spacer);
         _mailUnreadPill = UiTheme.Text("", 12, UiTheme.GoldBright);
@@ -120,9 +132,16 @@ public partial class World
         _mailList.AddThemeConstantOverride("separation", 3);
         scroll.AddChild(_mailList);
 
+        var foot = new HBoxContainer();
+        foot.AddThemeConstantOverride("separation", 6);
+        body.AddChild(foot);
         _mailStatus = UiTheme.Text("", 12, UiTheme.TextLo);
         _mailStatus.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        body.AddChild(_mailStatus);
+        _mailStatus.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        foot.AddChild(_mailStatus);
+        _mailFill = UiTheme.Text("", 11, UiTheme.TextDim, HorizontalAlignment.Right);
+        _mailFill.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
+        foot.AddChild(_mailFill);
 
         BuildMailReadWindow();
     }
@@ -167,8 +186,18 @@ public partial class World
         _mailClaimBtn.Pressed += () => { if (_mailSelectedId > 0) Net.I.SendMailClaim(_mailSelectedId); };
         actions.AddChild(_mailClaimBtn);
         _mailDeleteBtn = UiTheme.SmallButton("Delete", "Delete this mail");
-        _mailDeleteBtn.Pressed += () => { if (_mailSelectedId > 0) Net.I.SendMailDelete(_mailSelectedId); };
+        _mailDeleteBtn.Pressed += AskMailDelete;
         actions.AddChild(_mailDeleteBtn);
+    }
+
+    private void AskMailDelete()
+    {
+        int mailId = _mailSelectedId;
+        if (mailId <= 0) return;
+        string subject = _mails.FirstOrDefault(m => m.Id == mailId)?.Subject ?? "";
+        string question = ItemData.Text(MailDeleteConfirmText, "Are you sure you want to delete?");
+        Notice.Confirm(this, subject.Length > 0 ? $"{subject}\n{question}" : question, "Delete", "Cancel",
+            () => { if (_mailSelectedId == mailId) Net.I.SendMailDelete(mailId); });
     }
 
     private void ToggleMail()
@@ -229,6 +258,10 @@ public partial class World
     private void RenderMailList()
     {
         ClearChildren(_mailList);
+        int parcels = MailView.Parcels(_mails);
+        _mailParcelsOnly.Text = parcels > 0 ? $"Parcels ({parcels})" : "Parcels";
+        _mailFill.Text = MailView.Fill(_mails.Count);
+        _mailFill.AddThemeColorOverride("font_color", MailView.Full(_mails.Count) ? UiTheme.Warning : UiTheme.TextDim);
         if (_mails.Count == 0)
         {
             _mailList.AddChild(UiTheme.Text("Your mailbox is empty.", 12, UiTheme.TextLo, HorizontalAlignment.Center));
@@ -236,15 +269,16 @@ public partial class World
         }
 
         bool unreadOnly = _mailUnreadOnly.ButtonPressed;
+        bool parcelsOnly = _mailParcelsOnly.ButtonPressed;
         int shown = 0;
         foreach (var mail in _mails)
         {
-            if (unreadOnly && mail.Read) continue;
+            if (!MailView.Shows(mail, unreadOnly, parcelsOnly)) continue;
             _mailList.AddChild(BuildMailRow(mail));
             shown++;
         }
         if (shown == 0)
-            _mailList.AddChild(UiTheme.Text("No unread mail.", 12, UiTheme.TextLo, HorizontalAlignment.Center));
+            _mailList.AddChild(UiTheme.Text(MailView.EmptyText(unreadOnly, parcelsOnly), 12, UiTheme.TextLo, HorizontalAlignment.Center));
     }
 
     private Control BuildMailRow(MailEntry mail)

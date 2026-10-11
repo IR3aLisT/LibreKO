@@ -19,6 +19,8 @@ public partial class World
     private float _camYaw;
     private float _camPitch = 0.5f;
     private float _camDist = MaxDist;
+    private float _camZoomGoal = MaxDist;
+    private const float CamZoomEase = 12f;
     private bool _testCameraFrozen;
     private bool _halfTurnActive;
     private float _halfTurnElapsed;
@@ -92,6 +94,7 @@ public partial class World
             }
         }
 
+        _camDist = Mathf.Lerp(_camDist, _camZoomGoal, 1f - Mathf.Exp(-CamZoomEase * (float)delta));
         float aimT = Mathf.Clamp((_camDist - MinDist) / (MaxDist - MinDist), 0f, 1f);
         float aimHeight = Mathf.Lerp(CamMinAimHeight, CamAimHeight, aimT);
         var target = _self.Position + Vector3.Up * aimHeight;
@@ -103,8 +106,9 @@ public partial class World
         _camDistClear = clear < _camDistClear
             ? clear
             : Mathf.MoveToward(_camDistClear, clear, CamReturnSpeed * (float)delta);
-        _camera.Position = EyeAboveTerrain(target + dir * _camDistClear);
-        _camera.LookAt(target, Vector3.Up);
+        float shake = CameraShakeTick(delta);
+        _camera.Position = EyeAboveTerrain(target + dir * _camDistClear) + Vector3.Up * shake;
+        _camera.LookAt(target + Vector3.Up * (shake * CameraShake.LookFactor), Vector3.Up);
     }
 
     private float TerrainClearDist(Vector3 target, Vector3 dir)

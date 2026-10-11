@@ -143,8 +143,13 @@ public partial class Cape : MeshInstance3D
         var format = (RenderingServer.ArrayFormat)_mesh.SurfaceGetFormat(0);
         _normalOffset = (int)RenderingServer.MeshSurfaceGetFormatOffset(format, surfaceCount, (int)Mesh.ArrayType.Normal);
         _normalStride = (int)RenderingServer.MeshSurfaceGetFormatNormalTangentStride(format, surfaceCount);
-        using var surface = RenderingServer.MeshGetSurface(_mesh.GetRid(), 0);
-        _vertexBytes = surface["vertex_data"].AsByteArray();
+        var templateKey = ((long)format, surfaceCount);
+        if (!VertexTemplates.TryGetValue(templateKey, out var template))
+        {
+            using var surface = RenderingServer.MeshGetSurface(_mesh.GetRid(), 0);
+            VertexTemplates[templateKey] = template = surface["vertex_data"].AsByteArray();
+        }
+        _vertexBytes = (byte[])template.Clone();
         _mat ??= new ShaderMaterial { Shader = ClothShader };
         MaterialOverride = _mat;
         float extent = length + hemWidth * 0.5f + 0.5f;
@@ -361,11 +366,11 @@ public partial class Cape : MeshInstance3D
                     var toSkel = _skel.GlobalTransform.AffineInverse() * mi.GlobalTransform;
                     for (int s = 0; s < mesh.GetSurfaceCount(); s++)
                     {
-                        using var arr = mesh.SurfaceGetArrays(s);
-                        if (arr.Count <= (int)Mesh.ArrayType.Vertex) continue;
-                        var verts = arr[(int)Mesh.ArrayType.Vertex].AsVector3Array();
-                        var bones = arr[(int)Mesh.ArrayType.Bones].AsInt32Array();
-                        var weights = arr[(int)Mesh.ArrayType.Weights].AsFloat32Array();
+                        var cached = MeshArraysCache.Get(mesh, s);
+                        if (cached.Vertices.Length == 0) continue;
+                        var verts = cached.Vertices;
+                        var bones = cached.Bones;
+                        var weights = cached.Weights;
                         int influences = verts.Length > 0 ? bones.Length / verts.Length : 0;
                         int stride = Mathf.Max(1, verts.Length / 4000);
                         for (int v = 0; v < verts.Length; v += stride)

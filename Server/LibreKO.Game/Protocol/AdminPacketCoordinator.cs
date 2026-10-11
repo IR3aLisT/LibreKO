@@ -47,11 +47,17 @@ public class AdminPacketCoordinator(
     IJuraidMountainService juraidMountainService,
     IUnderTheCastleService underTheCastleService,
     IForgottenTempleService forgottenTempleService,
+    IKrowazService krowazService,
     IItemGrantService itemGrantService,
+    ICastleSiegeService castleSiegeService,
+    IVanguardService vanguardService,
+    IClanMatchService clanMatchService,
     ILogger<AdminPacketCoordinator> logger) : IAdminPacketCoordinator
 {
     private const int MaxGmSummonCount = 50;
+    public const string GmNoticeFrame = "#### NOTICE : {0} ####";
     private const string ItemUsage = "+item <itemId> [count] | <name> - Give yourself an item, or search items by name";
+    private const string TerrainUsage = "+terrain <0-4> - Show yourself a terrain effect: 0 none, 1 hay, 2 swamp, 3 water, 4 slowing swamp";
 
     public async Task HandleOperatorAsync(IClient client, Packet packet)
     {
@@ -102,6 +108,23 @@ public class AdminPacketCoordinator(
         }
     }
 
+    private async Task HandleKrowazCommandAsync(UserSession session, string arg)
+    {
+        switch (arg.Trim().ToLowerInvariant())
+        {
+            case "open":
+                await krowazService.OpenAsync();
+                break;
+            case "close":
+                await krowazService.CloseAsync();
+                break;
+        }
+
+        await SendNoticeAsync(session, krowazService.IsOpen
+            ? $"Krowaz's Dominion is open for {krowazService.RemainingSeconds / 60} more minutes. Usage: +krowaz open|close"
+            : "Krowaz's Dominion is closed. Usage: +krowaz open|close");
+    }
+
     public bool IsOpenToEveryone(string command) =>
         CommandWord(command) == "setlevel" && settings.Value.PublicDemo.GrantSetLevelToEveryone;
 
@@ -148,7 +171,7 @@ public class AdminPacketCoordinator(
 
             case "notice":
                 if (!string.IsNullOrEmpty(arg))
-                    await BroadcastNoticeAsync(arg);
+                    await BroadcastNoticeAsync(string.Format(GmNoticeFrame, arg));
                 break;
 
             case "cropen":
@@ -221,8 +244,24 @@ public class AdminPacketCoordinator(
                 await HandleWeatherAsync(session, arg);
                 break;
 
+            case "terrain":
+                await HandleTerrainAsync(session, arg);
+                break;
+
             case "sealcode":
                 await HandleSealCodeAsync(session, arg);
+                break;
+
+            case "siegewar":
+                await HandleSiegeWarAsync(session, arg);
+                break;
+
+            case "wanted":
+                await HandleWantedAsync(session, arg);
+                break;
+
+            case "clanmatch":
+                await HandleClanMatchAsync(session, arg);
                 break;
 
             case "exp":
@@ -294,6 +333,11 @@ public class AdminPacketCoordinator(
 
             case "chaos":
                 await HandleTempleEventCommandAsync(session, TempleEvent.Chaos, ZoneId.ChaosDungeon, "Chaos Dungeon", arg);
+                break;
+
+            case "krowaz":
+            case "kro":
+                await HandleKrowazCommandAsync(session, arg);
                 break;
 
             case "utc":
@@ -440,7 +484,7 @@ public class AdminPacketCoordinator(
 
                         if (isEligible)
                         {
-                            var confirmPkt = EventPacketWriter.TempleEvent((byte)TempleSubOpcode.TempleEventJoin, 1, (short)ZoneId.ForgottenTemple);
+                            var confirmPkt = EventPacketWriter.TempleEvent((byte)TempleSubOpcode.TempleEventJoin, (byte)TempleJoinResult.Joined, (short)ZoneId.ForgottenTemple);
                             await session.Client.SendPacket(confirmPkt);
                             await SendNoticeAsync(session, $"[Forgotten Temple] Tier {(isLow ? 1 : 2)} ({min}-{max}) registration open ({formattedTime}). Pop-up modal broadcasted! You will teleport automatically.");
                         }
@@ -467,36 +511,7 @@ public class AdminPacketCoordinator(
 
             case "?":
             case "help":
-                await SendNoticeAsync(session, "GM Commands:");
-                await SendNoticeAsync(session, ItemUsage);
-                await SendNoticeAsync(session, "+monsummon <npcId> [count] - Spawn monsters here once; they never respawn");
-                await SendNoticeAsync(session, "+gold <amount> - Give/take gold");
-                await SendNoticeAsync(session, "+kc <name> <amount> - Give/take Knight Cash");
-                await SendNoticeAsync(session,
-                    "+setlevel <1-83> - Set level; resets stats + mastery, clears the skill bar");
-                await SendNoticeAsync(session, "+hp - Restore HP/MP");
-                await SendNoticeAsync(session, "+summon <name|pattern> - Bring a player, or everyone whose name matches (* = any text), to you");
-                await SendNoticeAsync(session, BotsUsage);
-                await SendNoticeAsync(session, "+gm - Toggle GM mode: the GM aura, one-hit kills, 1 damage taken");
-                await SendNoticeAsync(session, "+exp <amount> - Give experience");
-                await SendNoticeAsync(session, "+notice <text> - Server notice");
-                await SendNoticeAsync(session, "+time <hh[:mm]> - Set the game time for everyone");
-                await SendNoticeAsync(session, "+weather <clear|rain|snow|leaves> [0-100] - Set the weather for everyone");
-                await SendNoticeAsync(session, "+sealcode <8 digits> - Set this account's item seal security code");
-                await SendNoticeAsync(session, "+online - Show online count");
-                await SendNoticeAsync(session, "+santa/+angel/+offsanta - Santa/Angel");
-                await SendNoticeAsync(session, "+waropen <zoneId>/+warclose/+snowwar");
-                await SendNoticeAsync(session, "+bifroststart [min] / +bifrostclose - Bifrost event");
-                await SendNoticeAsync(session, "+jr [sec|min] / +jrcancel / +bdw [sec] / +chaos [sec] / +templecancel - Temple Events");
-                await SendNoticeAsync(session, "+cropen <eventIndex> / +crclose / +crstatus - Collection Race");
-                await SendNoticeAsync(session, "+lottery start [id] / +lottery close / +lottery cancel - Lottery Event");
-                await SendNoticeAsync(session, "+savemerchantbots - Save active merchant bots to DB");
-                await SendNoticeAsync(session, "+loadbotmerchant - Load and spawn merchant bots from DB");
-                await SendNoticeAsync(session, "+clearmerchantbots - Clear all active merchant bots");
-                await SendNoticeAsync(session, "+clear [characterName] - Clear inventory (preserves equipped gear)");
-                await SendNoticeAsync(session, "+zone | +zone <id> - List zones / teleport to zone home");
-                await SendNoticeAsync(session, "+reloadscripts - Reload quest scripts without restart");
-                await SendNoticeAsync(session, "+reseed - Seed JSON to DB + reload (drops/NPCs/items)");
+                await session.Client.SendPacket(AdminPanelPacketWriter.Commands(open: true, GmCommandCatalog.All));
                 break;
 
             case "savemerchantbots":
@@ -559,21 +574,21 @@ public class AdminPacketCoordinator(
 
             case "exp_add":
             case "expadd":
-                await HandleEventRateAsync(session, arg, "EXP", v => timeWeather.ExpEventAmount = v);
+                await HandleEventRateAsync(session, arg, "EXP", RateEvent.Exp, v => timeWeather.ExpEventAmount = v);
                 break;
 
             case "money_add":
             case "noahadd":
             case "coin_add":
-                await HandleEventRateAsync(session, arg, "Coin", v => timeWeather.CoinEventAmount = v);
+                await HandleEventRateAsync(session, arg, "Coin", RateEvent.Coin, v => timeWeather.CoinEventAmount = v);
                 break;
 
             case "np_add":
-                await HandleEventRateAsync(session, arg, "NP", v => timeWeather.NpEventAmount = v);
+                await HandleEventRateAsync(session, arg, "NP", RateEvent.Np, v => timeWeather.NpEventAmount = v);
                 break;
 
             case "drop_add":
-                await HandleEventRateAsync(session, arg, "Drop", v => timeWeather.DropEventAmount = v);
+                await HandleEventRateAsync(session, arg, "Drop", RateEvent.Drop, v => timeWeather.DropEventAmount = v);
                 break;
 
             case "goto":
@@ -638,6 +653,19 @@ public class AdminPacketCoordinator(
 
             case "rank":
                 await HandleRankAsync(session, arg);
+                break;
+
+            case "objturn":
+                await HandleObjectTurnAsync(session, arg);
+                break;
+
+            case "soccer":
+                await HandleSoccerAsync(session, arg);
+                break;
+
+            case "dailyrank":
+                await serviceProvider.GetRequiredService<IDailyRankService>().RecomputeAsync();
+                await SendNoticeAsync(session, "Daily rankings recomputed; today's changes stay against yesterday");
                 break;
 
             case "mon":
@@ -810,6 +838,22 @@ public class AdminPacketCoordinator(
         }
     }
 
+    private const byte ObjectTurnGrowing = 1;
+    private const byte ObjectTurnShrinking = 2;
+
+    private async Task HandleObjectTurnAsync(UserSession session, string arg)
+    {
+        var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        byte direction = ObjectTurnGrowing;
+        if (parts.Length < 2 || !int.TryParse(parts[0], out var npcId) || !short.TryParse(parts[1], out var degrees)
+            || (parts.Length > 2 && (!byte.TryParse(parts[2], out direction) || direction is not (ObjectTurnGrowing or ObjectTurnShrinking))))
+        {
+            await SendNoticeAsync(session, "Usage: +objturn <npcId> <degrees> [1|2]");
+            return;
+        }
+        await sessionManager.Regions.SendToRegion(session, MiscPacketWriter.ObjectTurn(direction, npcId, degrees), excludeSender: false);
+    }
+
     private async Task HandleRankAsync(UserSession session, string arg)
     {
         string name = arg.Trim();
@@ -826,6 +870,32 @@ public class AdminPacketCoordinator(
         string note = target.IsGM ? " (Game Master accounts are not ranked)" : "";
         await SendNoticeAsync(session,
             $"{target.Name}: total points place {PlaceText(placed.Knights)}, monthly points place {PlaceText(placed.Personal)}{note}");
+    }
+
+    private async Task HandleSoccerAsync(UserSession session, string arg)
+    {
+        var soccer = serviceProvider.GetRequiredService<ISoccerService>();
+        switch (arg.Trim().ToLowerInvariant())
+        {
+            case "blue":
+            case "red":
+                var joined = await soccer.JoinAsync(session, arg.Trim().Equals("blue", StringComparison.OrdinalIgnoreCase)
+                    ? SoccerService.TeamBlue : SoccerService.TeamRed);
+                await SendNoticeAsync(session, $"Soccer join: {joined}");
+                break;
+            case "start":
+                await SendNoticeAsync(session, await soccer.StartAsync(session, practice: true)
+                    ? "Soccer practice match started"
+                    : "A soccer match is already running");
+                break;
+            case "end":
+                await soccer.FinishAsync();
+                await SendNoticeAsync(session, "Soccer match ended");
+                break;
+            default:
+                await SendNoticeAsync(session, "Usage: +soccer blue|red|start|end");
+                break;
+        }
     }
 
     private static string PlaceText(byte place) => place == NationRanks.Unranked ? "none" : place.ToString();
@@ -990,6 +1060,65 @@ public class AdminPacketCoordinator(
         logger.LogInformation("GM {Gm} set the weather to {Weather} at {Amount}", session.Name, type, amount);
     }
 
+    private async Task HandleTerrainAsync(UserSession session, string arg)
+    {
+        if (!byte.TryParse((arg ?? string.Empty).Trim(), out var effect) || effect > ZoneTerrainPacketWriter.MaxEffect)
+        {
+            await SendNoticeAsync(session, TerrainUsage);
+            return;
+        }
+
+        await session.Client.SendPacket(ZoneTerrainPacketWriter.Effect(effect));
+    }
+
+    private async Task HandleSiegeWarAsync(UserSession session, string arg)
+    {
+        switch (arg.Trim().ToLowerInvariant())
+        {
+            case "on":
+                await castleSiegeService.OpenAsync();
+                break;
+            case "countdown":
+                await castleSiegeService.StartCountdownAsync();
+                break;
+            case "off":
+                await castleSiegeService.CloseAsync();
+                break;
+        }
+        await SendNoticeAsync(session, $"Castle siege war: {castleSiegeService.Phase}. Usage: +siegewar on|countdown|off");
+    }
+
+    private async Task HandleClanMatchAsync(UserSession session, string arg)
+    {
+        var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1 && parts[0].Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            await clanMatchService.StopAsync();
+            await SendNoticeAsync(session, "Clan match stopped.");
+            return;
+        }
+        if (parts.Length != 2)
+        {
+            await SendNoticeAsync(session, "Usage: +clanmatch <clan> <clan> | off");
+            return;
+        }
+        await SendNoticeAsync(session, await clanMatchService.StartAsync(parts[0], parts[1]));
+    }
+
+    private async Task HandleWantedAsync(UserSession session, string arg)
+    {
+        switch (arg.Trim().ToLowerInvariant())
+        {
+            case "on":
+                await vanguardService.StartAsync();
+                break;
+            case "off":
+                await vanguardService.StopAsync();
+                break;
+        }
+        await SendNoticeAsync(session, $"Wanted event: {(vanguardService.Enabled ? "on" : "off")}. Usage: +wanted on|off");
+    }
+
     private async Task HandleSealCodeAsync(UserSession session, string arg)
     {
         var code = (arg ?? string.Empty).Trim();
@@ -1024,7 +1153,7 @@ public class AdminPacketCoordinator(
         _ => null,
     };
 
-    private async Task HandleEventRateAsync(UserSession session, string arg, string label, Action<byte> apply)
+    private async Task HandleEventRateAsync(UserSession session, string arg, string label, RateEvent kind, Action<byte> apply)
     {
         if (string.IsNullOrWhiteSpace(arg) || !byte.TryParse(arg.Trim(), out var pct))
         {
@@ -1034,6 +1163,17 @@ public class AdminPacketCoordinator(
 
         apply(pct);
         await SendNoticeAsync(session, $"{label} event bonus = {pct}%");
+        var title = RateEvents.Title(kind);
+        if (pct == 0)
+        {
+            await sessionManager.BroadcastToAll(NoticePacketWriter.EventTitleRemoved(title));
+        }
+        else
+        {
+            var message = RateEvents.Message(gameDataService, kind, pct);
+            await sessionManager.BroadcastToAll(NoticePacketWriter.EventTitle(title, message));
+            await BroadcastNoticeAsync(message);
+        }
         logger.LogInformation("GM {Gm} set {Label} event bonus to {Pct}%", session.Name, label, pct);
     }
 
@@ -1670,7 +1810,7 @@ public class AdminPacketCoordinator(
         }
 
         await eventSchedulerService.CallTempleEventAsync(contest, joinSec, session);
-        var confirmPkt = EventPacketWriter.TempleEvent((byte)TempleSubOpcode.TempleEventJoin, 1, (short)zoneId);
+        var confirmPkt = EventPacketWriter.TempleEvent((byte)TempleSubOpcode.TempleEventJoin, (byte)TempleJoinResult.Joined, (short)zoneId);
         await session.Client.SendPacket(confirmPkt);
         string formattedTime = joinSec >= 60 ? $"{joinSec / 60}m" : $"{joinSec}s";
         await SendNoticeAsync(session, $"[{eventName}] Registration open ({formattedTime}). You are registered and will teleport automatically!");

@@ -7,6 +7,7 @@ public static class GenderChange
     public const int Item = 810594000;
     public const int FailedText = 40021;
     public const int NoItemText = 40020;
+    public const int ChangedText = 40022;
     public const int NotForClassText = 40023;
 
     public static int BaseClass(int classCode)

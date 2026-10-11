@@ -11,6 +11,9 @@ public interface IGameDataService
     ILookup<int, SpecialAuctionLotData> SpecialAuctionLotsByRow { get; }
     IReadOnlyList<ItemCombineRecipeData> ItemCombineRecipes { get; }
     ILookup<int, ItemCombineMaterialData> ItemCombineMaterialsByRecipe { get; }
+    IReadOnlyDictionary<int, ItemSmashClassData> ItemSmashClassesByGrade { get; }
+    ILookup<int, ItemSmashRewardData> ItemSmashRewardsByBand { get; }
+    IReadOnlyDictionary<int, int> ItemGradeBonuses { get; }
     IReadOnlyDictionary<short, CoefficientData> CoefficientTable { get; }
     IReadOnlyDictionary<short, StartPositionData> StartPositionTable { get; }
     IReadOnlyDictionary<int, ItemData> ItemTable { get; }
@@ -47,6 +50,7 @@ public interface IGameDataService
     IReadOnlyList<MonsterSummonData> MonsterSummonTable { get; }
     IReadOnlyDictionary<short, ZoneInfoData> ZoneInfoTable { get; }
     ILookup<byte, GameEventData> GameEventsByZone { get; }
+    ILookup<short, MapObjectData> MapObjectsByZone { get; }
     IReadOnlyDictionary<int, AttendanceRewardData> AttendanceRewardTable { get; }
     IReadOnlyDictionary<int, AchievementData> AchievementTable { get; }
     IReadOnlyDictionary<int, AchievementTitleData> AchievementTitleTable { get; }
@@ -92,6 +96,7 @@ public enum PremiumPropertyType
 {
     Noah = 1,
     Drop = 2,
+    Loyalty = 3,
     RepairDiscount = 4,
     ItemSell = 5
 }

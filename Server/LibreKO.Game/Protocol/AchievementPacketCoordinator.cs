@@ -55,6 +55,21 @@ public class AchievementPacketCoordinator(
                 await SelectTitleAsync(session, packet);
                 break;
 
+            case AchievementSubOpcode.ResetDisplayTitle:
+                session.DisplayTitleId = 0;
+                await worldPacketCoordinator.BroadcastDisplayTitleAsync(session);
+                await session.Client.SendPacket(AchievementPacketWriter.TitleReset(sub, AchievementPacketWriter.TitleDone));
+                break;
+
+            case AchievementSubOpcode.SelectSkillTitle:
+                await session.Client.SendPacket(AchievementPacketWriter.TitleSelected(
+                    sub, packet.RemainingBytes >= 2 ? packet.ReadShort() : 0, AchievementPacketWriter.TitleRefused));
+                break;
+
+            case AchievementSubOpcode.ResetSkillTitle:
+                await session.Client.SendPacket(AchievementPacketWriter.TitleReset(sub, AchievementPacketWriter.TitleRefused));
+                break;
+
             default:
                 logger.LogWarning(
                     "ACHIEVE sub {Sub} from {Name} has no handler; the window latches on every "
@@ -111,12 +126,15 @@ public class AchievementPacketCoordinator(
         var titleId = packet.RemainingBytes >= 2 ? packet.ReadShort() : (short)0;
         if (!HasUnlockedTitle(session, titleId))
         {
-            await SendClaimAsync(session, titleId, AchievementPacketWriter.ClaimNotAvailable);
+            await session.Client.SendPacket(AchievementPacketWriter.TitleSelected(
+                AchievementSubOpcode.SelectDisplayTitle, titleId, AchievementPacketWriter.TitleRefused));
             return;
         }
 
         session.DisplayTitleId = titleId;
         await worldPacketCoordinator.BroadcastDisplayTitleAsync(session);
+        await session.Client.SendPacket(AchievementPacketWriter.TitleSelected(
+            AchievementSubOpcode.SelectDisplayTitle, titleId, AchievementPacketWriter.TitleDone));
     }
 
     private static Task SendClaimAsync(UserSession session, int achievementId, sbyte result) =>

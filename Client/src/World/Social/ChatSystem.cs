@@ -25,10 +25,9 @@ internal sealed partial class ChatSystem
     private const float PeekGlyphSize = 26f;
     private const float EdgeMargin = 12f;
     private const int NoticeTop = 60;
-    private const double NoticeBaseSeconds = 3.5;
-    private const double NoticeSecondsPerChar = 0.04;
-    private const double NoticeMinSeconds = 4.0;
-    private const double NoticeMaxSeconds = 12.0;
+    private const float NoticeBarWidth = 520f;
+    private const float NoticeBarHeight = 26f;
+    private const float NoticeStillInset = 15f;
     private static readonly Vector2 DefaultSize = new(490, 238);
     private static readonly Vector2 MinimumSize = new(330, 170);
     private static readonly Vector2 ResizeGripOffset = new(0, 23);
@@ -43,13 +42,14 @@ internal sealed partial class ChatSystem
     private CanvasLayer _noticeLayer = null!;
     private Label _noticeLabel = null!;
     private readonly NoticeQueue _notices = new();
-    private int _noticeToken;
+    private Tween? _noticeScroll;
+    private Tween? _noticeFade;
 
     internal const byte WhisperChannel = ChatType.Private;
     private const byte GeneralChannel = ChatType.General;
     private const byte ClanChannel = ChatType.Clan;
     private const byte ChatRoomChannel = ChatType.ChatRoom;
-    private const byte ClanRecruitChannel = ChatType.ClanRecruit;
+    private const byte NoahKnightsChannel = ChatType.NoahKnights;
     private const byte CommanderChannel = ChatType.Command;
 
     private byte _sendChannel = GeneralChannel;
@@ -60,6 +60,9 @@ internal sealed partial class ChatSystem
 
     private static readonly HashSet<string> ReplyCommands = new(StringComparer.OrdinalIgnoreCase) { "r", "reply" };
     private static readonly HashSet<string> WhisperCommands = new(StringComparer.OrdinalIgnoreCase) { "w", "tell", "whisper" };
+    private const int NationChatCommandText = 8019;
+    private const int NotInChatRoomText = 30958;
+    private const int NoahChatBlockedText = 40101;
     private static readonly HashSet<string> CommandsOpenToEveryone = new(StringComparer.OrdinalIgnoreCase) { "setlevel" };
 
     private readonly ChatPrefs _prefs = ChatPrefs.Parse(Config.ChatLook);
@@ -72,6 +75,9 @@ internal sealed partial class ChatSystem
     internal Action<int>? ItemTipShow;
     internal Action? ItemTipHide;
     internal Func<string, bool>? IsFriend;
+    internal Func<bool>? NoahKnight;
+    internal Func<string?>? SendRefusal;
+    internal Func<int, int>? PersonalRankOf;
     internal Action? ColorsRequested;
     internal Action<string>? StatusNotice;
     internal event Action? LayoutChanged;
@@ -134,6 +140,7 @@ internal sealed partial class ChatSystem
         ChatType.Alliance => "alliance",
         ChatType.SeekingParty => "zone",
         ChatType.ClanOfficer => "officer",
+        ChatType.NoahKnights => "noah",
         _ => "",
     };
 
@@ -174,6 +181,9 @@ internal sealed partial class ChatSystem
         BuildNoticeBanner();
 
         Net.I.ChatEvent += OnChat;
+        Net.I.RoomChatEvent += OnRoomChat;
+        Net.I.RoyalOrderEvent += OnRoyalOrder;
+        Net.I.KingEventResultEvent += OnKingEventResult;
         Net.I.ChatTargetEvent += OnChatTarget;
         Net.I.NoticeEvent += OnNotice;
     }
@@ -181,6 +191,9 @@ internal sealed partial class ChatSystem
     internal void DetachNetwork()
     {
         Net.I.ChatEvent -= OnChat;
+        Net.I.RoomChatEvent -= OnRoomChat;
+        Net.I.RoyalOrderEvent -= OnRoyalOrder;
+        Net.I.KingEventResultEvent -= OnKingEventResult;
         Net.I.ChatTargetEvent -= OnChatTarget;
         Net.I.NoticeEvent -= OnNotice;
     }
@@ -231,20 +244,39 @@ internal sealed partial class ChatSystem
         rows.AddThemeConstantOverride("separation", 6);
         panel.AddChild(rows);
         rows.AddChild(World.QuestToastRule());
-        var m = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        UiTheme.Margins(m, 58, 3, 58, 3);
-        rows.AddChild(m);
-        _noticeLabel = UiTheme.Text("", 16, UiTheme.GoldBright, HorizontalAlignment.Center);
+        var bar = new Control
+        {
+            CustomMinimumSize = new Vector2(NoticeBarWidth, NoticeBarHeight),
+            ClipContents = true,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        rows.AddChild(bar);
+        _noticeLabel = UiTheme.Text("", 16, UiTheme.GoldBright);
+        _noticeLabel.VerticalAlignment = VerticalAlignment.Center;
         _noticeLabel.AddThemeConstantOverride("font_embolden", 1);
         _noticeLabel.AddThemeConstantOverride("outline_size", 4);
         _noticeLabel.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
-        m.AddChild(_noticeLabel);
+        bar.AddChild(_noticeLabel);
         rows.AddChild(World.QuestToastRule());
     }
 
     internal Control NoticePanel { get; private set; } = null!;
 
     internal void ShowNoticePreview(string msg) => OnNotice(msg);
+
+    private const int DragonAlarmId = 7035;
+
+    private void ShowServerNotice(ChatLine line)
+    {
+        string text = ChatSender.Flatten(line.Type, line.Message);
+        if (line.Type == ChatType.InfoNotice)
+        {
+            StatusNotice?.Invoke(text);
+            return;
+        }
+        if (line.Type == ChatType.AlarmNotice && line.CharId == DragonAlarmId) Audio.PlayUi(Sfx.DragonRoar);
+        if (_notices.Enqueue(text)) ShowNotice(text);
+    }
 
     private void OnNotice(string msg)
     {
@@ -257,16 +289,40 @@ internal sealed partial class ChatSystem
     private void ShowNotice(string msg)
     {
         _noticeLabel.Text = msg;
-        _noticeLayer.Visible = true;
-        int token = ++_noticeToken;
-        double secs = Mathf.Clamp(NoticeBaseSeconds + msg.Length * NoticeSecondsPerChar, NoticeMinSeconds, NoticeMaxSeconds);
-        if (!_ctx.Root.IsInsideTree()) return;
-        _ctx.Root.GetTree().CreateTimer(secs).Timeout += () =>
+        _noticeLabel.Size = new Vector2(_noticeLabel.GetMinimumSize().X, NoticeBarHeight);
+        _noticeLabel.Position = new Vector2(NoticeStillInset, 0);
+        if (!_noticeLabel.IsInsideTree())
         {
-            if (_noticeToken != token || _noticeLayer == null || !GodotObject.IsInstanceValid(_noticeLayer)) return;
-            if (_notices.Advance() is { } next) ShowNotice(next);
-            else _noticeLayer.Visible = false;
-        };
+            _noticeLayer.Visible = true;
+            _noticeLabel.Connect(Node.SignalName.TreeEntered, Callable.From(() => ShowNotice(msg)), (uint)GodotObject.ConnectFlags.OneShot);
+            return;
+        }
+
+        FadeNotice(visible: true);
+        _noticeScroll?.Kill();
+        float width = _noticeLabel.Size.X;
+        float seconds = NoticeMarquee.PassSeconds(NoticeBarWidth, width);
+        _noticeScroll = _noticeLabel.CreateTween();
+        for (int pass = 0; pass < NoticeMarquee.Passes; pass++)
+            _noticeScroll.TweenProperty(_noticeLabel, "position:x", -width, seconds).From(NoticeBarWidth);
+        _noticeScroll.TweenCallback(Callable.From(NextNotice));
+    }
+
+    private void NextNotice()
+    {
+        if (!GodotObject.IsInstanceValid(_noticeLayer)) return;
+        if (_notices.Advance() is { } next) ShowNotice(next);
+        else FadeNotice(visible: false);
+    }
+
+    private void FadeNotice(bool visible)
+    {
+        _noticeFade?.Kill();
+        if (visible && !_noticeLayer.Visible) NoticePanel.Modulate = Godot.Colors.Transparent;
+        if (visible) _noticeLayer.Visible = true;
+        _noticeFade = NoticePanel.CreateTween();
+        _noticeFade.TweenProperty(NoticePanel, "modulate:a", visible ? 1f : 0f, NoticeMarquee.FadeSeconds);
+        if (!visible) _noticeFade.TweenCallback(Callable.From(() => _noticeLayer.Visible = false));
     }
 
     internal void Open()
@@ -305,7 +361,7 @@ internal sealed partial class ChatSystem
 
     private void Suspend()
     {
-        if (!_active || _settingsMenu.Visible || _input.HasFocus()) return;
+        if (!_active || _settingsMenu.Visible || EmoticonsOpen || _input.HasFocus()) return;
         if (_input.Text.Length == 0)
         {
             Close();
@@ -324,6 +380,7 @@ internal sealed partial class ChatSystem
         _input.MouseFilter = active || clickToType ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
         _input.Editable = active;
         _input.FocusMode = active ? Control.FocusModeEnum.All : Control.FocusModeEnum.None;
+        _emoticonButton.Visible = active || !clickToType;
         ApplyInputStyle();
     }
 
@@ -362,6 +419,8 @@ internal sealed partial class ChatSystem
         UpdateInputColour();
     }
 
+    private const char GmCommandPrefix = '+';
+
     private void Submit(string text)
     {
         string visible = text.TrimEnd();
@@ -371,6 +430,13 @@ internal sealed partial class ChatSystem
 
         if (visible[0] == '/' && LocalCommand?.Invoke(visible.Substring(1).Trim()) == true) { Close(); return; }
         if (visible[0] == '/' && RunSlashCommand(visible.Substring(1).Trim())) { Close(); return; }
+
+        if (visible[0] != GmCommandPrefix && SendRefusal?.Invoke() is { } refusal)
+        {
+            Info(refusal);
+            Close();
+            return;
+        }
 
         var (chan, body, target) = Parse(wire);
 
@@ -395,14 +461,23 @@ internal sealed partial class ChatSystem
             if (chan == CommanderChannel && Net.I.MyClan.Fame != ClanRanks.CommandCaptain)
                 Info("Only war captains can use commander chat.");
             else if (chan == ChatRoomChannel)
-                Net.I.SendChatRoomSay(body);
-            else if (chan == ClanRecruitChannel)
-                Info("Clan recruitment chat is not available yet.");
+            {
+                if (Net.I.NationChat.InRoom) Net.I.SendRoomChat(body);
+                else Info(ItemData.Text(NotInChatRoomText, "You are not participating in a chatroom. You may use the '/nation_chat' command to open the UI."));
+            }
+            else if (chan == NoahKnightsChannel && NoahKnight?.Invoke() != true)
+                Info(ItemData.Text(NoahChatBlockedText, "Currently the Noah Knights chat is blocked"));
             else
                 Net.I.SendChat(body, chan);
         }
 
         Close();
+    }
+
+    internal void RunCommand(string command)
+    {
+        if (LocalCommand?.Invoke(command) == true) return;
+        RunSlashCommand(command);
     }
 
     private bool RunSlashCommand(string command)
@@ -430,9 +505,55 @@ internal sealed partial class ChatSystem
             return true;
         }
 
+        if (string.Equals(word, ItemData.Text(NationChatCommandText, "nation_chat"), StringComparison.OrdinalIgnoreCase))
+        {
+            NationChatRequested?.Invoke();
+            return true;
+        }
+
+        if (Gestures.CommandAction(word, ItemData.Text) is { } gesture)
+        {
+            GestureRequested?.Invoke(gesture);
+            return true;
+        }
+
+        if (KingCommands.Parse(word, args, ItemData.Text) is { } kingCommand)
+        {
+            Net.I.SendKingCommand(kingCommand);
+            return true;
+        }
+
         if (Net.I.IsGm || CommandsOpenToEveryone.Contains(word)) return false;
         Info($"Unknown command: /{word}");
         return true;
+    }
+
+    internal Action? NationChatRequested;
+    internal Action<int>? GestureRequested;
+
+    internal void UseRoomChannel(bool inRoom) => SetChannel(inRoom ? ChatRoomChannel : GeneralChannel);
+
+    private const string RoyalOrderColour = "ff6994";
+
+    private void OnRoyalOrder(byte kind, string message)
+    {
+        string line = ItemData.Text(KingCommands.RoyalOrderLineText, "%s : %s");
+        int first = line.IndexOf("%s", StringComparison.Ordinal);
+        if (first >= 0) line = line[..first] + ItemData.Text(KingCommands.KingTitleText, "King") + line[(first + 2)..];
+        line = line.Replace("%s", message);
+        AddEntry(ChatEntry.Raw(ChatCategory.Notice, $"[color=#{RoyalOrderColour}]{BbCode.Esc(line)}[/color]"));
+    }
+
+    private void OnKingEventResult(byte kingEvent, short result)
+    {
+        int text = KingCommands.ResultText(kingEvent, result);
+        if (text != 0) Info(ItemData.Text(text, ""));
+    }
+
+    private void OnRoomChat(RoomChatLine line)
+    {
+        string name = ZoneCatalog.Knows(line.ZoneId) ? $"[ {ZoneCatalog.Name(line.ZoneId)} ] {line.Name}" : line.Name;
+        AddEntry(ChatEntry.Player(ChatRoomChannel, name, Net.I.LastEnter.Nation, false, line.Text));
     }
 
     internal Action<string, string>? WhisperEcho;
@@ -474,22 +595,49 @@ internal sealed partial class ChatSystem
             if (line.Name.Length == 0 || IsSelf(line.Name)) return;
             _lastWhisperFrom = line.Name;
             var side = IsFriend?.Invoke(line.Name) == true ? WhisperSide.ReceivedFromFriend : WhisperSide.Received;
-            AddEntry(ChatEntry.Whisper(side, line.Name, line.Nation, line.IsGm, line.Message));
+            AddEntry(SenderShown(ChatEntry.Whisper(side, line.Name, line.Nation, line.IsGm, ReadableText(line)), line));
+            return;
+        }
+
+        if (line.Type is ChatType.MarqueeNotice or ChatType.AlarmNotice or ChatType.InfoNotice && line.Name.Length == 0)
+        {
+            ShowServerNotice(line);
             return;
         }
 
         if (line.CharId < 0 && line.Name.Length == 0)
         {
             var category = ChatCategories.Of(line.Type, false);
-            if (category == ChatCategory.Notice) StatusNotice?.Invoke(line.Message);
-            else AddEntry(ChatEntry.Plain(category, line.Type, line.Message));
+            string notice = ChatSender.Flatten(line.Type, line.Message);
+            if (category == ChatCategory.Notice) StatusNotice?.Invoke(notice);
+            else AddEntry(ChatEntry.Plain(category, line.Type, notice));
             return;
         }
 
-        string text = Understandable(line) ? line.Message : Garble(line.Message);
-        AddEntry(ChatEntry.Player(line.Type, line.Name, line.Nation, line.IsGm, text));
-        ShowBubble(line.CharId, line.Type, PlainText(text));
+        string text = ChatSender.Flatten(line.Type, ReadableText(line));
+        var entry = SenderShown(ChatEntry.Player(line.Type, line.Name, line.Nation, line.IsGm, text), line);
+        AddEntry(entry);
+        ShowBubble(line.CharId, line.Type, PlainText(entry.Text));
     }
+
+    private ChatEntry SenderShown(ChatEntry entry, ChatLine line)
+    {
+        int siege = Net.I.SiegeChatMask(line.CharId, line.IsGm);
+        if (siege != 0)
+            return entry with
+            {
+                Name = ItemData.Text(siege, SiegeWar.Fallback(siege)),
+                Text = SiegeWar.Scramble(entry.Text, count => (int)(GD.Randi() % (uint)count)),
+                Masked = true,
+            };
+        int mask = ChatSender.MaskText(Net.I.LastEnter.Zone, Net.I.IsGm, Net.I.Nation, Net.I.MyCharId,
+            line.Type, line.Nation, line.CharId);
+        return mask == 0
+            ? entry with { Rank = RankOf(line.CharId) }
+            : entry with { Name = ItemData.Text(mask, entry.Name), Masked = true };
+    }
+
+    private int RankOf(int charId) => PersonalRankOf?.Invoke(charId) ?? NationRankAura.Unranked;
 
     private static bool IsSelf(string name) =>
         string.Equals(name, Net.I.LastEnter.Name, StringComparison.OrdinalIgnoreCase);
@@ -499,7 +647,10 @@ internal sealed partial class ChatSystem
         || line.Nation == 0
         || line.Nation == Net.I.Nation
         || Net.I.CurrentZoneAbility.CanTalk
-        || line.Type is not (ChatType.General or ChatType.Shout or ChatType.Merchant);
+        || line.Type is not (ChatType.General or ChatType.Private or ChatType.Shout or ChatType.GameMaster
+            or ChatType.Merchant);
+
+    internal static string ReadableText(ChatLine line) => Understandable(line) ? line.Message : Garble(line.Message);
 
     private static string Garble(string message)
     {
@@ -509,34 +660,40 @@ internal sealed partial class ChatSystem
         return new string(scrambled);
     }
 
+    internal const int TextWhisperFailed = 1101;
+    internal const int TextWhisperConnected = 1102;
+    private const int TextOwnWhispersBlocked = 7635;
+    private const int TextTargetBlocksWhispers = 7636;
+    private const int TextNoCrossNationWhisper = 44060;
+
     private void OnChatTarget(int result, string name)
     {
         switch (result)
         {
             case Net.ChatTargetConnected:
                 _whisperName = name;
+                WhisperOpened?.Invoke(name);
                 if (_pendingWhisper is { } msg)
                 {
                     Net.I.SendChat(msg, WhisperChannel);
                     AppendWhisperEcho(name, msg);
                     _pendingWhisper = null;
                 }
-                WhisperOpened?.Invoke(name);
                 break;
             case Net.ChatTargetNotFound:
-                WhisperNotice?.Invoke(_pendingWhisperTo, "Player not found.");
+                WhisperNotice?.Invoke(_pendingWhisperTo, ItemData.Text(TextWhisperFailed, "Failed to connect for a private chat"));
                 _pendingWhisper = null;
                 break;
             case Net.ChatTargetBlocked:
-                WhisperNotice?.Invoke(_pendingWhisperTo, "That player is blocking whispers.");
+                WhisperNotice?.Invoke(_pendingWhisperTo, ItemData.Text(TextTargetBlocksWhispers, "This user has blocked private messages."));
                 _pendingWhisper = null;
                 break;
             case Net.ChatTargetCrossNation:
-                WhisperNotice?.Invoke(_pendingWhisperTo, "You cannot whisper between nations in this zone.");
+                WhisperNotice?.Invoke(_pendingWhisperTo, ItemData.Text(TextNoCrossNationWhisper, "You cannot whisper between nations in this zone."));
                 _pendingWhisper = null;
                 break;
             case Net.ChatTargetSenderBlocked:
-                WhisperNotice?.Invoke(_pendingWhisperTo, "You have blocked whispers.");
+                WhisperNotice?.Invoke(_pendingWhisperTo, ItemData.Text(TextOwnWhispersBlocked, "Blocked Private messages."));
                 _pendingWhisper = null;
                 break;
         }

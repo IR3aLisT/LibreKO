@@ -17,6 +17,7 @@ public enum KeyAction
 
     TargetHostile,
     TargetFriendly,
+    TargetParty,
     AutoAttack,
     StealthCancel,
 
@@ -53,6 +54,7 @@ public enum KeyAction
     FishingHall,
     Genie,
     TownRecall,
+    CommandList,
 
     HotPageNext,
     PotionHp,
@@ -64,6 +66,7 @@ public enum KeyAction
     PerfSkipPoses,
     PerfSkipMove,
     PerfSkipPlates,
+    NamePlates,
     PerfSkipEmitters,
     PerfSkipAudio,
     PerfSkipFx,
@@ -75,6 +78,15 @@ public enum KeyAction
     PerfSceneSweep,
     GmPanel,
     GmSpeed,
+    CompareItems,
+    CommanderSlot1,
+    CommanderSlot2,
+    CommanderSlot3,
+    CommanderSlot4,
+    CommanderSlot5,
+    CommanderSlot6,
+    CommanderHold,
+    PkLadder,
 }
 
 public enum BindGroup
@@ -153,6 +165,7 @@ public static partial class KeyBinds
 
         new(KeyAction.TargetHostile, BindGroup.Combat, "Target Nearest Enemy", Chord(Key.Z)),
         new(KeyAction.TargetFriendly, BindGroup.Combat, "Target Nearest Ally", Chord(Key.B)),
+        new(KeyAction.TargetParty, BindGroup.Combat, "Target Nearest Party Member", Chord(Key.X)),
         new(KeyAction.AutoAttack, BindGroup.Combat, "Auto Attack", Chord(Key.R)),
         new(KeyAction.StealthCancel, BindGroup.Combat, "Cancel Stealth", Chord(Key.Insert)),
         new(KeyAction.PotionHp, BindGroup.Combat, "Health Potion", Chord(Key.None)),
@@ -209,6 +222,17 @@ public static partial class KeyBinds
         new(KeyAction.FishingHall, BindGroup.Windows, "Fishing Hall of Fame", Chord(Key.Kp7)),
         new(KeyAction.Genie, BindGroup.Windows, "Genie", Chord(Key.KpAdd)),
         new(KeyAction.TownRecall, BindGroup.Windows, "Town Recall", Ctrl(Key.H)),
+        new(KeyAction.CommandList, BindGroup.Windows, "Command List", Chord(Key.J)),
+        new(KeyAction.NamePlates, BindGroup.Windows, "Show / Hide Name Plates", Chord(Key.None)),
+        new(KeyAction.CommanderHold, BindGroup.Combat, "Commander keys (hold)", Chord(Key.Capslock)),
+        new(KeyAction.CommanderSlot1, BindGroup.Combat, "Commander: Mark Target", Chord(Key.Key1)),
+        new(KeyAction.CommanderSlot2, BindGroup.Combat, "Commander: Attack", Chord(Key.Key2)),
+        new(KeyAction.CommanderSlot3, BindGroup.Combat, "Commander: Retreat", Chord(Key.Key3)),
+        new(KeyAction.CommanderSlot4, BindGroup.Combat, "Commander: Return to Town", Chord(Key.Key4)),
+        new(KeyAction.CommanderSlot5, BindGroup.Combat, "Commander: Right", Chord(Key.Key5)),
+        new(KeyAction.CommanderSlot6, BindGroup.Combat, "Commander: Left", Chord(Key.Key6)),
+        new(KeyAction.CompareItems, BindGroup.Windows, "Compare Items (hold)", Chord(Key.Ctrl)),
+        new(KeyAction.PkLadder, BindGroup.Windows, "PK Zone Ladder (hold)", Chord(Key.Alt)),
 
         new(KeyAction.PerformanceOverlay, BindGroup.System, "Performance Overlay", Shift(Key.F3)),
         new(KeyAction.PerfSkipPoses, BindGroup.System, "Perf bisect: crowd poses", Shift(Key.F5)),
@@ -227,6 +251,17 @@ public static partial class KeyBinds
         new(KeyAction.GmSpeed, BindGroup.System, "GM Speed (hold)", Chord(Key.G)),
     };
 
+    public const int BaseLayer = 0;
+    public const int CommanderLayer = 1;
+    public const int ModifierLayer = 2;
+
+    public static int LayerOf(KeyAction action) => action switch
+    {
+        >= KeyAction.CommanderSlot1 and <= KeyAction.CommanderSlot6 => CommanderLayer,
+        KeyAction.CommanderHold => ModifierLayer,
+        _ => BaseLayer,
+    };
+
     private static readonly Dictionary<KeyAction, KeyChord> Bound = new();
     private static bool _loaded;
 
@@ -242,15 +277,34 @@ public static partial class KeyBinds
 
     public static Key PolledKey(KeyAction action) => Get(action).Key;
 
-    public static void Set(KeyAction action, KeyChord chord)
+    public static List<KeyAction> Set(KeyAction action, KeyChord chord)
     {
         Load();
+        var taken = new List<KeyAction>();
         if (chord.Assigned)
             foreach (var entry in Table)
-                if (entry.Action != action && Get(entry.Action) == chord)
+                if (entry.Action != action && LayerOf(entry.Action) == LayerOf(action) && Get(entry.Action) == chord)
+                {
                     Store(entry.Action, KeyChord.Unbound);
+                    taken.Add(entry.Action);
+                }
         Store(action, chord);
         Changed?.Invoke();
+        return taken;
+    }
+
+    private static readonly HashSet<KeyAction> HoldActions = new()
+    {
+        KeyAction.CommanderHold, KeyAction.CompareItems, KeyAction.PkLadder, KeyAction.GmSpeed,
+    };
+
+    public static bool IsHold(KeyAction action) => HoldActions.Contains(action);
+
+    public static string LabelOf(KeyAction action)
+    {
+        foreach (var entry in Table)
+            if (entry.Action == action) return entry.Label;
+        return action.ToString();
     }
 
     public static void Reset()
@@ -287,16 +341,16 @@ public static partial class KeyBinds
     internal static Dictionary<KeyAction, KeyChord> Resolve(IReadOnlyList<Entry> table, Func<KeyAction, KeyChord?> saved)
     {
         var bound = new Dictionary<KeyAction, KeyChord>();
-        var chosen = new HashSet<KeyChord>();
+        var chosen = new HashSet<(int Layer, KeyChord Chord)>();
         foreach (var entry in table)
         {
             if (saved(entry.Action) is not { } chord) continue;
             bound[entry.Action] = chord;
-            if (chord.Assigned) chosen.Add(chord);
+            if (chord.Assigned) chosen.Add((LayerOf(entry.Action), chord));
         }
         foreach (var entry in table)
             if (!bound.ContainsKey(entry.Action))
-                bound[entry.Action] = chosen.Contains(entry.Default) ? KeyChord.Unbound : entry.Default;
+                bound[entry.Action] = chosen.Contains((LayerOf(entry.Action), entry.Default)) ? KeyChord.Unbound : entry.Default;
         return bound;
     }
 }

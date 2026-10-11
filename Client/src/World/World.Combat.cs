@@ -5,7 +5,6 @@ namespace LibreKO;
 
 public partial class World
 {
-    private const float SwingInterval = 1.2f;
     private const float SwingCommitFallback = 0.3f;
     private const float ActionClipCap = 2.5f;
     private const float ProjectileFxSpeed = 18f;
@@ -15,7 +14,7 @@ public partial class World
     private const int PendingFlying = 2;
     private const int PendingEffecting = 3;
     private const double PendingReplyTimeout = 5.0;
-    private const short ArrowMissedMarker = -101;
+    private const short ArrowMissedMarker = MagicFail.ProjectileKilled;
     private const int MissMarkerSlot = 3;
 
     private static short[] ArrowMissedData()
@@ -121,7 +120,7 @@ public partial class World
                         continue;
                     }
                 }
-                Net.I.SendMagic(3, pc.SkillId, pc.TargetId, pc.Data);
+                Net.I.SendMagic(3, pc.SkillId, pc.TargetId, DashRequestData(pc.SkillId, pc.TargetId) ?? KickRequestData(pc.SkillId, pc.TargetId) ?? pc.Data);
             }
             pc.Stage = PendingAwaitServer;
             pc.EffectTime = double.PositiveInfinity;
@@ -157,11 +156,8 @@ public partial class World
                 _corpseScratch.Add(id);
         foreach (var id in _corpseScratch)
         {
-            if (!_ents.TryGetValue(id, out var e)) continue;
             if (_selectedId == id) Deselect();
-            e.Body.QueueFree();
-            _ents.Remove(id);
-            StateVisualForgetEntity(id);
+            RemoveEntity(id);
         }
     }
 
@@ -173,6 +169,7 @@ public partial class World
 
     private void ToggleAutoAttack()
     {
+        if (SelfOnSoccerTeam) return;
         if (_autoAttack)
         {
             StopAutoAttack();
@@ -180,17 +177,25 @@ public partial class World
         }
         if (!CanAutoAttack())
         {
-            CombatNotice(_selectedId < 0
-                ? "Select a target first."
-                : "That target cannot be attacked.");
+            if (_selectedId >= 0 && _ents.ContainsKey(_selectedId))
+            {
+                FaceSelectedWhenStill();
+                return;
+            }
+            CombatNotice("Select a target first.");
             return;
         }
 
+        FaceSelectedWhenStill();
         StartAutoAttack(_selectedId);
     }
 
+    private readonly AttackChain _attackChain = new();
+
     private void StartAutoAttack(int targetId)
     {
+        if (SelfOnSoccerTeam && OnSoccerPitch()) return;
+        _attackChain.Record(AttackChain.BasicAttack, Now());
         _autoAttack = true;
         _autoTargetId = targetId;
         _hasMoveTarget = false;
@@ -221,7 +226,7 @@ public partial class World
         _swingTarget = -1;
         if (_selfDead || IsStunned()) return;
         if (!_ents.TryGetValue(target, out var t) || t.Dead || !t.Attackable) return;
-        Net.I.SendAttack(target, SwingDelay());
+        Net.I.SendAttack(target, SwingDelay(), chained: _attackChain.Chained);
     }
 
     private short SwingDelay()
@@ -235,6 +240,15 @@ public partial class World
     }
 
     private const int BareHandedSwingDelay = 100;
+
+    private float MeleeSwingInterval()
+    {
+        var gear = SelfGear();
+        int right = gear.Length > InventoryConstants.VisRightHand ? gear[InventoryConstants.VisRightHand] : 0;
+        int delay = right == 0 ? 0 : ItemData.Get(right)?.Delay ?? 0;
+        int percent = right == 0 ? 0 : ItemData.ExtFor(right)?.AttackIntervalPercent ?? 0;
+        return SwingTiming.IntervalSeconds(delay, percent, AttackSpeedMultiplier());
+    }
 
     private void CancelSwing()
     {
@@ -286,39 +300,40 @@ public partial class World
 
         var rangedSkill = BasicRangedAttackSkill();
         _nextSwingIfCancelled = _nextSwing;
-        _nextSwing = now + (rangedSkill != null ? rangedSkill.CastSeconds + RangedSwingPad : SwingInterval / AttackSpeedMultiplier());
+        _nextSwing = now + (rangedSkill != null ? rangedSkill.CastSeconds + RangedSwingPad : MeleeSwingInterval());
         BasicAttack();
     }
 
     private float BasicAttackRange(Ent? target)
     {
         int ranged = RangedWeaponItem();
-        float weapon = ranged != 0
-            ? (ItemData.Get(ranged)?.Range ?? 0) / 10f
-            : MeleeWeaponReach();
-        return Mathf.Max(MeleeReach, weapon) + (target?.Radius ?? 0f);
+        if (ranged != 0)
+            return (ItemData.Get(ranged)?.Range ?? 0) / WeaponRangeScale + (target?.Radius ?? 0f);
+        float self = _ents.TryGetValue(_myId, out var me) ? me.Radius : DefaultBodyRadius;
+        return SkillReach.BasicMelee(self, target?.Radius ?? 0f, MeleeWeaponReach(), _zone);
     }
 
-    private float MeleeWeaponReach()
+    private float MeleeWeaponReach() => HandWeaponReach(rightFirst: true);
+
+    private float HandWeaponReach(bool rightFirst)
     {
         var gear = SelfGear();
         int right = gear.Length > 6 ? gear[6] : 0;
         int left = gear.Length > 7 ? gear[7] : 0;
-        int hand = right != 0 ? right : left;
-        return hand == 0 ? 0f : (ItemData.Get(hand)?.Range ?? 0) / 10f;
+        int hand = rightFirst ? (right != 0 ? right : left) : (left != 0 ? left : right);
+        return hand == 0 ? 0f : (ItemData.Get(hand)?.Range ?? 0) / WeaponRangeScale;
     }
 
-    private const float MeleeReach = 3.0f;
+    private const float WeaponRangeScale = 10f;
     private const float ApproachFraction = 0.8f;
     private const float RangedSwingPad = 0.15f;
-    private const float DefaultSkillRange = 7.0f;
 
     private void AimAttack(double now)
     {
         if (_selectedId >= 0 && _ents.TryGetValue(_selectedId, out var e))
             FaceSelfToward(e.Body.Position);
         else if (_faceDir.LengthSquared() >= 0.01f)
-            _self.RotationDegrees = new Vector3(0, 180f - Coord.KoHeading(-_faceDir.X, _faceDir.Z), 0);
+            SnapSelfToFaceDir();
         _attackLungeDir = Vector3.Zero;
         _attackLungeUntil = 0;
     }
@@ -366,17 +381,27 @@ public partial class World
 
     private bool InBasicAttackRange(int id) =>
         _ents.TryGetValue(id, out var e)
-        && e.Body.GlobalPosition.DistanceTo(_self.GlobalPosition) <= BasicAttackRange(e);
+        && FlatDistance(e.Body.GlobalPosition, _self.GlobalPosition) <= BasicAttackRange(e);
 
     private const int AttackResultHit = 1;
+    private const int AttackResultKill = 2;
 
-    private void OnAttack(int attackType, int result, int attackerId, int targetId)
+    private const int AttackTypeBasic = 1;
+
+    private void OnAttack(int attackType, int result, int attackerId, int targetId, bool chained)
     {
+        if (targetId == _myId && attackerId != _myId) BreakCastByChance();
+        if (attackerId == _myId || targetId == _myId) _battleUntil = Now() + NestDungeon.BattleSeconds;
+        if (attackType == AttackTypeBasic && result == AttackResultHit
+            && (attackerId == _myId ? _attackChain.Consume() : chained)
+            && Fx.NameForId(AttackChain.Effect(GD.Randi())) is { } chainFx)
+            SpawnFxOn(attackerId, chainFx, 0f);
         if (result == AttackResultHit) PlayStruck(targetId);
+        if (result == AttackResultKill && _ents.TryGetValue(targetId, out var victim)) victim.KillStriker = attackerId;
         if (attackerId != _myId && _ents.TryGetValue(attackerId, out var a))
         {
-            a.StrikeTarget = result == AttackResultHit ? targetId : -1;
-            PlayEntityAction(a, BasicAttackClips, ActionRankBasic);
+            a.StrikeTarget = result is AttackResultHit or AttackResultKill ? targetId : -1;
+            if (!TryMoveAttack(a)) PlayEntityAction(a, BasicAttackClips, ActionRankBasic);
         }
         FaceToward(attackerId, targetId);
     }
@@ -388,12 +413,13 @@ public partial class World
         {
             case 1:
                 if (Diag.SlowLog) GD.Print($"[fx] casting skill={skillId} caster={casterId} selfFx1={s?.SelfFx1} part={s?.SelfPart1}");
+                ShowSkillMsgOut(SkillMsgOut.Cast(skillId));
                 if (targetId < 0) FaceTowardImpact(casterId, data);
                 else FaceToward(casterId, targetId);
                 if (casterId != _myId) StopSkillFx(casterId, skillId);
                 if (casterId == _myId && s != null)
                 {
-                    EnsureSkillCooldown(s);
+                    if (!_instantCasts.Remove(s.Id)) EnsureSkillCooldown(s);
                     BeginCast(s);
                     LogSkillUse(s);
                 }
@@ -413,6 +439,7 @@ public partial class World
                 break;
 
             case 3:
+                ShowSkillMsgOut(SkillMsgOut.Effect(skillId));
                 if (s != null && SecondaryBuff.IsEcho(s, data))
                 {
                     OnSecondaryBuffLanded(s, targetId == 0 ? casterId : targetId, SecondaryBuff.Seconds(data),
@@ -420,6 +447,7 @@ public partial class World
                     break;
                 }
                 bool miss = data.Length > 3 && data[3] <= -100;
+                bool dash = s != null && OnDashEffecting(s, casterId, targetId, data);
                 int affected = targetId == 0 ? casterId : targetId;
                 if (Diag.SlowLog) GD.Print($"[fx] effecting skill={skillId} caster={casterId} target={targetId} miss={miss} targetFx={s?.TargetFx} part={s?.TargetPart} data3={(data.Length > 3 ? data[3] : 0)}");
                 StopSkillFx(casterId, skillId, 1);
@@ -438,19 +466,20 @@ public partial class World
                     if (loops) ScheduleSkillFxStop(casterId, skillId, 2, Now() + buff);
                     AudioFxAt(s.SelfFx2Id, casterId);
                 }
-                if (!miss && s?.TargetFx != null)
+                if (!miss && !dash && s?.TargetFx != null)
                 {
-                    if (SpawnFxAtImpact(casterId, targetId, s.TargetFx, s.TargetPart, data, s.IsAreaCast)
+                    if (SpawnFxAtImpact(casterId, targetId, s.TargetFx, s.TargetPart, data, s.IsAreaCast, s.IsMelee)
                         && !(casterId == _myId && s.IsPotion))
                         AudioFxAt(s.TargetFxId, targetId > 0 ? targetId : casterId);
                 }
                 if (!miss && s != null && s.TargetAnim != 0 && targetId >= 0)
                     PlaySkillAction(affected, s.TargetAnim, StruckClips, ActionRankStruck);
+                if (!miss && targetId >= 0 && Gestures.IsCorpseSkill(skillId)) PlayCorpseJiggle(targetId);
                 if (casterId == _myId)
                 {
                     bool requested = ResolvePendingReply(skillId);
                     if (!HasPendingCast(skillId)) EndCast(skillId);
-                    if (requested && s != null && !HasPendingCast(skillId))
+                    if (requested && s != null && !HasPendingCast(skillId) && !dash)
                         LogSkillOutcome(s, miss);
                     if (s != null)
                     {
@@ -458,27 +487,34 @@ public partial class World
                         if (!miss && affected == _myId) ApplyMoveSpeedBuff(s, BuffSeconds(s, data));
                     }
                 }
+                if (!miss && s != null && affected == _myId && casterId != _myId && CastBreak.LightningHurts(CastBreakSkill.Of(s)))
+                    BreakCastByChance();
                 if (!miss && s != null)
                 {
                     RegisterBuff(s, affected, BuffSeconds(s, data));
                     if (affected == _myId && s.Type1 == MagicType.Buff)
                         ApplySelfStatus(s.BuffType, SecondaryBuff.SpeedPercent(data), BuffSeconds(s, data));
                 }
-                if (!miss && s?.IsResurrect == true) Revive(affected);
+                if (!miss && s?.Revives == true && !ResurrectionOnlyOffered(s, data)) Revive(affected);
                 break;
 
             case 4:
             case 6:
+                if (sub == MagicSub.Fail && targetId == _myId && casterId != _myId && s != null && CastBreak.InFlightFailBreaks(CastBreakSkill.Of(s), data))
+                    BreakCastByChance();
                 StopSkillFx(casterId, skillId);
                 if (casterId != _myId) EndEntityCastPose(casterId);
                 if (casterId == _myId)
                 {
                     bool awaited = HasPendingCast(skillId);
                     ClearPendingCast(skillId);
+                    _instantCasts.Remove(skillId);
                     EndCast(skillId);
-                    if (s != null) CancelSkillCooldown(s);   // a refused cast must not eat the cooldown
+                    if (s != null && (sub != MagicSub.Fail || MagicFail.RefundsCooldown(MagicFail.Code(data), s.FlyingFxId > 0)))
+                        CancelSkillCooldown(s);
                     if (sub == MagicSub.Fail) NoteGenieRefusal(skillId);
-                    if (awaited && s != null) LogSkillRefused(s, sub);
+                    if (s != null && sub == MagicSub.Fail && MagicFail.Code(data) != 0) LogSkillFail(s, data);
+                    else if (awaited && s != null) LogSkillRefused(s, sub);
                     _castLogged.Remove(skillId);
                 }
                 break;
@@ -500,6 +536,19 @@ public partial class World
         if (BasicRangedAttackSkill()?.Id == s.Id || s.IsPotion) return;
         if (miss) CombatLogAdd(SystemText(TextMissed, "%s Missed.", s.Name), CombatLogKind.Incoming);
         else CombatLogAdd($"{s.Name} succeeded.", CombatLogKind.Outgoing);
+    }
+
+    private void LogSkillFail(SkillData.Skill s, short[] data)
+    {
+        string text = MagicFail.TextFor(data) switch
+        {
+            MagicFailText.CastingFailed => SystemText(TextCastingFailed, "Casting failed"),
+            MagicFailText.SkillFailed => $"{s.Name} failed.",
+            MagicFailText.Missed => SystemText(TextMissed, "%s Missed.", s.Name),
+            MagicFailText.NotEnoughMp => SystemText(TextNotEnoughMp, "Skill Failed - Not enough MP"),
+            _ => "",
+        };
+        CombatNotice(text);
     }
 
     private void LogSkillRefused(SkillData.Skill s, int sub)
@@ -541,20 +590,18 @@ public partial class World
 
     private void OnDead(int victimId, int killerId)
     {
-        AudioDeath(victimId);
         if (victimId == _myId)
         {
-            CombatLogAdd(
-                killerId >= 0 ? $"You were defeated by {CombatEntityName(killerId)}." : "You died.",
-                CombatLogKind.Incoming);
+            AudioDeath(victimId);
+            if (_ents.TryGetValue(killerId, out var killer) && !killer.IsNpc && killer.Name.Length > 0)
+                CombatLogAdd(TextTemplate.Fill(SystemText(CombatLogLines.KilledByText, "You've been killed by %s"), killer.Name),
+                    CombatLogKind.Incoming, KilledByColour);
             EnterSelfDeath();
             return;
         }
         if (_ents.TryGetValue(victimId, out var e))
         {
-            if (killerId == _myId)
-                CombatLogAdd($"You defeated {e.Name}.", CombatLogKind.Outgoing);
-            LayOutCorpse(e, settled: false);
+            BeginDying(e);
             if (_autoAttack && _autoTargetId == victimId) StopAutoAttack();
         }
     }
@@ -569,10 +616,10 @@ public partial class World
         Deselect();
         _pendingCasts.Clear();
         _selfFlinch?.Stop();
-        double len = PlayActionOn(_selfAnim, DeathClips);
+        double len = PlayActionOn(_selfAnim, DeathPoses.PlayerKeepClip, DeathClips);
         _selfActionUntil = Now() + Mathf.Max((float)len, 2.5f);
         _selfActionRank = ActionRankDeath;
-        ShowDeathDialog();
+        if (!RoyaleDeath()) ShowDeathDialog();
     }
 
     private void OnSelfHp(int hp, int maxHp, int attackerId)
@@ -581,9 +628,15 @@ public partial class World
         _hpBar?.Set(hp, maxHp);
         if (_selfDead && hp > 0) OnSelfResurrected();
         if (dmg > 0)
-            CombatLogAdd($"{CombatEntityName(attackerId)} hit you for {dmg:n0} damage.", CombatLogKind.Incoming);
+        {
+            int shown = CombatLogLines.LoggedHp(_zone, dmg);
+            CombatLogAdd(_ents.TryGetValue(attackerId, out var hitter) && !hitter.IsNpc && hitter.Name.Length > 0
+                ? TextTemplate.Fill(SystemText(CombatLogLines.PlayerDamageText, "%s is inflicted with %d HP damage."), ShownName(hitter), shown)
+                : TextTemplate.Fill(SystemText(CombatLogLines.HpDamageText, "%d HP Damage"), shown), CombatLogKind.Incoming);
+        }
         else if (recovered > 0)
-            CombatLogAdd($"You recovered {recovered:n0} HP.", CombatLogKind.Recovery);
+            CombatLogAdd(TextTemplate.Fill(SystemText(CombatLogLines.HpRecoveredText, "%d HP Recovered"),
+                CombatLogLines.LoggedHp(_zone, recovered)), CombatLogKind.Recovery);
         if (dmg > 0 && _self != null)
         {
             Floaters?.Wound(dmg);
@@ -600,17 +653,30 @@ public partial class World
         }
     }
 
+    private void OnSelfStamina(int sp, int maxSp)
+    {
+        int delta = Vitals.ApplySp(sp, maxSp);
+        ShowVpBar(sp, maxSp);
+        if (delta < 0)
+            CombatLogAdd(TextTemplate.Fill(SystemText(VpUsedText, "%d SP Used"), -delta), CombatLogKind.Spent);
+    }
+
+    private const int VpUsedText = 3014;
+    private static readonly Color KilledByColour = new("ff8080");
+
     private void OnSelfMp(int mp, int maxMp)
     {
         int delta = Vitals.ApplyMp(mp, maxMp);
         _mpBar?.Set(mp, maxMp);
         if (delta > 0)
         {
-            CombatLogAdd($"You recovered {delta:n0} MP.", CombatLogKind.Resource);
+            CombatLogAdd(TextTemplate.Fill(SystemText(CombatLogLines.ManaText(_selfClass, recovered: true), "%d MP Recovered"), delta),
+                CombatLogKind.Resource);
             Floaters?.RegenMp(delta);
         }
         else if (delta < 0)
-            CombatLogAdd($"You used {-delta:n0} MP.", CombatLogKind.Resource);
+            CombatLogAdd(TextTemplate.Fill(SystemText(CombatLogLines.ManaText(_selfClass, recovered: false), "%d MP Used"), -delta),
+                CombatLogKind.Spent);
     }
 
     private void OnItemStats(DerivedStats stats)
@@ -625,6 +691,7 @@ public partial class World
         if (id == _myId) { OnSelfResurrected(); return; }
         if (!_ents.TryGetValue(id, out var e) || !e.Dead) return;
         e.Dead = false;
+        e.DeathDueAt = 0;
         e.CorpseRemoveAt = 0;
         e.ActionUntil = 0;
         e.ActionRank = 0;
@@ -639,6 +706,7 @@ public partial class World
         _selfDead = false;
         _selfActionUntil = 0;
         _selfClip = null;
+        CloseResurrectPrompt();
         HideDeathDialog();
         CombatLogAdd("You have been resurrected.", CombatLogKind.Recovery);
     }
@@ -657,7 +725,9 @@ public partial class World
         EndCast(0);
         ClearAllBuffs();
         _selfClip = null;
+        CloseResurrectPrompt();
         HideDeathDialog();
+        SpawnRespawnEffect();
         CombatLogAdd("You returned to the battlefield.", CombatLogKind.Status);
     }
 

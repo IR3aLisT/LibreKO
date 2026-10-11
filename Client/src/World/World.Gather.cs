@@ -49,23 +49,39 @@ public partial class World
         _fishingCast.Clear();
     }
 
-    private int FindGatherTool(out int kind)
+    private const int TextNoPickaxe = 18103;
+    private const int TextNoFishingRod = 18112;
+    private const int TextGatherBagFull = 18105;
+    private const int TextPickaxeBroken = 18106;
+    private const int TextFishingRodBroken = 18113;
+    private const int TextGatherTransformed = 10353;
+
+    private int FindGatherTool(int kind)
     {
-        kind = 0;
         if (Inv == null) return -1;
 
         foreach (int slot in new[] { InventoryConstants.RightHand, InventoryConstants.LeftHand })
         {
             if (Inv.Length <= slot) continue;
-            var def = ItemData.Get(Inv[slot].ItemId);
-            if (def == null) continue;
-            if (def.Kind != KindPickaxe && def.Kind != KindFishingRod) continue;
-            kind = def.Kind;
-            return slot;
+            if (ItemData.Get(Inv[slot].ItemId)?.Kind == kind) return slot;
         }
 
         return -1;
     }
+
+    private bool BackpackFull()
+    {
+        for (int i = 0; i < InventoryConstants.HaveMax; i++)
+        {
+            int slot = InventoryConstants.InventoryStart + i;
+            if (slot >= Inv.Length || Inv[slot].IsEmpty) return false;
+        }
+        return true;
+    }
+
+    private string ToolBrokenText(bool fishing) => fishing
+        ? SystemText(TextFishingRodBroken, "Durability of fishing rod becomes 0.")
+        : SystemText(TextPickaxeBroken, "The durability of pickaxe is 0");
 
     private bool SelfInGatherArea(bool fishing)
     {
@@ -80,17 +96,33 @@ public partial class World
         if (_gathering) { StopGather(sendStop: true); return true; }
         if (_selfDead) return false;
 
-        int slot = FindGatherTool(out int kind);
-        if (slot < 0) return false;
+        bool fishing = SelfInGatherArea(fishing: true);
+        if (!fishing && !SelfInGatherArea(fishing: false)) return false;
 
-        bool fishing = kind == KindFishingRod;
-        if (!SelfInGatherArea(fishing)) return false;
+        int slot = FindGatherTool(fishing ? KindFishingRod : KindPickaxe);
+        if (slot < 0)
+        {
+            CombatNotice(fishing
+                ? SystemText(TextNoFishingRod, "Fishing rod is not equipped.")
+                : SystemText(TextNoPickaxe, "A pickaxe is not equipped"));
+            return true;
+        }
 
         if (Inv[slot].Durability <= 0)
         {
-            CombatNotice(fishing
-                ? "Durability of fishing rod becomes 0."
-                : "The durability of pickaxe is 0");
+            CombatNotice(ToolBrokenText(fishing));
+            return true;
+        }
+
+        if (BackpackFull())
+        {
+            CombatNotice(SystemText(TextGatherBagFull, "Not enough inventory slot"));
+            return true;
+        }
+
+        if (_selfTransformSkill != 0)
+        {
+            CombatNotice(SystemText(TextGatherTransformed, "Transforming."));
             return true;
         }
 
@@ -110,6 +142,7 @@ public partial class World
         _fishingCast.Remove(_myId);
         if (_ents.TryGetValue(_myId, out var self)) self.Gathering = false;
         ClearGatherFx();
+        RefreshGatherChip();
         if (sendStop) { if (_gatherFishing) Net.I.SendFishingStop(); else Net.I.SendMiningStop(); }
     }
 
@@ -266,6 +299,7 @@ public partial class World
             _gathering = true;
             _gatherFishing = fishing;
             _gatherNextAttempt = Now() + GatherInterval;
+            RefreshGatherChip();
         }
 
         if (fishing) PlayGatherCast(charId);
@@ -350,9 +384,7 @@ public partial class World
 
         if (_gathering && position == _gatherToolSlot && dura <= 0)
         {
-            CombatNotice(_gatherFishing
-                ? "Durability of fishing rod becomes 0."
-                : "The durability of pickaxe is 0");
+            CombatNotice(ToolBrokenText(_gatherFishing));
             StopGather(sendStop: true);
         }
     }

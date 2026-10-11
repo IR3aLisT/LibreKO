@@ -12,6 +12,7 @@ public partial class Net
     public const byte GenieStart = 4;
     public const byte GenieStop = 5;
     public const byte GenieRemainingTime = 6;
+    public const byte GenieActivated = 7;
     public const byte GenieUseHammer = 8;
     public const byte GenieMove = 1;
     public const byte GenieRotate = 2;
@@ -19,9 +20,10 @@ public partial class Net
     public const byte GenieMagic = 4;
     public const byte GenieAcknowledged = 1;
     public const byte GenieActive = 1;
-    public const int GenieOptionBytes = 100;
+    public const int GenieOptionBytes = 128;
 
     public event Action<bool>? GenieHammerResult;
+    public event Action<int, bool>? GenieAuraEvent;
 
     public void SendGenieHammer(byte threshold)
     {
@@ -62,6 +64,11 @@ public partial class Net
         if (command == GenieUseHammer)
         {
             if (p.RemainingBytes >= 1) GenieHammerResult?.Invoke(p.ReadByte() == GenieActive);
+            return;
+        }
+        if (command == GenieActivated)
+        {
+            if (p.RemainingBytes >= 5) GenieAuraEvent?.Invoke(p.ReadInt(), p.ReadByte() == GenieActive);
             return;
         }
         if (command == GenieLoadOptions)

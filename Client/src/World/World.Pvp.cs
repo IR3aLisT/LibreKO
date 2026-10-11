@@ -12,9 +12,8 @@ public partial class World
     private bool _pvpFull;
     private bool _pvpMarked;
 
-    private Node3D? _pvpHalo;
-    private Color _pvpSavedNameCol;
-    private bool _pvpSavedName;
+    private Node3D? _pvpMarker;
+    private static readonly Color PvpLogColour = new(1f, 1f, 0f);
 
     private static readonly Color PvpRivalCol = new("e0574a");
 
@@ -114,9 +113,10 @@ public partial class World
 
         _pvpNameLbl.Text = _pvpClanName.Length > 0 ? $"Rival: {_pvpRivalName} [{_pvpClanName}]" : $"Rival: {_pvpRivalName}";
         RefreshPvpPips();
-        _pvpLayer.Visible = true;
+        _pvpLayer.Visible = Net.I.Sheet.Level >= PvpRival.MinLevel;
 
-        CombatNotice($"{_pvpRivalName} is now your rival.");
+        if (!string.IsNullOrEmpty(rivalName))
+            CombatNotice(ItemData.Text(PvpRival.AssignedText, "%s is now your rival.").Replace("%s", rivalName), PvpLogColour);
 
         TryMarkRival();
     }
@@ -124,7 +124,7 @@ public partial class World
     private void OnPvpRivalRemoved()
     {
         if (_pvpRivalId >= 0)
-            CombatNotice($"Your rivalry with {_pvpRivalName} has ended.");
+            CombatNotice(ItemData.Text(PvpRival.CancelledText, "Rivalry cancelled."), PvpLogColour);
         ClearRivalMarker();
         _pvpRivalId = -1;
         _pvpRivalName = "";
@@ -155,60 +155,21 @@ public partial class World
     private void TryMarkRival()
     {
         if (_pvpMarked || _pvpRivalId < 0) return;
+        if (!PvpRival.MarksIn(_zone) || Net.I.Sheet.Level < PvpRival.MinLevel) return;
         if (!_ents.TryGetValue(_pvpRivalId, out var e) || e.Body == null) return;
         if (!GodotObject.IsInstanceValid(e.Body)) return;
 
-        if (e.NameTag != null)
-        {
-            _pvpSavedNameCol = e.NameTag.Modulate;
-            _pvpSavedName = true;
-            e.NameTag.Modulate = PvpRivalCol;
-            e.NameTag.Text = $"⚔ {e.Name}";
-        }
-
-        _pvpHalo = BuildPvpHalo();
-        e.Body.AddChild(_pvpHalo);
-        _pvpMarked = true;
-    }
-
-    private Node3D BuildPvpHalo()
-    {
-        var holder = new Node3D { Position = new Vector3(0, 2.65f, 0) };
-
-        var ring = new MeshInstance3D
-        {
-            Mesh = new TorusMesh { InnerRadius = 0.34f, OuterRadius = 0.46f, RingSegments = 24, Rings = 8 },
-            RotationDegrees = new Vector3(90, 0, 0),
-            MaterialOverride = new StandardMaterial3D
-            {
-                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                BlendMode = BaseMaterial3D.BlendModeEnum.Add,
-                DisableFog = true,
-                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                AlbedoColor = new Color(PvpRivalCol, 0.85f),
-                NoDepthTest = true,
-                RenderPriority = 8,
-            },
-        };
-        holder.AddChild(ring);
-        return holder;
+        _pvpMarker = Fx.Spawn(PvpRival.MarkerFx, e.Body, Vector3.Zero);
+        _pvpMarked = _pvpMarker != null;
     }
 
     private void ClearRivalMarker()
     {
-        if (_pvpHalo != null)
+        if (_pvpMarker != null)
         {
-            if (GodotObject.IsInstanceValid(_pvpHalo)) _pvpHalo.QueueFree();
-            _pvpHalo = null;
+            if (GodotObject.IsInstanceValid(_pvpMarker)) _pvpMarker.QueueFree();
+            _pvpMarker = null;
         }
-        if (_pvpSavedName && _pvpRivalId >= 0 && _ents.TryGetValue(_pvpRivalId, out var e) && e.NameTag != null
-            && GodotObject.IsInstanceValid(e.NameTag))
-        {
-            e.NameTag.Modulate = _pvpSavedNameCol;
-            e.NameTag.Text = e.Name;
-        }
-        _pvpSavedName = false;
         _pvpMarked = false;
     }
 
@@ -222,21 +183,10 @@ public partial class World
             return;
         }
 
-        if (!_ents.ContainsKey(_pvpRivalId)
-            || (_pvpHalo != null && !GodotObject.IsInstanceValid(_pvpHalo)))
+        if (!_ents.ContainsKey(_pvpRivalId) || _pvpMarker == null || !GodotObject.IsInstanceValid(_pvpMarker))
         {
-            if (_pvpHalo != null && !GodotObject.IsInstanceValid(_pvpHalo)) _pvpHalo = null;
+            _pvpMarker = null;
             _pvpMarked = false;
-            _pvpSavedName = false;
-            return;
-        }
-
-        if (_pvpHalo != null && GodotObject.IsInstanceValid(_pvpHalo))
-        {
-            float t = (float)now;
-            _pvpHalo.RotationDegrees = new Vector3(0, (t * 70f) % 360f, 0);
-            float pulse = 1f + 0.12f * Mathf.Sin(t * 4f);
-            _pvpHalo.Scale = new Vector3(pulse, 1f, pulse);
         }
     }
 }

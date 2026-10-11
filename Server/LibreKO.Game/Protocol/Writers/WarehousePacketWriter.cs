@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Entities.GameData;
+﻿using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol;
 
@@ -8,6 +8,7 @@ public sealed class WarehousePacketWriter
 {
     public const byte Failed = 0;
     public const byte Succeeded = 1;
+    public const byte DuplicateItem = 2;
 
     public static Packet Result(WarehouseSubOpcode sub, byte result)
     {
@@ -43,11 +44,16 @@ public sealed class WarehousePacketWriter
         return packet;
     }
 
-    public static Packet VipContents(
-        VipWarehouseSubOpcode sub, VipWarehouseResult result, int remainingSeconds, IReadOnlyList<ItemSlot> slots)
+    public static Packet VipContents(bool pinSet, bool open, uint expiresAt, IReadOnlyList<ItemSlot> slots)
     {
-        var packet = VipResult(sub, result);
-        packet.WriteInt(remainingSeconds);
+        var packet = VipResult(VipWarehouseSubOpcode.Open, VipWarehouseResult.Succeeded);
+        packet.WriteByte((byte)(pinSet ? 1 : 0));
+        for (byte storage = 0; storage < VipVault.Storages; storage++)
+        {
+            var own = storage == VipVault.OwnStorage;
+            packet.WriteByte((byte)(own && open ? 1 : 0));
+            packet.WriteUInt(own ? expiresAt : 0u);
+        }
 
         foreach (var slot in slots)
         {
@@ -61,10 +67,18 @@ public sealed class WarehousePacketWriter
         return packet;
     }
 
-    public static Packet VipVaultExtended(VipWarehouseSubOpcode sub, VipWarehouseResult result, int remainingSeconds)
+    public static Packet VipVaultExtended(byte storage, uint expiresAt)
     {
-        var packet = VipResult(sub, result);
-        packet.WriteInt(remainingSeconds);
+        var packet = VipResult(VipWarehouseSubOpcode.UseVault, VipWarehouseResult.Succeeded);
+        packet.WriteByte(storage);
+        packet.WriteUInt(expiresAt);
+        return packet;
+    }
+
+    public static Packet VipKeyExpired(byte storage)
+    {
+        var packet = VipSub(VipWarehouseSubOpcode.KeyExpired);
+        packet.WriteByte(storage);
         return packet;
     }
 
@@ -72,6 +86,13 @@ public sealed class WarehousePacketWriter
     {
         var packet = VipResult(sub, result);
         packet.WriteByte(0);
+        return packet;
+    }
+
+    public static Packet VipPasswordRejected(byte failures)
+    {
+        var packet = VipResult(VipWarehouseSubOpcode.EnterPassword, VipWarehouseResult.Rejected);
+        packet.WriteByte(failures);
         return packet;
     }
 

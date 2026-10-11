@@ -75,6 +75,7 @@ public partial class FxBoardBatch : Node3D
             image.Convert(Image.Format.Rgba8);
             if (image.GetWidth() != first.GetWidth() || image.GetHeight() != first.GetHeight())
                 image.Resize(first.GetWidth(), first.GetHeight());
+            image.GenerateMipmaps();
             images.Add(image);
         }
         var array = new Texture2DArray();
@@ -126,7 +127,7 @@ public partial class FxBoardBatch : Node3D
         {
             Code = "shader_type spatial;\n"
                    + $"render_mode {FxShading.RenderModes(doubleSided, noDepthTest)};\n"
-                   + "uniform sampler2DArray frames : filter_linear, repeat_enable;\n"
+                   + "uniform sampler2DArray frames : filter_linear_mipmap, repeat_enable;\n"
                    + "uniform vec2 uv_scale = vec2(1.0, 1.0);\n"
                    + "varying vec3 cell;\n"
                    + "varying flat float blend_word;\n"

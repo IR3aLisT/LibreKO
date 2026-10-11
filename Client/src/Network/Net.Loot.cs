@@ -20,6 +20,8 @@ public partial class Net
 
     public event Action<int>? LootFailEvent;
 
+    public event Action<int, int>? LootRefusedEvent;
+
     private void HandleItemDrop(Packet p)
     {
         if (p.RemainingBytes < 9) return;
@@ -33,17 +35,19 @@ public partial class Net
     {
         if (p.RemainingBytes < 5) return;
         int bundleId = p.ReadInt();
-        bool hasItems = p.ReadByte() != 0;
+        int result = p.ReadByte();
+        if (result != LootOpenResult.Opened)
+        {
+            LootRefusedEvent?.Invoke(bundleId, result);
+            return;
+        }
 
         var entries = new List<LootEntry>(LootMaxItems);
-        if (hasItems)
+        for (int i = 0; i < LootWireSlots && p.RemainingBytes >= 6; i++)
         {
-            for (int i = 0; i < LootWireSlots && p.RemainingBytes >= 6; i++)
-            {
-                int itemId = p.ReadInt();
-                int count = p.ReadUShort();
-                if (itemId != 0) entries.Add(new LootEntry(itemId, count));
-            }
+            int itemId = p.ReadInt();
+            int count = p.ReadUShort();
+            if (itemId != 0) entries.Add(new LootEntry(itemId, count));
         }
         LootContentsEvent?.Invoke(bundleId, entries);
     }

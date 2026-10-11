@@ -4,8 +4,8 @@ namespace LibreKO.Game.Protocol.Writers;
 
 public sealed class RankPacketWriter
 {
-    public const int ChaosDungeonTrailer = 1;
     public const ushort NoPremiumBonus = 0;
+    public const int MaxPremiumBonus = 999;
     public const byte NoSymbolRank = 0xFF;
 
     public readonly record struct RankEntry(
@@ -14,41 +14,72 @@ public sealed class RankPacketWriter
         ushort ClanId,
         ushort MarkVersion,
         string ClanName,
-        int DailyLoyalty);
+        int DailyLoyalty,
+        ushort PremiumBonus = NoPremiumBonus,
+        byte SymbolRank = NoSymbolRank);
+
+    public static ushort PremiumShare(int premiumLoyalty) => (ushort)Math.Clamp(premiumLoyalty, 0, MaxPremiumBonus);
 
     public static Packet PkZone(
         byte rankType,
         IReadOnlyList<RankEntry> karus,
         IReadOnlyList<RankEntry> elmorad,
         ushort myRank,
-        int myDailyLoyalty)
+        int myDailyLoyalty,
+        ushort myPremiumBonus)
     {
         var packet = Sub(rankType);
         WriteNation(packet, karus);
         WriteNation(packet, elmorad);
         packet.WriteUShort(myRank);
         packet.WriteInt(myDailyLoyalty);
-        packet.WriteUShort(NoPremiumBonus);
+        packet.WriteUShort(myPremiumBonus);
         return packet;
     }
 
-    public static Packet BorderDefenseWar(byte rankType)
+    public static Packet BorderDefenseWar(
+        byte rankType,
+        IReadOnlyList<RankEntry> karus,
+        IReadOnlyList<RankEntry> elmorad,
+        uint victoryExp,
+        uint bonusExp)
     {
         var packet = Sub(rankType);
-        packet.WriteUShort(0);
-        packet.WriteUShort(0);
-        packet.WriteLong(0);
-        packet.WriteLong(0);
+        WriteRoomNation(packet, karus);
+        WriteRoomNation(packet, elmorad);
+        packet.WriteUInt(victoryExp);
+        packet.WriteUInt(bonusExp);
         return packet;
     }
 
-    public static Packet ChaosDungeon(byte rankType)
+    private static void WriteRoomNation(Packet packet, IReadOnlyList<RankEntry> entries)
+    {
+        packet.WriteUShort((ushort)entries.Count);
+        foreach (var entry in entries)
+        {
+            packet.WriteString(entry.Name);
+            packet.WriteByte(entry.Nation);
+            packet.WriteUShort(entry.ClanId);
+            packet.WriteUShort(entry.MarkVersion);
+            packet.WriteString(entry.ClanName);
+            packet.WriteInt(entry.DailyLoyalty);
+        }
+    }
+
+    public readonly record struct ChaosRow(string Name, short Kills, short Deaths);
+
+    public static Packet ChaosDungeon(byte rankType, IReadOnlyList<ChaosRow> rows, uint exp, uint premiumExp)
     {
         var packet = Sub(rankType);
-        packet.WriteByte(0);
-        packet.WriteInt(0);
-        packet.WriteInt(0);
-        packet.WriteInt(ChaosDungeonTrailer);
+        packet.WriteByte((byte)rows.Count);
+        foreach (var row in rows)
+        {
+            packet.WriteString(row.Name);
+            packet.WriteShort(row.Kills);
+            packet.WriteShort(row.Deaths);
+        }
+        packet.WriteUInt(exp);
+        packet.WriteUInt(premiumExp);
         return packet;
     }
 
@@ -64,14 +95,14 @@ public sealed class RankPacketWriter
         packet.WriteUShort((ushort)entries.Count);
         foreach (var entry in entries)
         {
-            packet.WriteSByteString(entry.Name);
+            packet.WriteString(entry.Name);
             packet.WriteByte(entry.Nation);
             packet.WriteUShort(entry.ClanId);
             packet.WriteUShort(entry.MarkVersion);
-            packet.WriteSByteString(entry.ClanName);
+            packet.WriteString(entry.ClanName);
             packet.WriteInt(entry.DailyLoyalty);
-            packet.WriteUShort(NoPremiumBonus);
-            packet.WriteByte(NoSymbolRank);
+            packet.WriteUShort(entry.PremiumBonus);
+            packet.WriteByte(entry.SymbolRank);
         }
     }
 

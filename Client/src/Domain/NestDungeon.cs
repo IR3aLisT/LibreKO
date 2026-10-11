@@ -14,8 +14,15 @@ public enum MonsterStoneResult : byte
 public static class NestDungeon
 {
     public const int EventSummonGroup = 1;
-    public const string InPartyRefusal = "You cannot use it while in a party.";
     public const string CompletedLine = "Quest Mission Completed!!!";
+    public const int InPartyText = 9916;
+    public const int DeadText = 9918;
+    public const int BattleText = 7725;
+    public const int ExpQuestionText = 42152;
+    public const double BattleSeconds = 10.0;
+
+    private const int ExpFactor = 5;
+    private const int ExpBase = 10;
 
     private const string TerminationLabel = "Mission termination time....";
     private const int FirstNest = 81;
@@ -25,8 +32,6 @@ public static class NestDungeon
     private const int JuraidMountain = 87;
     private const int SecondsPerMinute = 60;
     private const int SecondsPerHour = 3600;
-
-    public static string DeadRefusal(string itemName) => $"{itemName} cannot be used while dead.";
 
     public static bool IsNestZone(int zone) => zone is FirstNest or SecondNest or ThirdNest;
 
@@ -42,15 +47,19 @@ public static class NestDungeon
         return $"{TerminationLabel}{hours:00}:{minutes:00}:{seconds:00}";
     }
 
-    public static string? Message(MonsterStoneResult result, int currentZone) => result switch
+    public static long ExpFor(int level) => ExpFactor * ((long)level * level * level + ExpBase);
+
+    public static NestReply? Reply(MonsterStoneResult result, int currentZone) => result switch
     {
         MonsterStoneResult.CannotEnterHere => IsInstancedZone(currentZone)
-            ? "You are already in an instanced dungeon."
-            : "You cannot enter from this zone.",
-        MonsterStoneResult.PartyLeaderOnly => "Only the party leader can request entry.",
-        MonsterStoneResult.Failed or MonsterStoneResult.Refused => "Failed to enter the dungeon.",
-        MonsterStoneResult.PartyLevelTooHigh => "Only a party whose members are all below level 75 can enter.",
-        MonsterStoneResult.NotEnoughHealth => "You cannot use it with less than half of your HP.",
+            ? new NestReply(9914, "Currently participating another instanced dungeon", true)
+            : new NestReply(9911, "Cannot enter in current zone", true),
+        MonsterStoneResult.PartyLeaderOnly => new NestReply(9912, "Only Party Leader can request admission to enter", true),
+        MonsterStoneResult.Failed or MonsterStoneResult.Refused => new NestReply(9913, "Failed to enter instanced dungeon", true),
+        MonsterStoneResult.PartyLevelTooHigh => new NestReply(9915, "Only a party whose members are all below level 75 can enter.", true),
+        MonsterStoneResult.NotEnoughHealth => new NestReply(9919, "You can't use when less than half of your hp", false),
         _ => null,
     };
 }
+
+public readonly record struct NestReply(int Id, string Fallback, bool Boxed);

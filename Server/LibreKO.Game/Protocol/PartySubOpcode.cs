@@ -1,4 +1,4 @@
-namespace LibreKO.Game.Protocol;
+﻿namespace LibreKO.Game.Protocol;
 
 public enum PartySubOpcode : byte
 {
@@ -11,8 +11,9 @@ public enum PartySubOpcode : byte
     ClassChange = 8,
     StatusEffect = 9,
     Commander = 30,
-    TargetNumber = 31,
-    Alert = 32,
+    CommanderMark = 31,
+    CommanderOrder = 32,
+    WarBoard = 38,
 }
 
 public enum PartyRequest : byte
@@ -24,6 +25,7 @@ public enum PartyRequest : byte
     Delete = 5,
     Promote = 28,
     CommandPromote = 30,
-    TargetNumber = 31,
-    Alert = 32,
+    CommanderMark = 31,
+    CommanderOrder = 32,
+    WarBoard = 38,
 }

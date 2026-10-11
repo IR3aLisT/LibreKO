@@ -51,6 +51,7 @@ public partial class World
         _stallSignCanvas.AddChild(_stallSignLayer);
 
         Net.I.StallListEvent += OnStallList;
+        Net.I.StallShowcaseChangedEvent += OnStallShowcaseChanged;
         Net.I.StallsInViewEvent += OnStallsInView;
         Net.I.BuyStallPlacedEvent += OnBuyStallPlaced;
         Net.I.ReplayKnownStalls(RestoreStall);
@@ -59,6 +60,7 @@ public partial class World
     private void MerchantStallDispose()
     {
         Net.I.StallListEvent -= OnStallList;
+        Net.I.StallShowcaseChangedEvent -= OnStallShowcaseChanged;
         Net.I.StallsInViewEvent -= OnStallsInView;
         Net.I.BuyStallPlacedEvent -= OnBuyStallPlaced;
         _stalls.Clear();
@@ -69,6 +71,14 @@ public partial class World
     {
         PlaceStall(owner.CharacterId, owner.IsBuying, owner.Flags, null);
         Net.I.SendStallListRequest(owner.CharacterId);
+    }
+
+    private void OnStallShowcaseChanged(StallShowcaseReply reply)
+    {
+        if (!_stalls.TryGetValue(reply.Owner, out var stall)) return;
+        if (reply.ItemIds is { } ids) stall.ItemIds = ids;
+        else if (reply.Slot >= 0 && reply.Slot < stall.ItemIds.Length) stall.ItemIds[reply.Slot] = 0;
+        if (stall.Sign != null && GodotObject.IsInstanceValid(stall.Sign)) RefreshStallSign(reply.Owner, stall);
     }
 
     private void OnStallList(StallOwner owner, int[] itemIds) =>
@@ -92,6 +102,7 @@ public partial class World
         if (itemIds != null) stall.ItemIds = itemIds;
 
         AttachStall(charId, stall);
+        RefreshClanLine(charId);
     }
 
     private void AttachStall(int charId, Stall stall)
@@ -138,6 +149,7 @@ public partial class World
     {
         if (!_stalls.Remove(charId, out var stall)) return;
         FreeStallNode(stall);
+        RefreshClanLine(charId);
     }
 
     private void ForgetStall(int charId)

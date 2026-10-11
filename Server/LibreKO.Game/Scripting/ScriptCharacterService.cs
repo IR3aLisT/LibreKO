@@ -74,7 +74,7 @@ public class ScriptCharacterService(
         session.PremiumExpiry = standing.AddDays(days);
         session.AccountStatus = UserSession.AccountStatusPremium;
         queuedPackets.Add(MiscPacketWriter.Premium(
-            session.AccountStatus, session.PremiumType, session.PremiumTime));
+            session.PremiumType, session.PremiumTime, PremiumBonusList.For(session, gameData)));
         return true;
     }
 

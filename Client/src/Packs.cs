@@ -29,6 +29,7 @@ public partial class Packs : Node
     public override void _Ready()
     {
         Diag.Install();
+        RenderFaultWatch.Install();
         if (OS.HasFeature("editor")) return;
         Config.PinShippedDefaults();
         Build.Pin();

@@ -1,4 +1,5 @@
 ﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -35,6 +36,12 @@ public class ItemExpiryService(
         {
             if (session.IsBot)
                 continue;
+
+            if (VipVault.ExpiredUnannounced(session.VipVaultExpiry, session.VipVaultExpiryAnnounced, nowUnixSeconds))
+            {
+                session.VipVaultExpiryAnnounced = true;
+                await session.Client.SendPacket(WarehousePacketWriter.VipKeyExpired(VipVault.OwnStorage));
+            }
 
             ItemExpiry.Sweep(session.Warehouse, nowUnixSeconds);
             ItemExpiry.Sweep(session.VipWarehouse, nowUnixSeconds);

@@ -48,10 +48,17 @@ public partial class World
     private void AudioFxAt(int fxId, int entityId)
     {
         int sid = SoundCatalog.FxSound(fxId);
-        if (sid == 0) return;
-        var pos = WorldPosOf(entityId);
-        Audio.Play(sid, pos ?? _self.GlobalPosition);
+        if (sid == 0 || MutedPlayer(entityId)) return;
+        var pos = WorldPosOf(entityId) ?? _self.GlobalPosition;
+        if (pos.DistanceSquaredTo(_self.GlobalPosition) > Config.EffectSoundDistance * Config.EffectSoundDistance) return;
+        Audio.Play(sid, pos);
     }
+
+    private bool MutedPlayer(int entityId) =>
+        !Config.OtherPlayersSounds && entityId != _myId
+        && _ents.TryGetValue(entityId, out var e) && !e.IsNpc && !e.IsMonster;
+
+    private static bool MutedPlayer(Ent e) => !Config.OtherPlayersSounds && !e.IsNpc && !e.IsMonster;
 
     private void AttachFxAmbience(Node3D node, string fxName)
     {
@@ -74,10 +81,10 @@ public partial class World
     private SoundCatalog.LooksSounds? LooksOf(Ent e) =>
         SoundCatalog.Looks(e.IsNpc || e.IsMonster ? e.ModelId : e.Race);
 
-    private void PlayEntitySound(Ent e, int soundId)
+    private void PlayEntitySound(Ent e, int soundId, SoundOwnerKind kind)
     {
-        if (soundId == 0 || !GodotObject.IsInstanceValid(e.Body)) return;
-        Audio.Play(soundId, e.Body.GlobalPosition);
+        if (soundId == 0 || !GodotObject.IsInstanceValid(e.Body) || MutedPlayer(e)) return;
+        Audio.PlayOwned(soundId, e.Body.GlobalPosition, e.Body.GetInstanceId(), kind);
     }
 
     private static int Pick(int a, int b) => b != 0 && GD.Randf() < 0.5f ? b : a != 0 ? a : b;
@@ -113,50 +120,52 @@ public partial class World
         else if (_ents.TryGetValue(actorId, out var a)) a.StrikeTarget = targetId;
     }
 
-    private void MiningStrike(Node3D body)
+    private void MiningStrike(Node3D body, bool audible = true)
     {
         Vector3 at = body.GlobalPosition - body.GlobalTransform.Basis.Z * MiningStrikeReach;
         if (FxGroundHeight(at.X, at.Z) is { } groundY) at.Y = groundY;
         if (Fx.NameForId(MiningStrikeFx) is { } name)
             Fx.Spawn(name, this, at, oneShot: true);
         int sid = SoundCatalog.FxSound(MiningStrikeFx);
-        if (sid != 0) Audio.Play(sid, at);
+        if (sid != 0 && audible) Audio.PlayOwned(sid, at, body.GetInstanceId(), SoundOwnerKind.Mining);
     }
 
     private void SelfStrike()
     {
         if (_strikeTargetSelf < 0) return;
         if (!_ents.TryGetValue(_strikeTargetSelf, out var v)) return;
-        if (!GodotObject.IsInstanceValid(v.Body) || v.Dead) return;
-        SpawnHitImpact(v, SelfGear());
-        AudioWeaponImpact(_self.GlobalPosition, v.Body.GlobalPosition);
+        if (!GodotObject.IsInstanceValid(v.Body) || (v.Dead && !Dying(v))) return;
+        SpawnHitImpact(v, _self, SelfGear(), npcAttacker: false, IsWearingTransformLook(_myId), _selfStrikeAnim);
+        AudioWeaponImpact(_self.GlobalPosition, v.Body);
+        FinishDying(v);
     }
 
     private void EntityStrike(Ent attacker)
     {
         if (attacker.StrikeTarget < 0) return;
         if (!_ents.TryGetValue(attacker.StrikeTarget, out var v)) return;
-        if (!GodotObject.IsInstanceValid(v.Body) || v.Dead) return;
-        SpawnHitImpact(v, attacker.Gear);
-        AudioWeaponImpact(attacker.Body.GlobalPosition, v.Body.GlobalPosition);
+        if (!GodotObject.IsInstanceValid(v.Body) || (v.Dead && !Dying(v))) return;
+        SpawnHitImpact(v, attacker.Body, attacker.Gear, attacker.IsNpc, IsWearingTransformLook(attacker.Id), attacker.StrikeAnim);
+        if (!MutedPlayer(attacker) || v.Id == _myId) AudioWeaponImpact(attacker.Body.GlobalPosition, v.Body);
+        FinishDying(v);
     }
 
     private const float ImpactSoundPullback = 6.0f;
 
-    private static void AudioWeaponImpact(Vector3 from, Vector3 to)
+    private static void AudioWeaponImpact(Vector3 from, Node3D target)
     {
-        var away = to - from;
+        var away = target.GlobalPosition - from;
         float dist = away.Length();
         var at = dist <= ImpactSoundPullback
             ? from
             : from + away / dist * (dist - ImpactSoundPullback);
-        Audio.Play(Sfx.WeaponImpact, at);
+        Audio.PlayOwned(Sfx.WeaponImpact, at, target.GetInstanceId(), SoundOwnerKind.Impact);
     }
 
     private void AudioSelfSwing()
     {
         int sid = SwingSound(SelfGear(), SoundCatalog.Looks(_selfRace));
-        if (sid != 0) Audio.Play(sid, _self.GlobalPosition);
+        if (sid != 0) Audio.PlayOwned(sid, _self.GlobalPosition, _self.GetInstanceId(), SoundOwnerKind.Swing);
     }
 
     private void AudioStruck(int victimId)
@@ -166,12 +175,12 @@ public partial class World
             if (SoundCatalog.Looks(_selfRace) is { } mine)
             {
                 int sid = Pick(mine.Struck0, mine.Struck1);
-                if (sid != 0) Audio.Play(sid, _self.GlobalPosition);
+                if (sid != 0) Audio.PlayOwned(sid, _self.GlobalPosition, _self.GetInstanceId(), SoundOwnerKind.Struck);
             }
             return;
         }
         if (_ents.TryGetValue(victimId, out var v) && LooksOf(v) is { } l)
-            PlayEntitySound(v, Pick(l.Struck0, l.Struck1));
+            PlayEntitySound(v, Pick(l.Struck0, l.Struck1), SoundOwnerKind.Struck);
     }
 
     private void AudioDeath(int victimId)
@@ -181,12 +190,12 @@ public partial class World
             if (SoundCatalog.Looks(_selfRace) is { } mine)
             {
                 int sid = Pick(mine.Dead0, mine.Dead1);
-                if (sid != 0) Audio.Play(sid, _self.GlobalPosition);
+                if (sid != 0) Audio.PlayOwned(sid, _self.GlobalPosition, _self.GetInstanceId(), SoundOwnerKind.Death);
             }
             return;
         }
         if (_ents.TryGetValue(victimId, out var v) && LooksOf(v) is { } l)
-            PlayEntitySound(v, Pick(l.Dead0, l.Dead1));
+            PlayEntitySound(v, Pick(l.Dead0, l.Dead1), SoundOwnerKind.Death);
     }
 
     private readonly record struct AnimBeats(int Swings, int Strikes)
@@ -245,7 +254,7 @@ public partial class World
         for (int i = 0; i < beats.Swings; i++)
         {
             int sid = FootstepFor(_selfRace, running, ref _selfStepPhase);
-            if (sid != 0) Audio.Play(sid, _self.GlobalPosition);
+            if (sid != 0) Audio.PlayOwned(sid, _self.GlobalPosition, _self.GetInstanceId(), SoundOwnerKind.Step);
         }
     }
 
@@ -270,7 +279,7 @@ public partial class World
 
         if (e.Gathering && !e.GatherFishing)
         {
-            for (int i = 0; i < beats.Strikes; i++) MiningStrike(e.Body);
+            for (int i = 0; i < beats.Strikes; i++) MiningStrike(e.Body, !MutedPlayer(e));
             return;
         }
 
@@ -278,7 +287,7 @@ public partial class World
         {
             if (EntitySwinging(e, now))
                 for (int i = 0; i < beats.Swings; i++)
-                    PlayEntitySound(e, SwingSound(e.Gear, LooksOf(e)));
+                    PlayEntitySound(e, SwingSound(e.Gear, LooksOf(e)), SoundOwnerKind.Swing);
             for (int i = 0; i < beats.Strikes; i++) EntityStrike(e);
             return;
         }
@@ -286,7 +295,7 @@ public partial class World
         if (!EntityMoving(e, pos)) return;
         if (pos.DistanceSquaredTo(selfPos) > FootstepEntityDist * FootstepEntityDist) return;
 
-        bool running = e.Speed >= RunThreshold;
+        bool running = e.Speed >= RunThresholdOf(e);
         for (int i = 0; i < beats.Swings; i++)
         {
             int sid;
@@ -301,7 +310,7 @@ public partial class World
                 sid = FootstepFor(e.Race, running, ref phase);
                 e.StepPhase = phase;
             }
-            PlayEntitySound(e, sid);
+            PlayEntitySound(e, sid, SoundOwnerKind.Step);
         }
     }
 

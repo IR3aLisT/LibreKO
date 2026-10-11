@@ -16,7 +16,7 @@ public static class ChatPrefixes
             '%' => ChatType.Command,
             '&' => ChatType.Alliance,
             '~' => ChatType.ClanOfficer,
-            '|' => ChatType.ClanRecruit,
+            '|' => ChatType.NoahKnights,
             '\\' => ChatType.ChatRoom,
             '/' or '+' => NotChat,
             _ => selected,

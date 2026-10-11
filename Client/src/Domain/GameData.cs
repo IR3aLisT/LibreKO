@@ -25,6 +25,8 @@ public partial class GameData : Node
         return (isMonster ? "Mob #" : "NPC #") + npcId;
     }
 
+    public string? KnownNpcName(int npcId) => _npcNames.TryGetValue(npcId, out var n) && n.Length > 0 ? n : null;
+
     public string TalkNpcName(int npcId)
     {
         if (_npcNames.TryGetValue(npcId, out var n) && n.Length > 0) return n;

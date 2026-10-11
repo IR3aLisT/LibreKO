@@ -374,4 +374,30 @@ public class KnightsPacketWriterTests
         packet.ReadByte().Should().Be((byte)KnightsNoticeResult.NoAuthority);
         packet.RemainingBytes.Should().Be(0);
     }
+
+    [Fact]
+    public void HandoverListForANonChiefSaysNoAuthority()
+    {
+        var packet = KnightsPacketWriter.HandoverCandidates(KnightsPacketWriter.HandoverNotLeader, []);
+        packet.ResetOffset();
+
+        packet.ReadByte().Should().Be((byte)KnightsSubOpcode.HandoverList);
+        packet.ReadByte().Should().Be(4);
+        packet.ReadUShort().Should().Be(0);
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void HandoverListNamesTheOnlineViceChiefs()
+    {
+        var packet = KnightsPacketWriter.HandoverCandidates(KnightsPacketWriter.HandoverLeader, ["Aurelia", "Velkan"]);
+        packet.ResetOffset();
+
+        packet.ReadByte().Should().Be((byte)KnightsSubOpcode.HandoverList);
+        packet.ReadByte().Should().Be(KnightsPacketWriter.HandoverLeader);
+        packet.ReadUShort().Should().Be(2);
+        packet.ReadString().Should().Be("Aurelia");
+        packet.ReadString().Should().Be("Velkan");
+        packet.RemainingBytes.Should().Be(0);
+    }
 }

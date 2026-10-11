@@ -20,6 +20,7 @@ public class MagicPacketCoordinator(
     ICombatLifecycleService combatLifecycleService,
     IMagicExecutionService magicExecutionService,
     IMagicTimingService magicTimingService,
+    IBuffExtensionService buffExtensionService,
     ILogger<MagicPacketCoordinator> logger) : IMagicPacketCoordinator
 {
     private const int ArrowMissedMarker = -101;
@@ -56,13 +57,20 @@ public class MagicPacketCoordinator(
                 session.Name,
                 magicOpcode,
                 targetId);
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
             return;
         }
 
-        if (!session.CanUseSkills && !IsTerminator((MagicProcessOpcode)magicOpcode))
+        if ((!session.CanUseSkills || (session.IsBlinking && !RespawnBlinkService.AllowsSkill(magic)))
+            && !IsTerminator((MagicProcessOpcode)magicOpcode))
         {
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
+            return;
+        }
+
+        if (!ChaosRules.SkillAllowedIn(session.ZoneId, magic.Skill) && !IsTerminator((MagicProcessOpcode)magicOpcode))
+        {
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
             return;
         }
 
@@ -70,7 +78,7 @@ public class MagicPacketCoordinator(
         {
             logger.LogWarning("Unknown magic sub-opcode {SubOpcode} from {Name} skill={SkillId} type={SkillType}",
                 magicOpcode, session.Name, skillId, magic.PrimaryType);
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
             return;
         }
 
@@ -79,11 +87,12 @@ public class MagicPacketCoordinator(
         {
             logger.LogWarning("Refusing skill {SkillId} from {Name}: tree {Tree} needs a nation role or a command form (transform {TransformId})",
                 skillId, session.Name, magic.Skill, session.TransformId);
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
             return;
         }
 
         if (RequiresLearnedSkill((MagicProcessOpcode)magicOpcode)
+            && magic.Skill != ChaosRules.ChaosSkillTree
             && !MagicSkillRequirement.IsMet(magic, session.Level, session.SkillPoints))
         {
             logger.LogWarning(
@@ -93,7 +102,7 @@ public class MagicPacketCoordinator(
                 MagicSkillRequirement.Describe(magic),
                 session.Level,
                 string.Join(",", session.SkillPoints));
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
             return;
         }
 
@@ -103,7 +112,7 @@ public class MagicPacketCoordinator(
             if (magic.PrimaryType == MagicSkillType.Warp)
             {
                 logger.LogWarning("Refusing warp skill {SkillId} from Fragment of Manes carrier {Name}", skillId, session.Name);
-                await SendMagicFailAsync(session, skillId);
+                await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
                 return;
             }
 
@@ -112,7 +121,7 @@ public class MagicPacketCoordinator(
                 && ((BuffType)carrierType4.BuffType == BuffType.Speed || carrierType4.Speed > 100))
             {
                 logger.LogWarning("Refusing speed buff {SkillId} from Fragment of Manes carrier {Name}", skillId, session.Name);
-                await SendMagicFailAsync(session, skillId);
+                await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
                 return;
             }
         }
@@ -121,7 +130,7 @@ public class MagicPacketCoordinator(
             && (MagicProcessOpcode)magicOpcode != MagicProcessOpcode.Flying
             && (HealOverTimeAlreadyRunning(session, magic, targetId) || MissesRequiredBuff(session, magic)))
         {
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
             return;
         }
 
@@ -130,18 +139,17 @@ public class MagicPacketCoordinator(
             case MagicProcessOpcode.Casting:
                 if (!AllowTiming(session, magic, magicTimingService.CheckCasting(session, magic), magicOpcode))
                 {
-                    await SendMagicFailAsync(session, skillId);
+                    await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
                     return;
                 }
 
-                if (InstantMagicBuffOf(session, magic) is null)
-                    magicTimingService.OnCastAccepted(session, magic);
+                magicTimingService.OnCastAccepted(session, magic, armCooldown: InstantMagicBuffOf(session, magic) is null);
                 await HandleCastingAsync(session, magic, targetId, data);
                 break;
             case MagicProcessOpcode.Flying:
                 if (!AllowTiming(session, magic, magicTimingService.CheckRelease(session, magic), magicOpcode))
                 {
-                    await SendMagicFailAsync(session, skillId);
+                    await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
                     return;
                 }
 
@@ -150,13 +158,23 @@ public class MagicPacketCoordinator(
             case MagicProcessOpcode.Effecting:
                 if (!AllowTiming(session, magic, magicTimingService.CheckRelease(session, magic), magicOpcode))
                 {
-                    await SendMagicFailAsync(session, skillId);
+                    await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
+                    return;
+                }
+
+                if (IsDeathTaunt(session, magic, targetId))
+                {
+                    magicTimingService.OnReleaseAccepted(session, magic);
+                    data[DeathTaunt.MarkerSlot] = DeathTaunt.Marker;
+                    await sessionManager.Regions.SendToRegion(
+                        session,
+                        MagicProcessPacketWriter.Create(MagicProcessOpcode.Effecting, magic.Id, (short)session.CharacterId, targetId, data),
+                        excludeSender: false);
                     return;
                 }
 
                 var instantMagic = InstantMagicBuffOf(session, magic);
-                if (instantMagic is null)
-                    magicTimingService.OnReleaseAccepted(session, magic);
+                magicTimingService.OnReleaseAccepted(session, magic, armCooldown: instantMagic is null);
 
                 if (OpensTransformationList(session, magic))
                 {
@@ -190,7 +208,22 @@ public class MagicPacketCoordinator(
                 break;
             case MagicProcessOpcode.CancelTransformation:
                 break;
+            case MagicProcessOpcode.ExtendDuration:
+                await buffExtensionService.ExtendAsync(session, skillId);
+                break;
         }
+    }
+
+    private bool IsDeathTaunt(UserSession session, MagicData magic, int targetId)
+    {
+        MagicTypeLookup.TryResolve(gameDataService.MagicType3Table, magic, magic.Id, out var type3Data);
+        if (!DeathTaunt.IsTaunt(magic, type3Data))
+            return false;
+
+        if (sessionManager.GetByCharacterId(targetId) is { } player)
+            return player.Hp <= 0 && player.ZoneId == session.ZoneId;
+
+        return sessionManager.Regions.GetNpc(targetId) is { IsAlive: false } npc && npc.ZoneId == session.ZoneId;
     }
 
     private bool HealOverTimeAlreadyRunning(UserSession session, MagicData magic, int targetId)
@@ -328,32 +361,23 @@ public class MagicPacketCoordinator(
     {
         if (!magicItemUsageService.CanUseSkillItems(session, magic))
         {
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.NoEffect);
             return;
         }
 
         if (session.IsInCombat && StealthRules.IsInfiltrationPotion(gameDataService, skillId))
         {
             await session.Client.SendPacket(ChatPacketWriter.SystemNotice((byte)session.Nation, StealthRules.InCombatRefusal));
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.NoEffect);
             return;
         }
 
-        if (magic.Msp > 0)
-        {
-            if (session.Mp < magic.Msp)
-            {
-                await SendMagicFailAsync(session, skillId);
-                return;
-            }
-
-            session.Mp -= (short)magic.Msp;
-            await combatLifecycleService.SendMspChangeAsync(session);
-        }
+        if (!await TryPaySkillCostAsync(session, magic, skillId))
+            return;
 
         if (!await magicItemUsageService.TryConsumeSkillItemAsync(session, magic))
         {
-            await SendMagicFailAsync(session, skillId);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.NoEffect);
             return;
         }
 
@@ -367,17 +391,8 @@ public class MagicPacketCoordinator(
         int targetId,
         int[] data)
     {
-        if (magic.PrimaryType != MagicSkillType.Ranged && magic.Msp > 0)
-        {
-            if (session.Mp < magic.Msp)
-            {
-                await SendMagicFailAsync(session, skillId);
-                return;
-            }
-
-            session.Mp -= (short)magic.Msp;
-            await combatLifecycleService.SendMspChangeAsync(session);
-        }
+        if (magic.PrimaryType != MagicSkillType.Ranged && !await TryPaySkillCostAsync(session, magic, skillId))
+            return;
 
         await magicExecutionService.ExecuteAsync(session, magic, skillId, targetId, data);
     }
@@ -389,17 +404,8 @@ public class MagicPacketCoordinator(
         int targetId,
         int[] data)
     {
-        if (magic.Msp > 0)
-        {
-            if (session.Mp < magic.Msp)
-            {
-                await SendMagicFailAsync(session, skillId);
-                return;
-            }
-
-            session.Mp -= (short)magic.Msp;
-            await combatLifecycleService.SendMspChangeAsync(session);
-        }
+        if (!await TryPaySkillCostAsync(session, magic, skillId))
+            return;
 
         await magicExecutionService.ExecuteAsync(session, magic, skillId, targetId, data);
     }
@@ -410,7 +416,7 @@ public class MagicPacketCoordinator(
         {
             if (!MagicTypeLookup.TryResolve(gameDataService.MagicType2Table, magic, magic.Id, out var type2Data))
             {
-                await SendMagicFailAsync(session, magic.Id);
+                await SendMagicFailAsync(session, magic.Id, MagicFailCode.KillFlying);
                 return;
             }
 
@@ -418,20 +424,20 @@ public class MagicPacketCoordinator(
             if (magic.UseItem != 0
                 && !magicItemUsageService.CanUseItem(session, magic.UseItem, requiredArrowCount))
             {
-                await SendMagicFailAsync(session, magic.Id);
+                await SendMagicFailAsync(session, magic.Id, MagicFailCode.KillFlying);
                 return;
             }
 
             if (session.Mp < magic.Msp)
             {
-                await SendMagicFailAsync(session, magic.Id);
+                await SendMagicFailAsync(session, magic.Id, MagicFailCode.NotEnoughMp);
                 return;
             }
 
             if (magic.UseItem != 0
                 && !await magicItemUsageService.TryConsumeItemAsync(session, magic.UseItem, requiredArrowCount))
             {
-                await SendMagicFailAsync(session, magic.Id);
+                await SendMagicFailAsync(session, magic.Id, MagicFailCode.KillFlying);
                 return;
             }
 
@@ -452,6 +458,32 @@ public class MagicPacketCoordinator(
             excludeSender: false);
     }
 
-    private static Task SendMagicFailAsync(UserSession session, int skillId) =>
-        session.Client.SendPacket(MagicProcessPacketWriter.CreateFail(skillId, session.CharacterId));
+    private async Task<bool> TryPaySkillCostAsync(UserSession session, MagicData magic, int skillId)
+    {
+        if (session.Mp < magic.Msp)
+        {
+            await SendMagicFailAsync(session, skillId, MagicFailCode.NotEnoughMp);
+            return false;
+        }
+
+        if (!KurianStamina.CanPay(session, magic.Sp))
+        {
+            await SendMagicFailAsync(session, skillId, MagicFailCode.NoEffect);
+            return false;
+        }
+
+        if (magic.Msp > 0)
+        {
+            session.Mp -= (short)magic.Msp;
+            await combatLifecycleService.SendMspChangeAsync(session);
+        }
+
+        if (KurianStamina.Spend(session, magic.Sp))
+            await session.Client.SendPacket(VitalsPacketWriter.StaminaChange(session.KurianMaxSp, session.KurianSp));
+
+        return true;
+    }
+
+    private static Task SendMagicFailAsync(UserSession session, int skillId, int code) =>
+        session.Client.SendPacket(MagicProcessPacketWriter.CreateFail(skillId, session.CharacterId, code));
 }

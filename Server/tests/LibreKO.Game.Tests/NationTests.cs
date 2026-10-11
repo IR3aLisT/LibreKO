@@ -1,9 +1,10 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Common.Infrastructure.Persistence;
 using LibreKO.Game.Protocol;
+using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -163,10 +164,10 @@ public class NationTests : GameTestBase
 
         var response = sentPackets.Single(packet => packet.GetOpcode() == (byte)GameOpcodes.GS_KING);
         response.ResetOffset();
-        response.ReadByte().Should().Be(4);
-        response.ReadByte().Should().Be(2);
-        response.ReadByte().Should().Be(1);
-        response.ReadByte().Should().Be(10);
+        response.ReadByte().Should().Be(KingPacketConstants.Event);
+        response.ReadByte().Should().Be(KingPacketConstants.EventExp);
+        response.ReadShort().Should().Be(KingPacketConstants.EventOk);
+        response.RemainingBytes.Should().Be(0);
 
         sentPackets.Should().Contain(packet => packet.GetOpcode() == (byte)GameOpcodes.GS_NOTICE);
         provider.GetRequiredService<IKingEventState>().GetExpBonus(AccountNation.Karus).Should().Be(10);
@@ -258,6 +259,40 @@ public class NationTests : GameTestBase
         sentPacket.ReadByte().Should().Be(expectedType);
     }
 
+    [Theory]
+    [InlineData((byte)ZoneId.RonarkLand, 12)]
+    [InlineData((byte)ZoneId.Delos, 12)]
+    [InlineData((byte)ZoneId.NapiesGorge, 12)]
+    [InlineData((byte)ZoneId.Arena, 11)]
+    public async Task ChallengePacketCoordinator_HandleAsync_RefusesDuelsInWarAndArenaZones(byte zone, byte error)
+    {
+        using var provider = CreateProvider(_ => { });
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var coordinator = new ChallengePacketCoordinator(sessionManager, Substitute.For<IZoneTransitionService>(),
+            Substitute.For<ILogger<ChallengePacketCoordinator>>());
+
+        var requesterClient = Substitute.For<IClient>();
+        requesterClient.Id.Returns(Guid.NewGuid());
+        Packet? reply = null;
+        requesterClient.SendPacket(Arg.Do<Packet>(packet => reply = packet), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var requester = sessionManager.CreateSession(requesterClient, characterId: 133, accountId: 143);
+        requester.Name = "Requester";
+        requester.ZoneId = zone;
+        requester.Hp = 100;
+
+        var packet = new Packet(GameOpcodes.GS_CHALLENGE);
+        packet.WriteByte(1);
+        packet.WriteSByteString("Target");
+
+        await coordinator.HandleAsync(requesterClient, packet);
+
+        reply.Should().NotBeNull();
+        reply!.ResetOffset();
+        reply.ReadByte().Should().Be(error);
+        requester.Trade.IsRequestingChallenge.Should().BeFalse();
+    }
+
     [Fact]
     public async Task ChallengePacketCoordinator_HandleAsync_RequestSetsStateAndNotifiesBothPlayers()
     {
@@ -312,4 +347,22 @@ public class NationTests : GameTestBase
         targetPacket.ReadSByteString().Should().Be("Requester");
     }
 
+    [Fact]
+    public void KingEventRepliesCarryASignedResultAndTheRoyalOrderItsMessage()
+    {
+        var refused = KingPacketWriter.EventResult(KingPacketConstants.EventPrize, KingPacketConstants.PrizeNoTarget);
+        refused.ResetOffset();
+        refused.ReadByte().Should().Be(KingPacketConstants.Event);
+        refused.ReadByte().Should().Be(KingPacketConstants.EventPrize);
+        refused.ReadShort().Should().Be(KingPacketConstants.PrizeNoTarget);
+
+        var order = KingPacketWriter.RoyalOrder(KingPacketConstants.EventOk, "Gather at the bridge");
+        order.ResetOffset();
+        order.ReadByte().Should().Be(KingPacketConstants.Event);
+        order.ReadByte().Should().Be(KingPacketConstants.EventNotice);
+        order.ReadByte().Should().Be(KingPacketConstants.RoyalOrderFromKing);
+        order.ReadShort().Should().Be(KingPacketConstants.EventOk);
+        order.ReadSByteString().Should().Be("Gather at the bridge");
+        order.RemainingBytes.Should().Be(0);
+    }
 }

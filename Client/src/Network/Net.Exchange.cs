@@ -8,14 +8,16 @@ public partial class Net
     public const int ExchangeGoldItem = 900000000;
 
     private const byte ExchangeModeTrade = 1;
+    private const byte ExchangeDuplicateSub = 9;
 
     public event Action<int>? ExchangeRequestEvent;
     public event Action<bool>? ExchangeAgreeEvent;
     public event Action<bool>? ExchangeAddResultEvent;
-    public event Action<int, int, short>? ExchangeOtherAddEvent;
+    public event Action<int, int, short, int>? ExchangeOtherAddEvent;
     public event Action? ExchangeOtherDecideEvent;
     public event Action<bool, int, List<(byte DstPos, ItemSlot Slot)>>? ExchangeDoneEvent;
     public event Action? ExchangeCancelEvent;
+    public event Action? ExchangeDuplicateEvent;
 
     private void HandleExchange(Packet p)
     {
@@ -37,7 +39,8 @@ public partial class Net
                 int itemId = p.ReadInt();
                 int count = p.ReadInt();
                 short dura = p.ReadShort();
-                ExchangeOtherAddEvent?.Invoke(itemId, count, dura);
+                int uniqueId = ReadUniqueItem(p);
+                ExchangeOtherAddEvent?.Invoke(itemId, count, dura, uniqueId);
                 break;
             }
             case 6:
@@ -59,8 +62,8 @@ public partial class Net
                         int cnt = p.ReadUShort();
                         short dura = p.ReadShort();
                         p.ReadByte();
-                        p.ReadInt();
-                        received.Add((dstPos, new ItemSlot { ItemId = itemId, Count = (short)cnt, Durability = dura }));
+                        int uniqueId = ReadUniqueItem(p);
+                        received.Add((dstPos, new ItemSlot { ItemId = itemId, Count = (short)cnt, Durability = dura, UniqueId = uniqueId }));
                     }
                     GoldChangeEvent?.Invoke(money);
                 }
@@ -69,6 +72,9 @@ public partial class Net
             }
             case 8:
                 ExchangeCancelEvent?.Invoke();
+                break;
+            case ExchangeDuplicateSub:
+                ExchangeDuplicateEvent?.Invoke();
                 break;
         }
     }

@@ -42,6 +42,10 @@ public static class ZoneCatalog
         new(72, "freezone_a", "Ardream"),
         new(73, "freezone_c", "Ronark Land Base"),
         new(75, "itemzone_a", "Krowaz Domion"),
+        new(37, "battlezone_e_fl_2", "Knight Royale"),
+        new(38, "battlezone_e_fl_2", "Knight Royale"),
+        new(39, "battlezone_e_fl", "Knight Royale"),
+        new(76, "battlezone_e_fl", "Knight Royale"),
         new(77, "dragon_a", "Ardream Clan War"),
         new(79, "freezone_b", "Nation War"),
         new(81, "in_dungeon01", "Monster Suppression 1"),
@@ -63,6 +67,13 @@ public static class ZoneCatalog
         new(105, "freezone_a", "Zinan War"),
         new(109, "freezone_a", "Dark Ardream"),
     };
+
+    public static bool Knows(int zoneId)
+    {
+        foreach (var z in All)
+            if (z.Id == zoneId) return true;
+        return false;
+    }
 
     public static string Name(int zoneId)
     {

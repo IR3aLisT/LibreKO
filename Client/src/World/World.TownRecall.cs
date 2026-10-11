@@ -38,7 +38,7 @@ public partial class World
 
     private bool TownRecallReady()
     {
-        if (!_worldReady || _selfDead) return false;
+        if (!_worldReady || _selfDead || RefusedTownOnTower()) return false;
         if (!Vitals.BelowHalfHp) return true;
         CombatNotice(ItemData.Text(TextTownRecallLowHp,
             "You cannot teleport back to town when you have half the HP or less"));

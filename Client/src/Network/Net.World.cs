@@ -14,6 +14,25 @@ public partial class Net
         return v;
     }
 
+    private bool _rebuildingInPlace;
+
+    public bool WorldActive { get; internal set; }
+
+    private bool SelfRefreshInWorld => ReconnectState is ReconnectPhase.Idle && (WorldActive || _rebuildingInPlace);
+    public bool ConsumeRebuildInPlace()
+    {
+        var v = _rebuildingInPlace;
+        _rebuildingInPlace = false;
+        return v;
+    }
+
+    public void RebuildWorldInPlace(float x, float z, float y)
+    {
+        var e = LastEnter; e.X = x; e.Z = z; e.Y = y; LastEnter = e;
+        _rebuildingInPlace = true;
+        GetTree().ChangeSceneToFile(WorldScene);
+    }
+
     public const byte MoveEchoFinish = 0;
     public const byte MoveEchoStart = 1;
     public const byte MoveEchoMove = 3;
@@ -26,13 +45,16 @@ public partial class Net
         float y = p.ReadUShort() / 10f;
         short speed = p.ReadShort();
         byte echo = p.RemainingBytes >= 1 ? p.ReadByte() : MoveEchoFinish;
+        if (_known.TryGetValue(id, out var known)) { known.X = x; known.Z = z; known.Y = y; }
         EntityMoveEvent?.Invoke(id, x, z, y, speed / 10f, echo != MoveEchoFinish);
     }
 
     private void HandleRotate(Packet p)
     {
         int id = p.ReadInt();
-        EntityRotateEvent?.Invoke(id, Coord.HeadingFromWire(p.ReadShort()));
+        float heading = Coord.HeadingFromWire(p.ReadShort());
+        if (_known.TryGetValue(id, out var known) && !known.IsNpc) known.Dir = heading;
+        EntityRotateEvent?.Invoke(id, heading);
     }
 
     private void HandleWarp(Packet p)
@@ -54,8 +76,10 @@ public partial class Net
             float x = p.ReadUShort() / 10f;
             float z = p.ReadUShort() / 10f;
             float y = p.ReadUShort() / 10f;
+            if (zone != LastEnter.Zone) ResetChaosBattle();
             var e = LastEnter; e.Zone = zone; e.X = x; e.Z = z; e.Y = y; LastEnter = e;
             _known.Clear();
+            _rankAuraHidden.Clear();
             ForgetKnownStalls();
             _zoneChanging = true;
             GetTree().ChangeSceneToFile(WorldScene);
@@ -120,29 +144,63 @@ public partial class Net
         WeatherEvent?.Invoke(wtype, amount);
     }
 
+    private const byte NoticeStyleLines = 1;
     private const byte NoticeStyleLogin = 2;
+    private const byte NoticeStyleAccountState = 3;
+    private const byte NoticeStyleEventTitles = 4;
+    private string _flashTitle = "";
+    private const byte AccountTradeBlocked = 11;
+    private const int TextTradeBlocked = 7696;
+
+    private void HandleStory(Packet p)
+    {
+        if (p.RemainingBytes < 1 || p.ReadByte() != FlashBonus.Sub) return;
+        if (FlashBonus.Read(p) is not { } flash) return;
+        if (_flashTitle.Length > 0) EventTitles.Remove(_flashTitle);
+        _flashTitle = "";
+        if (!flash.Ended && flash.Value != 0 && FlashTitle.TextFor(flash.Kind) is { } text)
+        {
+            _flashTitle = FlashTitle.Format(ItemData.Text(text.Id, text.Fallback), flash.Value);
+            EventTitles.Show(_flashTitle, "");
+            EventTitles.Expanded = true;
+        }
+        EventTitlesChangedEvent?.Invoke();
+    }
 
     private void HandleNotice(Packet p)
     {
         if (p.RemainingBytes < 2) return;
         byte style = p.ReadByte();
+        if (style == NoticeStyleAccountState)
+        {
+            if (p.ReadByte() == AccountTradeBlocked)
+                TradeBlockedEvent?.Invoke(ItemData.Text(TextTradeBlocked, "The character is blocked for trading."));
+            return;
+        }
+        if (style == NoticeStyleEventTitles)
+        {
+            if (EventTitleNotice.Read(p) is not { } notice) return;
+            if (notice.Removed) EventTitles.Remove(notice.Title);
+            else EventTitles.Show(notice.Title, notice.Message);
+            EventTitlesChangedEvent?.Invoke();
+            return;
+        }
+        if (style is not (NoticeStyleLines or NoticeStyleLogin)) return;
         int count = p.ReadByte();
 
         for (int i = 0; i < count && p.RemainingBytes > 0; i++)
         {
-            string line = style == NoticeStyleLogin
-                ? NoticeEntry(p)
-                : p.ReadSByteString();
-
+            if (style == NoticeStyleLogin)
+            {
+                string title = p.ReadString();
+                string message = p.RemainingBytes >= sizeof(ushort) ? p.ReadString() : "";
+                EventTitles.Show(title.Length > 0 ? title : message, message);
+                continue;
+            }
+            string line = p.ReadSByteString();
             if (line.Length > 0) NoticeEvent?.Invoke(line);
         }
-    }
-
-    private static string NoticeEntry(Packet p)
-    {
-        string title = p.ReadString();
-        string message = p.RemainingBytes >= 2 ? p.ReadString() : "";
-        return title.Length > 0 && message.Length > 0 ? $"{title}: {message}" : title + message;
+        if (style == NoticeStyleLogin) EventTitlesChangedEvent?.Invoke();
     }
 
     private void ParseRegionUserList(Packet p)
@@ -179,15 +237,38 @@ public partial class Net
             RaiseOut(id);
     }
 
+    private const int NpcRegionListMax = 999;
+
     private void ParseNpcRegionList(Packet p)
     {
         int count = p.ReadShort();
-        if (count <= 0) return;
-        var req = new Packet(GameOpcodes.GS_REQ_NPCIN);
-        req.WriteShort((short)count);
+        var listed = new List<int>(Math.Max(count, 0));
         for (int i = 0; i < count && p.RemainingBytes >= 4; i++)
-            req.WriteInt(p.ReadInt());
+            listed.Add(p.ReadInt());
+
+        if (count < NpcRegionListMax) DropUnlistedNpcs(listed);
+        if (listed.Count == 0) return;
+
+        var req = new Packet(GameOpcodes.GS_REQ_NPCIN);
+        req.WriteShort((short)listed.Count);
+        foreach (int id in listed)
+            req.WriteInt(id);
         _conn.Send(req);
+    }
+
+    private void DropUnlistedNpcs(List<int> listed)
+    {
+        var visible = new HashSet<int>(listed);
+        List<int>? stale = null;
+        foreach (var known in _known.Values)
+        {
+            if (!known.IsNpc || known.Dead || visible.Contains(known.Id)) continue;
+            (stale ??= new List<int>()).Add(known.Id);
+        }
+
+        if (stale == null) return;
+        foreach (int id in stale)
+            RaiseOut(id);
     }
 
     private void ParseUserSnapshot(Packet p)
@@ -211,7 +292,7 @@ public partial class Net
         }
     }
 
-    private static EntitySnapshot ReadUserInfo(Packet p, int id)
+    internal static EntitySnapshot ReadUserInfo(Packet p, int id)
     {
         var e = new EntitySnapshot { Id = id, IsNpc = false };
         e.Name = p.ReadSByteString();
@@ -219,17 +300,18 @@ public partial class Net
         p.ReadByte(); p.ReadByte(); p.ReadByte();
         short knightsId = p.ReadShort();
         e.KnightsId = knightsId;
-        p.ReadByte();
+        e.ClanFame = p.ReadByte();
         if (knightsId > 0)
         {
-            p.ReadShort();
+            e.AllianceId = p.ReadShort();
             e.ClanName = p.ReadSByteString();
             e.ClanGrade = p.ReadByte();
             e.ClanRanking = p.ReadByte();
-            p.ReadShort();
+            e.ClanMarkVersion = p.ReadShort();
             e.CapeId = p.ReadShort();
             e.CapeR = p.ReadByte(); e.CapeG = p.ReadByte(); e.CapeB = p.ReadByte();
-            p.ReadByte(); p.ReadByte();
+            p.ReadByte();
+            e.ClanFlag = p.ReadByte();
         }
         else
         {
@@ -250,14 +332,14 @@ public partial class Net
         e.Dead = pose == UserPose.Dead;
         e.Gathering = pose is UserPose.Mining or UserPose.Fishing;
         e.GatherFishing = pose == UserPose.Fishing;
-        p.ReadByte();
-        p.ReadInt();
-        p.ReadByte();
+        e.Appearance = p.ReadByte();
+        e.TransformSkill = p.ReadInt();
+        e.NeedParty = p.ReadByte();
         e.IsGm = p.ReadByte() == GameMasterAuthority;
-        p.ReadByte();
+        e.PartyLeader = p.ReadByte() != 0;
         e.Invisibility = p.ReadByte();
         e.Invisible = e.Invisibility != 0;
-        p.ReadByte();
+        e.SoccerTeam = p.ReadByte();
         p.ReadByte();
         p.ReadByte();
         e.Dir = Coord.HeadingFromWire(p.ReadShort());
@@ -275,13 +357,15 @@ public partial class Net
         }
         SkipBytes(p, TrailerBeforeHelmet);
         e.HelmetHidden = p.RemainingBytes > 0 && p.ReadByte() != 0;
-        SkipBytes(p, TrailerAfterHelmet);
+        e.CostumeHidden = p.RemainingBytes > 0 && p.ReadByte() != 0;
+        e.GenieActive = p.RemainingBytes > 0 && p.ReadByte() != 0;
+        SkipBytes(p, TrailerAfterGenie);
         e.TitleId = p.RemainingBytes >= 2 ? p.ReadUShort() : 0;
         return e;
     }
 
     private const int TrailerBeforeHelmet = 11;
-    private const int TrailerAfterHelmet = 12;
+    private const int TrailerAfterGenie = 10;
 
     private static EntitySnapshot ReadNpcInfo(Packet p, int id)
     {

@@ -62,7 +62,7 @@ internal static class FxMeshMaterial
         {
             Code = "shader_type spatial;\n"
                    + $"render_mode {modes};\n"
-                   + "uniform sampler2DArray frames : filter_linear, repeat_enable;\n"
+                   + "uniform sampler2DArray frames : filter_linear_mipmap, repeat_enable;\n"
                    + "uniform vec4 base_color = vec4(1.0);\n"
                    + "uniform float frame_count = 1.0;\n"
                    + "uniform bool frame_loop = true;\n"

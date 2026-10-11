@@ -50,7 +50,22 @@ public partial class Net
             return;
         }
 
-        ClanRenamedEvent?.Invoke(p.RemainingBytes >= 2 ? p.ReadString() : "");
+        string name = p.RemainingBytes >= 2 ? p.ReadString() : "";
+        if (name.Length > 0 && MyClan.InClan)
+        {
+            var clan = MyClan;
+            clan.Name = name;
+            SetMyClan(clan);
+        }
+        ClanRenamedEvent?.Invoke(name);
+    }
+
+    public void SendClanNameChangeConfirm(string newName)
+    {
+        var p = new Packet(GameOpcodes.GS_NAME_CHANGE);
+        p.WriteByte(NameChangeClanSub);
+        p.WriteString(newName);
+        _conn.Send(p);
     }
 
     public void ApplyOwnName(string name)

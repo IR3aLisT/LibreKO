@@ -366,8 +366,8 @@ public static class Fx
             Gravity = ReadVec3(p, "gravity"),
             ScaleMin = sizeMin,
             ScaleMax = sizeMax,
-            AngularVelocityMin = Mathf.RadToDeg(ReadF(p, "rollRate")),
-            AngularVelocityMax = Mathf.RadToDeg(ReadF(p, "rollRate")),
+            AngularVelocityMin = Mathf.RadToDeg(ReadRollRate(p)),
+            AngularVelocityMax = Mathf.RadToDeg(ReadRollRate(p)),
             LifetimeRandomness = Mathf.Clamp((lifeMax - lifeMin) / particleLife, 0f, 1f),
         };
         if (lut != null) pm.ColorRamp = lut;
@@ -522,6 +522,10 @@ public static class Fx
     internal static float ReadF(Godot.Collections.Dictionary p, string key, float def = 0f)
         => p.ContainsKey(key) && p[key].VariantType != Variant.Type.Nil ? (float)p[key].AsDouble() : def;
 
+    internal static Vector3 ReadSpinRate(Godot.Collections.Dictionary p) => FxSpin.RateFromBaked(ReadVec3(p, "rotVel"));
+
+    internal static float ReadRollRate(Godot.Collections.Dictionary p) => FxSpin.RollFromBaked(ReadF(p, "rollRate"));
+
     internal static Basis ReadKoMatrixBasis(Godot.Collections.Dictionary p)
     {
         if (!p.ContainsKey("matrix") || p["matrix"].VariantType != Variant.Type.Array)
@@ -573,6 +577,11 @@ public static class Fx
     }
 
     public static bool Has(string name) => LoadDescriptor(name) != null;
+
+    internal static bool UsesTargetScale(string name) =>
+        LoadDescriptor(name) is { } d && d.ContainsKey(ScaleModeKey) && d[ScaleModeKey].AsInt32() != 0;
+
+    private const string ScaleModeKey = "scaleMode";
 
     public static string? NameForId(int fxId)
     {

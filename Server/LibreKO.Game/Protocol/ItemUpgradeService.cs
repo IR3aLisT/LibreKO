@@ -22,6 +22,9 @@ public class ItemUpgradeService(
     IChaoticGeneratorService chaoticGeneratorService,
     IPetService petService,
     IItemCombineService itemCombineService,
+    IItemSmashService itemSmashService,
+    IDailyRankService dailyRankService,
+    ICharacterSealService characterSeal,
     ILogger<ItemUpgradeService> logger) : IItemUpgradeService
 {
 
@@ -45,6 +48,7 @@ public class ItemUpgradeService(
 
     private const int ItemTrina = 700002000;
     private const int ItemKarivdis = 379258000;
+    private const int BlessedUpgradeScroll = 379021000;
     private const int ItemLowClassTrina = 353000000;
     private const int ItemMiddleClassTrina = 352900000;
     private const int ItemAccessoryTrina = 354000000;
@@ -74,7 +78,7 @@ public class ItemUpgradeService(
 
     private const int SealPrice = 1_000_000;
     private const int SealStoneItem = 810890000;
-    private const int SealCodeLength = 8;
+    private const int VaultPasswordLength = 4;
 
     private sealed record SealRule(
         Func<ItemFlag, bool> IsApplicable,
@@ -90,9 +94,9 @@ public class ItemUpgradeService(
         [ItemSealType.Unseal] = new SealRule(
             flag => flag == ItemFlag.Sealed, ItemFlag.Unsealed, NeedsCode: true),
         [ItemSealType.Bind] = new SealRule(
-            flag => flag != ItemFlag.Bound, ItemFlag.Bound),
+            flag => flag is ItemFlag.Unsealed or ItemFlag.NotBound, ItemFlag.Bound),
         [ItemSealType.Unbind] = new SealRule(
-            flag => flag == ItemFlag.Bound, ItemFlag.NotBound, ChargesStones: true),
+            flag => flag == ItemFlag.Bound, ItemFlag.NotBound, NeedsCode: true, ChargesStones: true),
     };
 
     private enum ScrollClass
@@ -121,6 +125,9 @@ public class ItemUpgradeService(
             case ItemUpgradeSubOpcode.UpgradeRebirth:
                 await HandleStandardUpgradeAsync(session, packet, subOpcode);
                 break;
+            case ItemUpgradeSubOpcode.CharacterSeal:
+                await characterSeal.HandleAsync(session, packet);
+                break;
             case ItemUpgradeSubOpcode.ItemSeal:
                 await HandleItemSealAsync(session, packet);
                 break;
@@ -135,6 +142,9 @@ public class ItemUpgradeService(
                 break;
             case ItemUpgradeSubOpcode.Combine:
                 await itemCombineService.HandleAsync(session, packet);
+                break;
+            case ItemUpgradeSubOpcode.Smash:
+                await itemSmashService.HandleAsync(session, packet);
                 break;
             default:
                 logger.LogDebug("Unhandled item upgrade sub-opcode {SubOpcode} from {Name}", subOpcode, session.Name);
@@ -419,6 +429,8 @@ public class ItemUpgradeService(
             originItem.ItemId = upgradedItemId;
             originItem.Durability = upgradedItemData.Duration;
             itemIds[0] = upgradedItemId;
+            if (scrollId == BlessedUpgradeScroll)
+                await dailyRankService.CountBlessedUpgradeAsync(session);
         }
         else if (hasLogos)
         {
@@ -458,7 +470,8 @@ public class ItemUpgradeService(
 
         var noticeItemData = upgradeResult == UpgradeSucceeded ? upgradedItemData : originItemData;
         var noticeItemId = upgradeResult == UpgradeSucceeded ? upgradedItemId : originItemId;
-        if (noticeItemData.UpgradeNotice == 0)
+        if (noticeItemData.UpgradeNotice == 0
+            && !(upgradeResult == UpgradeSucceeded && UpgradeAnnouncements.Announced(noticeItemData, ResolveGrade(noticeItemData, noticeItemId))))
             return;
 
         var notice = LogosShoutPacketWriter.UpgradeAnnouncement(
@@ -638,17 +651,12 @@ public class ItemUpgradeService(
             return ItemSealResult.Failed;
 
         var slot = session.Inventory[InventoryConstants.InventoryStart + srcPos];
-        if (slot.IsEmpty || slot.ItemId != itemId || !rule.IsApplicable(slot.State))
+        if (slot.IsEmpty || slot.ItemId != itemId || !rule.IsApplicable(slot.State)
+            || !SealSocketAccepts(slot, gameDataService.GetItem(itemId), sealType))
             return ItemSealResult.Failed;
 
-        if (rule.NeedsCode)
-        {
-            if (session.SealCode.Length != SealCodeLength)
-                return ItemSealResult.NoCodeSet;
-
-            if (code != session.SealCode)
-                return ItemSealResult.WrongCode;
-        }
+        if (rule.NeedsCode && VaultPasswordRefusal(session, code) is { } refusal)
+            return refusal;
 
         if (session.Money < rule.Price)
             return ItemSealResult.NeedCoins;
@@ -669,6 +677,34 @@ public class ItemUpgradeService(
         slot.Flag = (byte)rule.AppliedFlag;
         return ItemSealResult.Succeeded;
     }
+
+    internal static ItemSealResult? VaultPasswordRefusal(UserSession session, string code)
+    {
+        if (session.VipPassword.Length != VaultPasswordLength)
+            return ItemSealResult.NoCodeSet;
+
+        if (session.VipPasswordFailures >= VipWarehousePacketCoordinator.PasswordTriesAllowed)
+            return ItemSealResult.CodeLockedOut;
+
+        if (code != session.VipPassword)
+        {
+            session.VipPasswordFailures++;
+            return session.VipPasswordFailures >= VipWarehousePacketCoordinator.PasswordTriesAllowed
+                ? ItemSealResult.CodeLockedOut
+                : ItemSealResult.WrongVaultPassword;
+        }
+
+        session.VipPasswordFailures = 0;
+        return null;
+    }
+
+    private static bool SealSocketAccepts(ItemSlot slot, ItemData? item, ItemSealType sealType) =>
+        item is { Countable: 0 }
+        && !slot.Expires
+        && slot.State is not (ItemFlag.CharacterSeal or ItemFlag.Duplicate)
+        && (sealType == ItemSealType.Bind
+            ? item.Bound > 0
+            : slot.State != ItemFlag.NotBound && !(slot.State == ItemFlag.Unsealed && item.Bound > 0));
 
     private static int CountSealStones(UserSession session)
     {

@@ -37,9 +37,9 @@ public partial class World
         if (Now() >= _moveBuffUntil)
         {
             _moveBuffPercent = 100f;
-            return 1f;
+            return Net.I.GroundSpeedFactor;
         }
-        return _moveBuffPercent / 100f;
+        return _moveBuffPercent / 100f * Net.I.GroundSpeedFactor;
     }
 
     private void ApplyMoveSpeedBuff(SkillData.Skill s, int duration) =>
@@ -145,7 +145,7 @@ public partial class World
         var s = SkillData.Get(skillId);
         if (s != null)
             CancelSkillCooldown(s);
-        Net.I.SendMagic(4, skillId, _myId);
+        Net.I.SendCastFailed(skillId);
         _selfActionUntil = 0;
         _selfClip = null;
     }

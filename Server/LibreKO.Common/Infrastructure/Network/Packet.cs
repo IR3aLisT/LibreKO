@@ -7,6 +7,8 @@ public class Packet(byte opcode)
 {
     public static readonly byte[] Header = [0xAA, 0x55];
     public static readonly byte[] Tail = [0x55, 0xAA];
+    private const byte Utf8ContinuationMask = 0xC0;
+    private const byte Utf8Continuation = 0x80;
 
     private readonly MemoryStream _stream = new();
     private int _readOffset = 0;
@@ -91,7 +93,7 @@ public class Packet(byte opcode)
         if (length < 0)
             throw new InvalidDataException($"Packet string has negative length: {length}");
         EnsureReadable(length);
-        var str = Encoding.ASCII.GetString(_stream.GetBuffer(), _readOffset, length);
+        var str = Encoding.UTF8.GetString(_stream.GetBuffer(), _readOffset, length);
         _readOffset += length;
         return str;
     }
@@ -174,7 +176,7 @@ public class Packet(byte opcode)
 
     public void WriteString(string value)
     {
-        var bytes = Encoding.ASCII.GetBytes(value);
+        var bytes = Encoding.UTF8.GetBytes(value);
         if (bytes.Length > short.MaxValue)
             throw new ArgumentException($"String too long for WriteString: {bytes.Length} bytes (max {short.MaxValue})");
         WriteShort((short)bytes.Length);
@@ -183,18 +185,19 @@ public class Packet(byte opcode)
 
     public void WriteSByteString(string value)
     {
-        var bytes = Encoding.ASCII.GetBytes(value);
-        if (bytes.Length > byte.MaxValue)
-            throw new ArgumentException($"String too long for WriteSByteString: {bytes.Length} bytes (max {byte.MaxValue})");
-        WriteByte((byte)bytes.Length);
-        _stream.Write(bytes);
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var length = Math.Min(bytes.Length, byte.MaxValue);
+        while (length > 0 && length < bytes.Length && (bytes[length] & Utf8ContinuationMask) == Utf8Continuation)
+            length--;
+        WriteByte((byte)length);
+        _stream.Write(bytes, 0, length);
     }
 
     public string ReadSByteString()
     {
         var length = ReadByte();
         EnsureReadable(length);
-        var str = Encoding.ASCII.GetString(_stream.GetBuffer(), _readOffset, length);
+        var str = Encoding.UTF8.GetString(_stream.GetBuffer(), _readOffset, length);
         _readOffset += length;
         return str;
     }

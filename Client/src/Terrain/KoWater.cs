@@ -11,6 +11,7 @@ public sealed class KoWater
         public int Rows;
         public float LevelY;
         public Vector3[] Verts;
+        public Vector2[]? Uv;
     }
 
     public Patch[] Patches = System.Array.Empty<Patch>();
@@ -48,8 +49,21 @@ public sealed class KoWater
                 Rows = rows,
                 LevelY = o["level_y"].AsSingle(),
                 Verts = verts,
+                Uv = o.ContainsKey("uv") ? ReadUv(o["uv"].AsGodotArray(), verts.Length) : null,
             });
         }
         return patches.Count > 0 ? new KoWater { Patches = patches.ToArray() } : null;
+    }
+
+    private static Vector2[]? ReadUv(Godot.Collections.Array arr, int count)
+    {
+        if (arr.Count != count) return null;
+        var uv = new Vector2[count];
+        for (int i = 0; i < count; i++)
+        {
+            var v = arr[i].AsGodotArray();
+            uv[i] = new Vector2(v[0].AsSingle(), v[1].AsSingle());
+        }
+        return uv;
     }
 }

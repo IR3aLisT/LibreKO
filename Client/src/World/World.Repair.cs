@@ -98,7 +98,7 @@ public partial class World
         stack.AddChild(grid);
         for (int i = 0; i < _repairCells.Length; i++)
         {
-            var cell = new ItemSlotView(RepairCellSize) { Index = i };
+            var cell = new ItemSlotView(RepairCellSize) { Index = i, Veiled = true };
             cell.Clicked += c => { if (_repairCellSlots[c.Index] >= 0) SelectRepair(_repairCellSlots[c.Index]); };
             cell.DoubleClicked += c => RepairOne(_repairCellSlots[c.Index]);
             cell.RightClicked += c => RepairOne(_repairCellSlots[c.Index]);
@@ -202,7 +202,8 @@ public partial class World
         if (abs < 0 || abs >= Inv.Length || abs >= GridStart + GridCount || Inv[abs].IsEmpty) return false;
         var def = ItemData.Get(Inv[abs].ItemId);
         int max = RepairMax(abs);
-        return def != null && max > 1 && def.SaleType != ItemData.SaleTypeLowNoRepair && Inv[abs].Durability < max;
+        return def != null && RepairPrice.Listed(def.IsChargeItem, def.SaleType == ItemData.SaleTypeLowNoRepair,
+            max, Inv[abs].Durability, RepairCostAt(abs));
     }
 
     private int RepairMax(int abs) => ItemData.MaxDurability(ItemData.Get(Inv[abs].ItemId), ItemData.ExtFor(Inv[abs].ItemId));

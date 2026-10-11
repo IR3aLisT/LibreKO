@@ -7,7 +7,7 @@ namespace LibreKO.Game.Protocol;
 
 public interface ICombatNotificationService
 {
-    Task SendDeathNoticeAsync(UserSession killer, UserSession victim);
+    Task SendDeathNoticeAsync(UserSession killer, UserSession victim, bool slainVanguard = false);
     Task SendHpChangeAsync(UserSession session, int attackerId = -1);
     Task SendMspChangeAsync(UserSession session);
     Task SendNpcTargetHpAsync(UserSession attacker, NpcInstance npc, int damage = 0);
@@ -20,14 +20,19 @@ public interface ICombatNotificationService
 }
 
 public class CombatNotificationService(SessionManager sessionManager,
-    ILogger<CombatNotificationService> logger) : ICombatNotificationService
+    ILogger<CombatNotificationService> logger,
+    IPartyWarBoardService? partyWarBoard = null,
+    IKingSystemRuntimeService? kings = null) : ICombatNotificationService
 {
-    public async Task SendDeathNoticeAsync(UserSession killer, UserSession victim)
+    public async Task SendDeathNoticeAsync(UserSession killer, UserSession victim, bool slainVanguard = false)
     {
         logger.LogInformation("PvP death: {Killer} killed {Victim} in zone {Zone}", killer.Name, victim.Name, victim.ZoneId);
 
+        bool victimIsKing = kings?.GetKingData(victim.Nation)?.KingName is { Length: > 0 } king
+                            && string.Equals(king, victim.Name, StringComparison.OrdinalIgnoreCase);
         var packet = ChatPacketWriter.DeathNotice(
-            (byte)victim.Nation, (byte)killer.Nation, (byte)DeathNoticeType.WithCoordinates,
+            (byte)killer.Nation, (byte)victim.Nation, victimIsKing,
+            (byte)(slainVanguard ? DeathNoticeType.VanguardSlain : DeathNoticeType.WithCoordinates),
             killer.CharacterId, killer.Name, victim.CharacterId, victim.Name,
             victim.GetPosX, victim.GetPosZ);
 
@@ -58,6 +63,7 @@ public class CombatNotificationService(SessionManager sessionManager,
     {
         var packet = TargetHpPacketWriter.For(npc.UniqueId, npc.MaxHp, npc.Hp, damage);
         await attacker.Client.SendPacket(packet);
+        partyWarBoard?.CountDamage(attacker, Math.Abs(damage));
     }
 
     public async Task SendPlayerTargetHpAsync(UserSession attacker, UserSession victim, int damage = 0)
@@ -68,6 +74,7 @@ public class CombatNotificationService(SessionManager sessionManager,
         var packet = TargetHpPacketWriter
             .For(victim.CharacterId, victim.MaxHp, victim.Hp, damage);
         await attacker.Client.SendPacket(packet);
+        partyWarBoard?.CountDamage(attacker, Math.Abs(damage));
     }
 
     public async Task SendPartyHpUpdateAsync(UserSession session)
@@ -116,6 +123,7 @@ public class CombatNotificationService(SessionManager sessionManager,
 
     public async Task SendPartyStatusUpdateAsync(UserSession session, byte statusType, bool applied)
     {
+        await session.Client.SendPacket(ZoneChangePacketWriter.UserStatus(statusType, applied));
         if (!session.IsInParty)
             return;
 
@@ -142,6 +150,7 @@ public class CombatNotificationService(SessionManager sessionManager,
 
     private enum DeathNoticeType : byte
     {
-        WithCoordinates = 0
+        WithCoordinates = 0,
+        VanguardSlain = 3,
     }
 }

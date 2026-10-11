@@ -39,7 +39,13 @@ public partial class World
     {
         if (!_autoLooting) return false;
         if (_lootEntries.Count == 0) return true;
-        TakeLoot(0, _lootEntries[0].ItemId);
+        int next = _lootEntries.FindIndex(entry => LootFilterTakes(entry.ItemId));
+        if (next < 0)
+        {
+            StopAutoLoot();
+            return true;
+        }
+        TakeLoot(next, _lootEntries[next].ItemId);
         return true;
     }
 

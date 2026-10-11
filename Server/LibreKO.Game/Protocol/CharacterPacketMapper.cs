@@ -23,7 +23,8 @@ public sealed record MyInfoPacketContext(
     short PosY,
     short PremiumHours,
     IReadOnlyDictionary<int, PetItemInfo>? PetsBySlot = null,
-    NationRanks? Ranks = null);
+    NationRanks? Ranks = null,
+    bool IsKing = false);
 
 public sealed record SelectCharacterPacketContext(
     short ZoneId,
@@ -51,7 +52,7 @@ public class CharacterPacketMapper
 
     private static byte WireByte(int value) => (byte)Math.Clamp(value, 0, byte.MaxValue);
 
-    private static PreGamePacketWriter.CharacterSlot SlotOf(Character character)
+    internal static PreGamePacketWriter.CharacterSlot SlotOf(Character character)
     {
         var inventory = new byte[InventoryConstants.InventoryTotal * 8];
         if (character.Items.Length > 0)
@@ -109,6 +110,7 @@ public class CharacterPacketMapper
             Hair = context.Character.Hair,
             Level = context.Character.Level,
             StatPoints = context.Character.StatPoints,
+            SealedExperience = context.Character.SealedExperience,
             MaxExperience = context.MaxExperience,
             Experience = context.Character.Experience,
             Loyalty = context.Character.Loyalty,
@@ -120,7 +122,8 @@ public class CharacterPacketMapper
             TotalAc = context.Stats.TotalAc,
             Money = context.Character.Money,
             Authority = (byte)context.Account.Authority,
-            NoClanCapeId = NoCapeId,
+            NoClanCapeId = context.IsKing ? KingSystemRuntimeService.KingCapeOf(context.Account.Nation) : NoCapeId,
+            IsKing = context.IsKing,
             HasPremium = context.PremiumHours > 0,
             GenieTime = context.Character.GenieHours,
             IsChicken = context.Character.Level < ChickenLevelLimit,
@@ -174,8 +177,8 @@ public class CharacterPacketMapper
         {
             if (TryReadInventoryItem(
                     context.Character.Items, storageSlot,
-                    out var itemId, out var durability, out var count, out var flag))
-                writer.SetItem(storageSlot, itemId, durability, count, flag);
+                    out var itemId, out var durability, out var count, out var flag, out var expiresAt))
+                writer.SetItem(storageSlot, itemId, durability, count, flag, ItemRecordWriter.ExpiryOnWire(expiresAt));
             if (context.PetsBySlot?.TryGetValue(storageSlot, out var pet) == true)
                 writer.SetPetItem(storageSlot, pet);
         }
@@ -189,12 +192,14 @@ public class CharacterPacketMapper
         out int itemId,
         out short durability,
         out short count,
-        out byte flag)
+        out byte flag,
+        out long expiresAt)
     {
         itemId = 0;
         durability = 0;
         count = 0;
         flag = 0;
+        expiresAt = 0;
 
         var stride = UserSessionBinaryState.BytesPerItem;
         if (slot < 0 || inventoryData.Length < (slot + 1) * stride)
@@ -208,6 +213,11 @@ public class CharacterPacketMapper
         var flagOffset = InventoryConstants.InventoryTotal * stride + slot;
         if (flagOffset < inventoryData.Length)
             flag = inventoryData[flagOffset];
+
+        var expiryOffset = InventoryConstants.InventoryTotal * (stride + UserSessionBinaryState.BytesPerFlag)
+            + slot * UserSessionBinaryState.BytesPerExpiry;
+        if (expiryOffset + UserSessionBinaryState.BytesPerExpiry <= inventoryData.Length)
+            expiresAt = BitConverter.ToInt64(inventoryData, expiryOffset);
 
         return true;
     }

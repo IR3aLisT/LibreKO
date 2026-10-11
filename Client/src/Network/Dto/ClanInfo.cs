@@ -64,9 +64,10 @@ public struct ClanStanding
 
 public static class ClanRanks
 {
+    public const byte None = 0;
     public const byte Chief = 1;
     public const byte ViceChief = 2;
-    public const byte Officer = 3;
+    public const byte Officer = 6;
     public const byte Trainee = 5;
     public const byte CommandCaptain = 100;
 

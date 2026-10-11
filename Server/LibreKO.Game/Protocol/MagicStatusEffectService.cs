@@ -15,6 +15,8 @@ public interface IMagicStatusEffectService
         UserSession caster, MagicData magic, MagicSkillType skillType, int skillId, int targetId,
         int[] data, bool isPrimary = true);
     Task CancelAsync(UserSession session, int skillId);
+    Task<bool> TransformAsync(UserSession target, int skillId);
+    event Func<UserSession, int, Task>? TransformationEnded;
 }
 
 public class MagicStatusEffectService(
@@ -23,16 +25,19 @@ public class MagicStatusEffectService(
     IMagicItemUsageService magicItemUsageService,
     ICombatNotificationService combatNotificationService,
     IUserNotificationService userNotificationService,
-    IPlayerProgressionService playerProgressionService,
     IStealthService stealthService,
     INpcSummonService npcSummonService,
     INpcLifecycleService npcLifecycleService,
     IPetService petService,
+    IResurrectionOfferService resurrectionOfferService,
+    IControlStateService controlStateService,
     ILogger<MagicStatusEffectService> logger) : IMagicStatusEffectService
 {
     private const int SkillSucceeded = 1;
     private const int PetEffectNoDuration = -1;
     private const byte DamageOverTimeCured = 200;
+
+    public event Func<UserSession, int, Task>? TransformationEnded;
 
     public Task ExecuteAsync(
         UserSession caster, MagicData magic, MagicSkillType skillType, int skillId, int targetId,
@@ -57,6 +62,8 @@ public class MagicStatusEffectService(
         if (!session.ActiveBuffs.TryRemove(skillId, out var removedBuff))
             return;
 
+        await SyncSizeStateAsync(session);
+        await SyncDevilFormAsync(session);
         var magicRow = gameDataService.GetMagic(skillId);
         if (magicRow?.PrimaryType == MagicSkillType.Transform && session.IsTransformed)
             await EndTransformationAsync(session, skillId);
@@ -129,6 +136,7 @@ public class MagicStatusEffectService(
     private async Task EndTransformationAsync(UserSession session, int skillId)
     {
         session.TransformId = 0;
+        session.TransformSkillId = 0;
 
         await sessionManager.Regions.SendToRegion(
             session,
@@ -137,6 +145,10 @@ public class MagicStatusEffectService(
             excludeSender: false);
 
         await session.Client.SendPacket(MagicProcessPacketWriter.CreateCancelTransformation());
+
+        if (TransformationEnded is { } ended)
+            foreach (var handler in ended.GetInvocationList().Cast<Func<UserSession, int, Task>>())
+                await handler(session, skillId);
     }
 
     private const int NotTransformed = 0;
@@ -282,6 +294,7 @@ public class MagicStatusEffectService(
         }
 
         await AnnounceBuffAsync(caster, npc.UniqueId, skillId, type4Data, data);
+        await controlStateService.SyncAsync(npc);
     }
 
     private static bool TryDebuffNpc(
@@ -385,12 +398,35 @@ public class MagicStatusEffectService(
 
         target.RecalculateStatsWithBuffs(gameDataService);
         await userNotificationService.SendStatUpdateAsync(target);
+        await controlStateService.SyncAsync(target);
+        await SyncSizeStateAsync(target);
+        await SyncDevilFormAsync(target);
 
         var statusType = GetPartyStatusCode(buffType);
         if (statusType > 0 && isDebuff)
             await combatNotificationService.SendPartyStatusUpdateAsync(target, statusType, applied: true);
 
         return (BuffOutcome.Applied, target);
+    }
+
+    private async Task SyncDevilFormAsync(UserSession session)
+    {
+        if (DevilForms.Sync(session) is { } devil)
+            await sessionManager.Regions.SendToRegion(session, devil, excludeSender: false);
+    }
+
+    private async Task SyncSizeStateAsync(UserSession session)
+    {
+        var state = SizeStates.Current(session);
+        if (state == session.SizeState)
+            return;
+        session.SizeState = state;
+        if (session.IsBlinking)
+            return;
+        await sessionManager.Regions.SendToRegion(
+            session,
+            MovementPacketWriter.StateChange(session.CharacterId, (byte)StateChangeType.Abnormal, (byte)state),
+            excludeSender: false);
     }
 
     private static bool LandsDebuff(MagicData magic) =>
@@ -544,40 +580,20 @@ public class MagicStatusEffectService(
                     return;
                 }
 
-                if (special == SpecialMagicType.Resurrection
-                    && magic.UseItem != 0
-                    && type5Data.NeedStone > 0
-                    && !await magicItemUsageService.TryConsumeItemAsync(
-                        target, magic.UseItem, type5Data.NeedStone))
+                if (special == SpecialMagicType.Resurrection)
+                {
+                    await resurrectionOfferService.OfferAsync(caster, target, skillId);
+                    return;
+                }
+
+                if (!await magicItemUsageService.TryConsumeSkillItemAsync(caster, magic))
                 {
                     await SendMagicFailAsync(caster, skillId);
                     return;
                 }
 
-                target.Hp = target.MaxHp;
-                target.Mp = 0;
-
-                var recovered = target.DeathExpLoss > 0 && type5Data.ExpRecover > 0
-                    ? target.DeathExpLoss * type5Data.ExpRecover / 100
-                    : 0;
-                target.DeathExpLoss = 0;
-                if (recovered > 0)
-                    await playerProgressionService.ChangeExperienceAsync(target, recovered);
-
-                await combatNotificationService.SendHpChangeAsync(target);
-                await combatNotificationService.SendMspChangeAsync(target);
-
-                // Broadcast resurrection to region so other players see the player stand up.
-                await sessionManager.Regions.SendToRegion(
-                    target,
-                    MagicProcessPacketWriter.Create(
-                        MagicProcessOpcode.Effecting,
-                        skillId,
-                        (short)caster.CharacterId,
-                        (short)target.CharacterId,
-                        [0, 1]),
-                    excludeSender: false);
-                return; // Already broadcast above; skip the trailing region broadcast.
+                await resurrectionOfferService.ReviveAsync(caster, target, skillId, type5Data);
+                return;
             }
         }
 
@@ -673,7 +689,15 @@ public class MagicStatusEffectService(
             ? caster
             : sessionManager.GetByCharacterId(targetId) ?? caster;
 
-        switch ((TransformationUse)type6Data.UserSkillUse)
+        var use = (TransformationUse)type6Data.UserSkillUse;
+        if (SiegeRules.IsSiegeTransformation(use)
+            && !SiegeRules.SiegeTransformationAllowed(caster.ZoneId, sessionManager.Battle.CastleSiegeOpen))
+        {
+            await SendMagicFailAsync(caster, skillId);
+            return;
+        }
+
+        switch (use)
         {
             case TransformationUse.GuardTower:
                 await SendMagicFailAsync(caster, skillId);
@@ -716,7 +740,24 @@ public class MagicStatusEffectService(
             return;
         }
 
+        await ApplyTransformationAsync(caster, target, skillId, type6Data);
+        await magicItemUsageService.TryConsumeSkillItemAsync(caster, magic);
+    }
+
+    public async Task<bool> TransformAsync(UserSession target, int skillId)
+    {
+        if (target.IsTransformed || gameDataService.GetMagic(skillId) is not { } magic
+            || !MagicTypeLookup.TryResolve(gameDataService.MagicType6Table, magic, skillId, out var type6Data))
+            return false;
+
+        await ApplyTransformationAsync(target, target, skillId, type6Data);
+        return true;
+    }
+
+    private async Task ApplyTransformationAsync(UserSession caster, UserSession target, int skillId, MagicType6Data type6Data)
+    {
         target.TransformId = type6Data.TransformId;
+        target.TransformSkillId = skillId;
         target.ActiveBuffs[skillId] = new ActiveBuff
         {
             MagicId = skillId,
@@ -739,8 +780,6 @@ public class MagicStatusEffectService(
                 target.CharacterId,
                 effectingData),
             excludeSender: false);
-
-        await magicItemUsageService.TryConsumeSkillItemAsync(caster, magic);
     }
 
     private const byte ZoneDelos = (byte)ZoneId.Delos;

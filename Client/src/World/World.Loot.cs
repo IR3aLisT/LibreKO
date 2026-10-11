@@ -11,6 +11,7 @@ public partial class World
         public Node3D Node = null!;
         public Vector3 BasePos;
         public double SpawnTime;
+        public int OwnerId;
     }
 
     private readonly Dictionary<int, LootBox> _boxes = new();
@@ -22,15 +23,27 @@ public partial class World
 
     private CanvasLayer _lootLayer = null!;
     private PanelContainer _lootPanel = null!;
-    private Label _lootTitle = null!;
-    private VBoxContainer _lootListBox = null!;
+    private readonly ItemSlotView[] _lootCells = new ItemSlotView[LootCellCount];
     private Label _lootPrompt = null!;
+
+    private const int LootCellCount = 12;
+    private const int LootColumns = 3;
+    private const int LootRows = 4;
+    private const float LootCellSize = 45f;
+    private const int LootCellGap = 6;
+    private const float LootOpenLift = 150f;
+    private const float LootBoxAnchorHeight = 0.4f;
+    private const float LootScreenMargin = 8f;
 
     private const string ItemBoxScenePath = "res://assets/objects/itembox_jo_a1.glb";
     private const float ItemBoxScale = 1.0f;
     private const float LootClickPickRadius = 56f;
     private const int LootFailNoRoom = -11;
     private const int LootNoRoomText = 1708;
+    private const int LootFailRetry = -7;
+    private const int LootRetryText = 14042;
+    private const int LootFailCaptcha = -20;
+    private const int LootCaptchaText = 43583;
     private PackedScene? _itemBoxScene;
     private bool _itemBoxLoaded;
 
@@ -42,6 +55,11 @@ public partial class World
         Net.I.LootContentsEvent += OnLootContents;
         Net.I.LootTakenEvent += OnLootTaken;
         Net.I.LootFailEvent += OnLootFail;
+        Net.I.LootRefusedEvent += OnLootRefused;
+        Net.I.LootItemEvent += OnLootItem;
+        Net.I.PartyLootEvent += OnPartyLoot;
+        Net.I.TemporaryLootEvent += OnTemporaryLoot;
+        Net.I.ItemReceivedEvent += OnItemReceived;
     }
 
     private void LootDispose()
@@ -50,23 +68,84 @@ public partial class World
         Net.I.LootContentsEvent -= OnLootContents;
         Net.I.LootTakenEvent -= OnLootTaken;
         Net.I.LootFailEvent -= OnLootFail;
+        Net.I.LootRefusedEvent -= OnLootRefused;
+        Net.I.LootItemEvent -= OnLootItem;
+        Net.I.PartyLootEvent -= OnPartyLoot;
+        Net.I.TemporaryLootEvent -= OnTemporaryLoot;
+        Net.I.ItemReceivedEvent -= OnItemReceived;
+    }
+
+    private const int ReceivedText = 6092;
+    private const int ReceivedNewItemText = 7613;
+    private static readonly Color ReceivedTint = Color.Color8(255, 255, 0);
+
+    private void OnItemReceived(int itemId, bool newItem) =>
+        CombatLogAdd(ItemData.Text(newItem ? ReceivedNewItemText : ReceivedText, "Received %s.")
+            .Replace("%s", ItemData.DisplayName(itemId)), CombatLogKind.Resource, ReceivedTint);
+
+    private const int PickedUpText = 6069;
+    private const int PartyMemberGotText = 3413;
+    private const int TemporaryKeptText = 43742;
+    private const int TemporaryLostText = 43741;
+    private static readonly Color LootLogTint = Color.Color8(155, 155, 255);
+    private static readonly Color TemporaryKeptTint = Color.Color8(155, 237, 255);
+    private static readonly Color TemporaryLostTint = Color.Color8(220, 20, 60);
+
+    private void OnLootItem(int itemId) =>
+        CombatLogAdd(ItemData.Text(PickedUpText, "Picked up %s").Replace("%s", ItemData.DisplayName(itemId)),
+            CombatLogKind.Resource, LootLogTint);
+
+    private void OnPartyLoot(string looter, int itemId)
+    {
+        string text = ItemData.Text(PartyMemberGotText, "%s got %s");
+        int first = text.IndexOf("%s", System.StringComparison.Ordinal);
+        if (first >= 0) text = text[..first] + looter + text[(first + 2)..];
+        CombatLogAdd(text.Replace("%s", ItemData.DisplayName(itemId)), CombatLogKind.Resource, LootLogTint);
+    }
+
+    private void OnTemporaryLoot(int itemId, bool lost) =>
+        CombatLogAdd(ItemData.Text(lost ? TemporaryLostText : TemporaryKeptText, "[%s]")
+                .Replace("%s", ItemData.DisplayName(itemId)),
+            lost ? CombatLogKind.Status : CombatLogKind.Resource, lost ? TemporaryLostTint : TemporaryKeptTint);
+
+    private void OnLootRefused(int bundleId, int result)
+    {
+        if (bundleId != _openBundleId) return;
+        bool quiet = _autoLooting;
+        if (LootOpenResult.BoxIsEmpty(result)) DespawnBox(bundleId);
+        else CloseLoot();
+        if (!quiet) CombatNotice(ItemData.Text(LootOpenResult.TextId(result), LootOpenResult.Fallback(result)));
     }
 
     private void OnLootDrop(int sourceId, int bundleId)
     {
         if (_self == null) return;
         if (_boxes.ContainsKey(bundleId)) return;
+        if (sourceId == _myId || !_ents.TryGetValue(sourceId, out var e)) return;
 
-        Vector3 pos;
-        if (sourceId != _myId && _ents.TryGetValue(sourceId, out var e))
-            pos = e.Body.Position - new Vector3(0, e.Lift, 0);
-        else
-            pos = _self.Position - new Vector3(0, _selfLift, 0);
-
+        var pos = e.Body.Position - new Vector3(0, e.Lift, 0);
         var node = BuildLootBoxNode();
         node.Position = pos;
         _entities.AddChild(node);
-        _boxes[bundleId] = new LootBox { Node = node, BasePos = pos, SpawnTime = Now() };
+        _boxes[bundleId] = new LootBox { Node = node, BasePos = pos, SpawnTime = Now(), OwnerId = sourceId };
+        if (e.Dead) e.CorpseRemoveAt = 0;
+    }
+
+    private bool HoldsLootBox(int entityId)
+    {
+        foreach (var (_, box) in _boxes)
+            if (box.OwnerId == entityId) return true;
+        return false;
+    }
+
+    private readonly List<int> _ownedBoxScratch = new();
+
+    private void DropLootBoxesOf(int entityId)
+    {
+        _ownedBoxScratch.Clear();
+        foreach (var (id, box) in _boxes)
+            if (box.OwnerId == entityId) _ownedBoxScratch.Add(id);
+        foreach (var id in _ownedBoxScratch) DespawnBox(id);
     }
 
     private Node3D BuildLootBoxNode()
@@ -133,6 +212,9 @@ public partial class World
         {
             if (GodotObject.IsInstanceValid(box.Node)) box.Node.QueueFree();
             _boxes.Remove(bundleId);
+            if (_ents.TryGetValue(box.OwnerId, out var owner) && owner.Dead && owner.IsNpc
+                && owner.CorpseRemoveAt <= 0 && !HoldsLootBox(box.OwnerId))
+                owner.CorpseRemoveAt = Now() + CorpseLinger;
         }
         _autoLootTried.Remove(bundleId);
         if (_openBundleId == bundleId) CloseLoot();
@@ -195,45 +277,44 @@ public partial class World
         _lootLayer = new CanvasLayer { Layer = 71, Visible = false };
         AddChild(_lootLayer);
 
-        _lootPanel = new PanelContainer { Position = new Vector2(420, 150) };
+        _lootPanel = new PanelContainer();
+        _lootPanel.AddThemeStyleboxOverride("panel", UiTheme.WindowPanel());
         _lootLayer.AddChild(_lootPanel);
 
         var margin = new MarginContainer();
-        foreach (var s in new[] { "left", "right", "top", "bottom" })
-            margin.AddThemeConstantOverride($"margin_{s}", 10);
+        UiTheme.Margins(margin, LootCellGap);
         _lootPanel.AddChild(margin);
 
-        var root = new VBoxContainer { CustomMinimumSize = new Vector2(220, 0) };
-        root.AddThemeConstantOverride("separation", 6);
+        var root = new VBoxContainer();
+        root.AddThemeConstantOverride("separation", LootCellGap);
         margin.AddChild(root);
 
-        var titleRow = new HBoxContainer();
-        root.AddChild(titleRow);
-        _lootTitle = HudStyle.Label(17);
-        _lootTitle.Text = "Loot";
-        _lootTitle.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        titleRow.AddChild(_lootTitle);
-        var close = new Button { Text = "✕", FocusMode = Control.FocusModeEnum.None };
-        close.AddThemeFontSizeOverride("font_size", 12);
-        close.Pressed += CloseLoot;
-        titleRow.AddChild(close);
+        var grid = new GridContainer { Columns = LootColumns };
+        grid.AddThemeConstantOverride("h_separation", LootCellGap);
+        grid.AddThemeConstantOverride("v_separation", LootCellGap);
+        root.AddChild(grid);
+        for (int k = 0; k < LootCellCount; k++)
+        {
+            int index = k % LootColumns * LootRows + k / LootColumns;
+            var cell = new ItemSlotView(LootCellSize) { Index = index };
+            cell.Clicked += c => { if (!c.Item.IsEmpty) TakeLoot(c.Index, c.Item.ItemId); };
+            cell.RightClicked += c => { if (!c.Item.IsEmpty) ShowLootRuleMenu(c.Item.ItemId); };
+            cell.Hovered += c => { if (c.Item.ItemId != Net.GoldItemId) ShowItemTooltip(-1, TooltipItem(c.Item.ItemId)); };
+            cell.Unhovered += _ => HideItemTooltip();
+            _lootCells[index] = cell;
+            grid.AddChild(cell);
+        }
 
-        root.AddChild(new HSeparator());
-
-        _lootListBox = new VBoxContainer();
-        _lootListBox.AddThemeConstantOverride("separation", 4);
-        root.AddChild(_lootListBox);
-
-        root.AddChild(new HSeparator());
-        var hint = HudStyle.Label(12);
-        hint.Text = "Click an item to take it";
-        root.AddChild(hint);
-
-        HudLayout.Attach(
-            _lootPanel,
-            "loot",
-            titleRow,
-            () => new Vector2(420f, 150f));
+        var actions = new HBoxContainer();
+        actions.AddThemeConstantOverride("separation", LootCellGap);
+        var takeAll = UiTheme.SmallButton("Take all", "Take every item in the box");
+        takeAll.Pressed += TakeAllLoot;
+        takeAll.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        actions.AddChild(takeAll);
+        var filter = UiTheme.SmallButton("Filter", "Choose what auto-loot picks up");
+        filter.Pressed += OpenLootFilter;
+        actions.AddChild(filter);
+        root.AddChild(actions);
     }
 
     private void BuildLootPrompt()
@@ -257,62 +338,41 @@ public partial class World
         _lootEntries.AddRange(entries);
         if (AutoLootNext()) return;
         RefreshLootWindow();
+        PlaceLootWindow(bundleId);
         _lootLayer.Visible = true;
+    }
+
+    private void PlaceLootWindow(int bundleId)
+    {
+        var screen = GetViewport().GetVisibleRect().Size;
+        var size = _lootPanel.GetCombinedMinimumSize();
+        var at = new Vector2((screen.X - size.X) * 0.5f, (screen.Y - size.Y) * 0.5f);
+        if (_camera != null && _boxes.TryGetValue(bundleId, out var box))
+        {
+            var anchor = box.BasePos + Vector3.Up * LootBoxAnchorHeight;
+            if (!_camera.IsPositionBehind(anchor))
+                at = _camera.UnprojectPosition(anchor) - new Vector2(0, LootOpenLift);
+        }
+        _lootPanel.Position = new Vector2(
+            Mathf.Clamp(at.X, LootScreenMargin, Mathf.Max(LootScreenMargin, screen.X - size.X - LootScreenMargin)),
+            Mathf.Clamp(at.Y, LootScreenMargin, Mathf.Max(LootScreenMargin, screen.Y - size.Y - LootScreenMargin)));
+    }
+
+    private void TakeAllLoot()
+    {
+        if (_openBundleId < 0 || _lootEntries.Count == 0) return;
+        _autoLooting = true;
+        AutoLootNext();
     }
 
     private void RefreshLootWindow()
     {
-        foreach (var c in _lootListBox.GetChildren()) c.QueueFree();
-        for (int i = 0; i < _lootEntries.Count; i++)
-            _lootListBox.AddChild(BuildLootRow(i, _lootEntries[i]));
-    }
-
-    private Control BuildLootRow(int slot, LootEntry entry)
-    {
-        var row = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Stop };
-        var rowBg = new StyleBoxFlat
+        for (int i = 0; i < LootCellCount; i++)
         {
-            BgColor = new Color(0.09f, 0.10f, 0.13f, 0.92f),
-            BorderColor = new Color(0.34f, 0.36f, 0.42f),
-        };
-        rowBg.SetBorderWidthAll(1);
-        rowBg.ContentMarginLeft = rowBg.ContentMarginRight = 6;
-        rowBg.ContentMarginTop = rowBg.ContentMarginBottom = 4;
-        row.AddThemeStyleboxOverride("panel", rowBg);
-
-        var hb = new HBoxContainer();
-        hb.AddThemeConstantOverride("separation", 8);
-        row.AddChild(hb);
-
-        bool isGold = entry.ItemId == Net.GoldItemId;
-        var icon = new TextureRect
-        {
-            CustomMinimumSize = new Vector2(40, 40),
-            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            Texture = isGold ? null : ItemData.Icon(entry.ItemId),
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        hb.AddChild(icon);
-
-        var name = HudStyle.Label(14);
-        name.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        name.VerticalAlignment = VerticalAlignment.Center;
-        name.Text = isGold
-            ? $"Gold  x{entry.Count}"
-            : entry.Count > 1 ? $"{ItemData.DisplayName(entry.ItemId)}  x{entry.Count}"
-                              : ItemData.DisplayName(entry.ItemId);
-        if (isGold) name.AddThemeColorOverride("font_color", new Color("ffd24a"));
-        hb.AddChild(name);
-
-        int takeSlot = slot;
-        int takeItem = entry.ItemId;
-        row.GuiInput += ev =>
-        {
-            if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
-                TakeLoot(takeSlot, takeItem);
-        };
-        return row;
+            if (i >= _lootEntries.Count) { _lootCells[i].Clear(); continue; }
+            var entry = _lootEntries[i];
+            _lootCells[i].Set(new ItemSlot { ItemId = entry.ItemId, Count = 1 }, entry.Count);
+        }
     }
 
     private void TakeLoot(int slot, int itemId)
@@ -335,6 +395,18 @@ public partial class World
 
     private void OnLootFail(int reason)
     {
+        if (reason == LootFailRetry)
+        {
+            CombatNotice(ItemData.Text(LootRetryText, "You have failed to loot. Please try again."));
+            CloseLoot();
+            return;
+        }
+        if (reason == LootFailCaptcha)
+        {
+            CombatNotice(ItemData.Text(LootCaptchaText, "Loot/Trade/Menu Usage Fail. Requires Captcha verification"));
+            if (_autoLooting) StopAutoLoot();
+            return;
+        }
         if (reason == LootFailNoRoom)
         {
             CombatNotice(ItemData.Text(LootNoRoomText, "You cannot trade or pick up items because you have either exceeded the possible quantity or the weight."));
@@ -350,6 +422,10 @@ public partial class World
         _autoLooting = false;
         _openBundleId = -1;
         _lootEntries.Clear();
-        if (_lootLayer != null) _lootLayer.Visible = false;
+        if (_lootLayer != null && _lootLayer.Visible)
+        {
+            _lootLayer.Visible = false;
+            HideItemTooltip();
+        }
     }
 }

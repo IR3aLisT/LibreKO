@@ -1,4 +1,5 @@
 ﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Enums;
 
 namespace LibreKO.Game.World;
 
@@ -16,6 +17,12 @@ public static class SiegeRules
         && session.KnightsFame == ClanRules.FameChief;
 
     public static bool IsWeekday(byte day) => day is >= FirstWeekday and <= LastWeekday;
+
+    public static bool IsSiegeTransformation(TransformationUse use) =>
+        use is TransformationUse.Siege or TransformationUse.Siege3;
+
+    public static bool SiegeTransformationAllowed(byte zoneId, bool siegeOpen) =>
+        siegeOpen && zoneId == (byte)ZoneId.Delos;
 
     public static byte DayBefore(byte weekday) => weekday == FirstWeekday ? LastWeekday : (byte)(weekday - 1);
 }

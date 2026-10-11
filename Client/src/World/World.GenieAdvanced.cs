@@ -23,29 +23,50 @@ public partial class World
     }
 
     private const int GenieModeCount = (int)GenieModeFlag.MpPotion + 1;
-    private const int GenieFlagsOffset = 0;
-    private const int GenieHpPercentOffset = 1;
-    private const int GenieMpPercentOffset = 2;
-    private const int GenieRangeOffset = 3;
-    private const int GenieSkillsOffset = 4;
+
+    [Flags]
+    private enum GenieExtraFlag : byte
+    {
+        StayInPlace = 1,
+        HideRange = 2,
+        CureCurse = 4,
+        HuntInPlace = 8,
+    }
+    private const int GenieHuntInPlaceText = 31071;
+    private const byte GenieOptionsLayout = 1;
+    private const int GenieLayoutOffset = 0;
+    private const int GenieFlagsOffset = 1;
+    private const int GenieHpPercentOffset = 2;
+    private const int GenieMpPercentOffset = 3;
+    private const int GenieRangeOffset = 4;
+    private const int GenieSkillsOffset = 5;
     private const int GenieSkillIdBytes = sizeof(int);
+    private const int GenieExtraFlagsOffset = GenieSkillsOffset + GenieSkillSlots * GenieSkillIdBytes;
+    private const int ClassSkillBase = 1000;
+    private const int CureCurseSkillOffset = 525;
+    private const string GenieRingTexture = "res://assets/ui/genie/genie_circle_03.png";
+    private const float GenieRingDepth = 12f;
     private const double GenieStartReplyTimeout = 8;
     private const double GeniePollInterval = 0.3;
-    private const float GenieRangeSlack = 2;
+    private const float GenieHomeSlack = 3;
     private const double GenieLeaderTargetMemory = 8;
     private const double GenieSupportRetryInterval = 2;
     private const double GeniePotionUiInterval = 1;
+    private const float GenieMiscTabHeight = 560f;
 
     private readonly int[] _genieSkills = new int[GenieSkillSlots];
     private readonly Button[] _genieSlots = new Button[GenieSkillSlots];
     private readonly CheckButton[] _genieModes = new CheckButton[GenieModeCount];
     private readonly HashSet<string> _genieMonsters = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _genieMonstersOff = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(int Skill, int Target), double> _genieSupportAt = new();
     private readonly Dictionary<int, double> _genieRefusedUntil = new();
     private const double GenieRefusedSkillHold = 3.0;
     private ItemList _genieMonsterList = null!;
     private SpinBox _genieHp = null!, _genieMp = null!, _genieRange = null!;
     private CheckButton _genieAutoParty = null!;
+    private CheckButton _genieReturnHome = null!, _genieHideRange = null!, _genieCureCurse = null!, _genieHuntInPlace = null!;
+    private Decal? _genieRing;
     private LineEdit _geniePtCode = null!;
     private readonly GeniePartyCodeGate _geniePartyCodes = new();
     private int _geniePendingInviterId = -1;
@@ -67,9 +88,16 @@ public partial class World
         var tabs = new TabContainer();
         root.AddChild(tabs);
         var main = new VBoxContainer { Name = "Main", CustomMinimumSize = new Vector2(510, 0) };
-        var misc = new VBoxContainer { Name = "Misc" };
+        var miscScroll = new ScrollContainer
+        {
+            Name = "Misc",
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            CustomMinimumSize = new Vector2(0, GenieMiscTabHeight),
+        };
+        var misc = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        miscScroll.AddChild(misc);
         tabs.AddChild(main);
-        tabs.AddChild(misc);
+        tabs.AddChild(miscScroll);
         main.AddThemeConstantOverride("separation", 8);
         var columns = new HBoxContainer();
         columns.AddThemeConstantOverride("separation", 12);
@@ -98,6 +126,7 @@ public partial class World
                 button.AddThemeStyleboxOverride("hover", hoverStyle);
                 button.AddThemeConstantOverride("icon_max_width", 30);
                 button.Pressed += () => OpenGenieSkillPicker(slot);
+                WireGenieSkillSlot(button, slot);
                 grid.AddChild(button);
                 _genieSlots[slot] = button;
             }
@@ -123,39 +152,25 @@ public partial class World
         monsters.AddChild(_genieMonsterList);
         var actions = new HBoxContainer();
         monsters.AddChild(actions);
-        GenieButton(actions, "+ Add Target", () =>
-        {
-            if (_selectedId >= 0 && _ents.TryGetValue(_selectedId, out var e) && e.IsMonster)
-            { _genieMonsters.Add(e.Name); RefreshGenieMonsters(); }
-            else CombatNotice("Select a monster first.");
-        });
+        GenieButton(actions, "+ Add Target", () => AddGenieTarget());
         GenieButton(actions, "Remove", () =>
         {
-            foreach (int i in _genieMonsterList.GetSelectedItems()) _genieMonsters.Remove(_genieMonsterList.GetItemText(i));
-            RefreshGenieMonsters();
+            foreach (int i in _genieMonsterList.GetSelectedItems()) RemoveGenieTarget(_genieMonsterList.GetItemText(i));
         });
         main.AddChild(UiTheme.Text("Empty list: all monsters in range. Click a slot to select a skill.", 11, UiTheme.TextLo));
         _genieRunLabel = UiTheme.Text("Genie stopped.", 13, UiTheme.Gold);
         main.AddChild(_genieRunLabel);
         var footer = new HBoxContainer();
         main.AddChild(footer);
-        _genieStart = GenieButton(footer, "Start", () =>
-        {
-            if (_genieRequestPending) return;
-            if (Net.I.GenieRunning) { StopAdvancedGenie(); return; }
-            if (_selfDead || MerchantBlocksMove() || !Net.I.Connected || Net.I.ReconnectBlocking) return;
-            SaveAdvancedGenie();
-            _genieWantsRunning = true;
-            _genieRequestPending = true;
-            _genieRequestAt = Now();
-            _genieStart.Disabled = true;
-            _genieRunLabel.Text = "Waiting for server response…";
-            Net.I.SendGenieSystem(Net.GenieStart);
-        });
+        _genieStart = GenieButton(footer, "Start", ToggleGenieRun);
         GenieButton(footer, "Save Settings", SaveAdvancedGenie);
         GenieButton(footer, "Use Spirit of Genie", () => Net.I.SendGenieSystem(Net.GenieUseSpiritPotion));
         misc.AddChild(UiTheme.SectionTitle("Genie Settings"));
         _genieRange = GeniePercent(misc, "Range from Start Position", 25, 3, 80);
+        _genieReturnHome = GenieOption(misc, "When no monsters are in range, return to the start position", true);
+        _genieHuntInPlace = GenieOption(misc, ItemData.Text(GenieHuntInPlaceText, "Hunting in place"), false);
+        _genieHideRange = GenieOption(misc, "Hide attack range", false);
+        _genieCureCurse = GenieOption(misc, "Auto Cure Curse", false);
         _genieAutoParty = new CheckButton { Text = "Auto Party" };
         misc.AddChild(_genieAutoParty);
         _geniePtCode = new LineEdit { PlaceholderText = "PT CODE — code to send in a private message", Secret = true, MaxLength = 64 };
@@ -168,6 +183,7 @@ public partial class World
         misc.AddChild(UiTheme.Text("Leader Target uses the nearby party leader's most recent attack.", 11, UiTheme.TextLo));
         BuildGenieScrollOptions(misc);
         BuildGenieHammerOptions(misc);
+        BuildGenieTownOptions(misc);
         misc.AddChild(new HSeparator());
         _genieSkillPicker = new PopupMenu();
         _genieLayer.AddChild(_genieSkillPicker);
@@ -178,12 +194,69 @@ public partial class World
         };
         LoadAdvancedGenie();
         Net.I.GenieSystemState += OnGenieSystemState;
+        Net.I.GenieAuraEvent += OnGenieAura;
         Net.I.GenieOptionsReceived += OnGenieOptions;
         Net.I.ChatEvent += OnGeniePrivateMessage;
         Net.I.AttackEvent += GenieObserveAttack;
         Net.I.MagicEvent += GenieObserveMagic;
         return misc;
     }
+
+    private const int GenieTargetCap = 8;
+
+    private void ToggleGenieRun()
+    {
+        if (_genieRequestPending) return;
+        if (Net.I.GenieRunning) { StopAdvancedGenie(); return; }
+        if (_selfDead || MerchantBlocksMove() || !Net.I.Connected || Net.I.ReconnectBlocking) return;
+        SaveAdvancedGenie();
+        _genieWantsRunning = true;
+        _genieRequestPending = true;
+        _genieRequestAt = Now();
+        _genieStart.Disabled = true;
+        _genieRunLabel.Text = "Waiting for server response…";
+        Net.I.SendGenieSystem(Net.GenieStart);
+    }
+
+    private bool AddGenieTarget()
+    {
+        if (_selectedId < 0 || !_ents.TryGetValue(_selectedId, out var e) || !e.IsMonster)
+        {
+            CombatNotice("Select a monster first.");
+            return false;
+        }
+        if (_genieMonsters.Contains(e.Name))
+        {
+            CombatNotice($"{e.Name} is already in the Genie attack list.");
+            return true;
+        }
+        if (_genieMonsters.Count >= GenieTargetCap)
+        {
+            CombatNotice($"The Genie attack list is full ({GenieTargetCap}).");
+            return true;
+        }
+        _genieMonsters.Add(e.Name);
+        _genieMonstersOff.Remove(e.Name);
+        CombatNotice($"{e.Name} added to the Genie attack list.");
+        RefreshGenieMonsters();
+        return true;
+    }
+
+    private void RemoveGenieTarget(string name)
+    {
+        _genieMonsters.Remove(name);
+        _genieMonstersOff.Remove(name);
+        RefreshGenieMonsters();
+    }
+
+    private void SetGenieTargetOn(string name, bool on)
+    {
+        if (on) _genieMonstersOff.Remove(name);
+        else _genieMonstersOff.Add(name);
+        RefreshGenieSub();
+    }
+
+    private List<string> GenieTargetsInOrder() => _genieMonsters.OrderBy(n => n).ToList();
 
     private static Button GenieButton(Node parent, string text, Action action)
     {
@@ -201,6 +274,20 @@ public partial class World
         _genieModes[(int)mode] = button;
     }
 
+    private static CheckButton GenieOption(Node parent, string text, bool on)
+    {
+        var button = new CheckButton { Text = text, ButtonPressed = on };
+        button.AddThemeFontSizeOverride("font_size", 12);
+        parent.AddChild(button);
+        return button;
+    }
+
+    private GenieExtraFlag GenieExtras() =>
+        (_genieReturnHome.ButtonPressed ? 0 : GenieExtraFlag.StayInPlace)
+        | (_genieHideRange.ButtonPressed ? GenieExtraFlag.HideRange : 0)
+        | (_genieCureCurse.ButtonPressed ? GenieExtraFlag.CureCurse : 0)
+        | (_genieHuntInPlace.ButtonPressed ? GenieExtraFlag.HuntInPlace : 0);
+
     private static SpinBox GeniePercent(Node parent, string title, int value, int min, int max)
     {
         var row = new HBoxContainer();
@@ -216,14 +303,8 @@ public partial class World
         _genieEditingSlot = slot;
         _genieSkillPicker.Clear();
         _genieSkillPicker.AddItem("Clear Slot", 0);
-        foreach (var s in SkillData.ForClass(_selfClass).Where(SkillRequirementMet).OrderBy(s => s.Level))
-        {
-            if (s.IsPotion || s.IsDeadFriend || s.IsBlink || s.IsGroundArea) continue;
-            bool allowed = slot < GenieSkillGroupSlots ? s.IsEnemy : slot < GenieSkillGroupSlots * 2
-                ? s.Moral is SkillTarget.Self or SkillTarget.FriendWithMe or SkillTarget.Party or SkillTarget.PartyAll
-                : s.IsFriendly;
-            if (allowed) _genieSkillPicker.AddIconItem(SkillData.Icon(s.Id), s.Name, s.Id);
-        }
+        foreach (var s in SkillData.ForClass(_selfClass).OrderBy(s => s.Level))
+            if (GenieSkillAllowed(s, slot)) _genieSkillPicker.AddIconItem(SkillData.Icon(s.Id), s.Name, s.Id);
         _genieSkillPicker.Position = (Vector2I)(_genieSlots[slot].GetGlobalRect().End);
         _genieSkillPicker.Popup();
     }
@@ -243,15 +324,19 @@ public partial class World
     {
         _genieMonsterList.Clear();
         foreach (string name in _genieMonsters.OrderBy(n => n)) _genieMonsterList.AddItem(name);
+        RefreshGenieSub();
     }
 
     private byte[] GenieOptionBytes()
     {
         var bytes = new byte[Net.GenieOptionBytes];
+        bytes[GenieLayoutOffset] = GenieOptionsLayout;
         for (int i = 0; i < GenieModeCount; i++) if (_genieModes[i].ButtonPressed) bytes[GenieFlagsOffset] |= (byte)(1 << i);
         bytes[GenieHpPercentOffset] = (byte)_genieHp.Value;
         bytes[GenieMpPercentOffset] = (byte)_genieMp.Value;
         bytes[GenieRangeOffset] = (byte)_genieRange.Value;
+        bytes[GenieExtraFlagsOffset] = (byte)GenieExtras();
+        WriteGenieTownOptions(bytes);
         for (int i = 0; i < GenieSkillSlots; i++)
             System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(GenieSkillsOffset + i * GenieSkillIdBytes, GenieSkillIdBytes), _genieSkills[i]);
         return bytes;
@@ -259,10 +344,15 @@ public partial class World
 
     private void OnGenieOptions(byte[] bytes)
     {
-        // A new character's zero-filled options must not erase usable defaults.
-        if (bytes.Length != Net.GenieOptionBytes || bytes[GenieHpPercentOffset] == 0 || _genieRequestPending || Net.I.GenieRunning) return;
+        if (bytes.Length != Net.GenieOptionBytes || bytes[GenieLayoutOffset] != GenieOptionsLayout || _genieRequestPending || Net.I.GenieRunning) return;
         for (int i = 0; i < GenieModeCount; i++) _genieModes[i].ButtonPressed = (bytes[GenieFlagsOffset] & (1 << i)) != 0;
         _genieHp.Value = bytes[GenieHpPercentOffset]; _genieMp.Value = bytes[GenieMpPercentOffset]; _genieRange.Value = bytes[GenieRangeOffset];
+        var extras = (GenieExtraFlag)bytes[GenieExtraFlagsOffset];
+        _genieReturnHome.ButtonPressed = (extras & GenieExtraFlag.StayInPlace) == 0;
+        _genieHideRange.ButtonPressed = (extras & GenieExtraFlag.HideRange) != 0;
+        _genieCureCurse.ButtonPressed = (extras & GenieExtraFlag.CureCurse) != 0;
+        _genieHuntInPlace.ButtonPressed = (extras & GenieExtraFlag.HuntInPlace) != 0;
+        ReadGenieTownOptions(bytes);
         for (int i = 0; i < GenieSkillSlots; i++)
             _genieSkills[i] = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(GenieSkillsOffset + i * GenieSkillIdBytes, GenieSkillIdBytes));
         RefreshGenieSlots();
@@ -306,6 +396,7 @@ public partial class World
 
     private void OnGenieSystemState(bool running, int minutes)
     {
+        ShowGenieAura(_myId, running);
         if (running && !_genieWantsRunning) { StopAdvancedGenie(); return; }
         _genieRequestPending = false;
         _genieStart.Disabled = false;
@@ -319,10 +410,13 @@ public partial class World
             _genieAttackCursor = 0;
         }
         if (!running && _genieWasRunning) HaltGenieActions();
+        if (running != _genieWasRunning) ResetGenieTownWatch();
         _genieWasRunning = running;
         if (!running) _genieWantsRunning = false;
         _genieDeadline = Now() + minutes * 60;
         _genieStart.Text = running ? "Stop" : "Start";
+        _geniePoints = minutes;
+        RefreshGenieSub();
         _genieRunLabel.Text = running ? $"Genie active • {minutes} minutes" :
             minutes > 0 ? $"Genie stopped • {minutes} minutes" : "No time remaining. Spirit of Genie required.";
     }
@@ -341,6 +435,7 @@ public partial class World
     {
         HaltGenieActions();
         Net.I.ResetGenieSystem();
+        ShowGenieAura(_myId, false);
         _genieWasRunning = false;
         _genieWantsRunning = false;
         _genieRequestPending = false;
@@ -373,7 +468,7 @@ public partial class World
         }
     }
 
-    private void GenieObserveAttack(int type, int result, int attacker, int target) => GenieObserveLeader(attacker, target);
+    private void GenieObserveAttack(int type, int result, int attacker, int target, bool chained) => GenieObserveLeader(attacker, target);
     private void GenieObserveMagic(int stage, int skill, int caster, int target, short[] data)
     {
         if (stage is 1 or 3) GenieObserveLeader(caster, target);
@@ -393,6 +488,7 @@ public partial class World
         Net.I.ResetGenieSystem();
         Net.I.GenieHammerResult -= OnGenieHammerResult;
         Net.I.GenieSystemState -= OnGenieSystemState;
+        Net.I.GenieAuraEvent -= OnGenieAura;
         Net.I.GenieOptionsReceived -= OnGenieOptions;
         _geniePartyCodes.Clear();
         Net.I.ChatEvent -= OnGeniePrivateMessage;
@@ -403,26 +499,28 @@ public partial class World
     private bool GenieValidMonster(int id) => _ents.TryGetValue(id, out var e)
         && e.IsMonster && e.Attackable && !e.Dead
         && e.Body.GlobalPosition.DistanceTo(_genieOrigin) <= (float)_genieRange.Value
-        && (_genieMonsters.Count == 0 || _genieMonsters.Contains(e.Name));
+        && (_genieMonsters.Count == 0 || (_genieMonsters.Contains(e.Name) && !_genieMonstersOff.Contains(e.Name)));
 
     private void AdvancedGenieTick(double now)
     {
+        GenieRingTick();
         if (_genieRequestPending && now - _genieRequestAt > GenieStartReplyTimeout) StopAdvancedGenie();
         if (!Net.I.GenieRunning)
         { if (_genieWasRunning) StopAdvancedGenie(); return; }
-        if (_selfDead || !Net.I.Connected || Net.I.ReconnectBlocking || MerchantBlocksMove() || now >= _genieDeadline
-            || _self.GlobalPosition.DistanceTo(_genieOrigin) > (float)_genieRange.Value + GenieRangeSlack)
+        if (_selfDead || !Net.I.Connected || Net.I.ReconnectBlocking || MerchantBlocksMove() || now >= _genieDeadline)
         { StopAdvancedGenie(); return; }
         if (now < _geniePollAt) return;
         _geniePollAt = now + GeniePollInterval;
         GenieHammerTick(now);
         if (now >= _geniePotionUiAt)
         { _geniePotionUiAt = now + GeniePotionUiInterval; RefreshGeniePotionSelectors(); }
+        if (GenieTownTick()) return;
         if (_genieModes[(int)GenieModeFlag.HpPotion].ButtonPressed && Vitals.MaxHp > 0 && Vitals.Hp * 100.0 / Vitals.MaxHp <= _genieHp.Value)
             UseGeniePotion(HealTarget.Hp);
         if (_genieModes[(int)GenieModeFlag.MpPotion].ButtonPressed && Vitals.MaxMp > 0 && Vitals.Mp * 100.0 / Vitals.MaxMp <= _genieMp.Value)
             UseGeniePotion(HealTarget.Mp);
         if (SelfCasting(now)) return;
+        if (GenieCureCurse(now)) return;
         if (GenieScrollTick(now)) return;
         if (_genieModes[(int)GenieModeFlag.SelfSkills].ButtonPressed && GenieSupport(GenieSkillGroupSlots, _myId, Vitals.Hp, Vitals.MaxHp, now)) return;
         if (_genieModes[(int)GenieModeFlag.PartySkills].ButtonPressed)
@@ -434,12 +532,21 @@ public partial class World
         int target = _selectedId;
         if (_genieModes[(int)GenieModeFlag.LeaderTarget].ButtonPressed && InParty && !AmLeader)
             target = _genieLeaderId == PartyMembers[0].CharId && now - _genieLeaderSeenAt < GenieLeaderTargetMemory && GenieValidMonster(_genieLeaderTarget) ? _genieLeaderTarget : -1;
-        else if (!GenieValidMonster(target))
-            target = _ents.Where(pair => GenieValidMonster(pair.Key))
+        else if (!GenieValidMonster(target) || !GenieCanReach(target))
+            target = _ents.Where(pair => GenieValidMonster(pair.Key) && GenieCanReach(pair.Key))
                 .OrderBy(pair => pair.Value.Body.GlobalPosition.DistanceSquaredTo(_self.GlobalPosition))
                 .Select(pair => pair.Key).DefaultIfEmpty(-1).First();
         if (target < 0)
-        { StopAutoAttack(); if (_genieMoving) _hasMoveTarget = false; _genieMoving = false; return; }
+        {
+            StopAutoAttack();
+            if (_genieReturnHome.ButtonPressed && _self.GlobalPosition.DistanceTo(_genieOrigin) > GenieHomeSlack)
+            {
+                _moveTarget = _genieOrigin;
+                _hasMoveTarget = true; _genieMoving = true;
+            }
+            else if (_genieMoving) { _hasMoveTarget = false; _genieMoving = false; }
+            return;
+        }
         if (_selectedId != target) Select(target, _ents[target]);
         bool basic = _genieModes[(int)GenieModeFlag.BasicAttack].ButtonPressed;
         bool basicInRange = basic && InBasicAttackRange(target);
@@ -463,13 +570,25 @@ public partial class World
             return;
         }
         // Use the normal movement path; never teleport or bypass server range checks.
-        bool shouldMove = (basic || hasAttackSkill) && !skillInRange && !(basic && InBasicAttackRange(target));
+        bool shouldMove = !_genieHuntInPlace.ButtonPressed
+            && (basic || hasAttackSkill) && !skillInRange && !(basic && InBasicAttackRange(target));
         if (shouldMove)
         {
             _moveTarget = _ents[target].Body.GlobalPosition;
             _hasMoveTarget = true; _genieMoving = true;
         }
         else if (_genieMoving) { _hasMoveTarget = false; _genieMoving = false; }
+    }
+
+    private bool GenieCanReach(int target)
+    {
+        if (!_genieHuntInPlace.ButtonPressed) return true;
+        if (target < 0 || !_ents.ContainsKey(target)) return false;
+        if (_genieModes[(int)GenieModeFlag.BasicAttack].ButtonPressed && InBasicAttackRange(target)) return true;
+        for (int j = 0; j < GenieSkillGroupSlots; j++)
+            if (SkillData.Get(_genieSkills[j]) is { IsEnemy: true } skill && InSkillRange(target, skill))
+                return true;
+        return false;
     }
 
     private void NoteGenieRefusal(int skillId)
@@ -479,6 +598,49 @@ public partial class World
 
     private bool GenieSkillHeld(int skillId, double now) =>
         _genieRefusedUntil.TryGetValue(skillId, out double until) && now < until;
+
+    private bool GenieCureCurse(double now)
+    {
+        if (!_genieCureCurse.ButtonPressed || !SelfCursed()) return false;
+        var skill = SkillData.Get(_selfClass * ClassSkillBase + CureCurseSkillOffset);
+        if (skill == null || !SkillRequirementMet(skill) || !SkillReady(skill, now)
+            || GenieSkillHeld(skill.Id, now) || !CanCastWithGear(skill)) return false;
+        if (_genieSupportAt.TryGetValue((skill.Id, _myId), out var next) && now < next) return false;
+        int previous = _selectedId;
+        _selectedId = _myId;
+        try { CastSkill(skill.Id); }
+        finally { _selectedId = previous; }
+        _genieSupportAt[(skill.Id, _myId)] = now + GenieSupportRetryInterval;
+        return true;
+    }
+
+    private bool SelfCursed() =>
+        _buffs.Exists(buff => SkillData.Get(buff.SkillId) is { Type1: MagicType.Buff, IsEnemy: true });
+
+    private void GenieRingTick()
+    {
+        if (_genieHideRange is null || _geniePanel is null) return;
+        bool show = _self != null && !_genieHideRange.ButtonPressed
+            && (Net.I.GenieRunning || _geniePanel.Visible);
+        if (!show)
+        {
+            if (_genieRing != null) _genieRing.Visible = false;
+            return;
+        }
+        if (_genieRing == null)
+        {
+            _genieRing = new Decal
+            {
+                TextureAlbedo = ResourceLoader.Load<Texture2D>(GenieRingTexture),
+                CullMask = ItemShineLight.SceneryLayer,
+            };
+            AddChild(_genieRing);
+        }
+        float diameter = 2f * (float)_genieRange.Value;
+        _genieRing.Size = new Vector3(diameter, GenieRingDepth, diameter);
+        _genieRing.GlobalPosition = Net.I.GenieRunning ? _genieOrigin : _self!.GlobalPosition;
+        _genieRing.Visible = true;
+    }
 
     private bool GenieSupport(int start, int target, int hp, int maxHp, double now)
     {

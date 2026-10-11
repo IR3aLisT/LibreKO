@@ -13,59 +13,97 @@ public partial class Cape : MeshInstance3D
     private PinInfluence[][] _pinBindings = Array.Empty<PinInfluence[]>();
     private Vector3[] _pins = Array.Empty<Vector3>(), _oldPins = Array.Empty<Vector3>(), _stepPins = Array.Empty<Vector3>();
 
+    private const int AttachmentCacheLimit = 512;
+    private readonly record struct AttachmentPart(Mesh Mesh, Skin? Skin, Transform3D Transform);
+    private sealed record AttachmentSource(List<AttachmentVertex> Vertices, List<int> Triangles);
+    private static readonly Dictionary<string, AttachmentSource> AttachmentCache =
+        Shutdown.Track(new Dictionary<string, AttachmentSource>());
+
     private void FitAttachment(Node root, Vector3 neck)
     {
-        var vertices = new List<AttachmentVertex>();
-        var triangles = new List<int>();
         var frame = new Transform3D(_restBasis, neck);
         var toFrame = frame.AffineInverse() * _skel.GlobalTransform.AffineInverse();
-        void Collect(Node node)
+        var parts = new List<AttachmentPart>();
+        void Gather(Node node)
         {
             if (node is Cape or BoneAttachment3D or FxInstance or FxWeaponGlow or ItemShineDriver) return;
             if (node is MeshInstance3D { Mesh: { } mesh, Visible: true } instance)
-            {
-                var transform = toFrame * instance.GlobalTransform;
-                var skin = instance.Skin;
-                for (int surface = 0; surface < mesh.GetSurfaceCount(); surface++)
-                {
-                    using var arrays = mesh.SurfaceGetArrays(surface);
-                    var positions = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
-                    var indices = arrays[(int)Mesh.ArrayType.Index].AsInt32Array();
-                    var bones = arrays[(int)Mesh.ArrayType.Bones].AsInt32Array();
-                    var weights = arrays[(int)Mesh.ArrayType.Weights].AsFloat32Array();
-                    int influences = positions.Length > 0 ? bones.Length / positions.Length : 0;
-                    int start = vertices.Count;
-                    for (int i = 0; i < positions.Length; i++)
-                    {
-                        var binding = new List<PinInfluence>();
-                        if (skin != null)
-                            for (int j = 0; j < influences; j++)
-                            {
-                                int at = i * influences + j;
-                                if (weights[at] <= 0) continue;
-                                int bind = bones[at];
-                                var name = skin.GetBindName(bind);
-                                int bone = name.IsEmpty ? skin.GetBindBone(bind) : _skel.FindBone(name);
-                                if (bone < 0) continue;
-                                binding.Add(new PinInfluence(bone, skin.GetBindPose(bind) * positions[i], weights[at]));
-                            }
-                        var restPoint = transform * positions[i];
-                        if (binding.Count > 0)
-                        {
-                            restPoint = Vector3.Zero;
-                            foreach (var influence in binding)
-                                restPoint += (_skel.GetBoneGlobalRest(influence.Bone) * influence.Point) * influence.Weight;
-                            restPoint = frame.AffineInverse() * restPoint;
-                        }
-                        vertices.Add(new AttachmentVertex(restPoint, binding.ToArray()));
-                    }
-                    if (indices.Length > 0) foreach (int index in indices) triangles.Add(start + index);
-                    else for (int i = 0; i < positions.Length; i++) triangles.Add(start + i);
-                }
-            }
-            foreach (var child in node.GetChildren()) Collect(child);
+                parts.Add(new AttachmentPart(mesh, instance.Skin, toFrame * instance.GlobalTransform));
+            foreach (var child in node.GetChildren()) Gather(child);
         }
-        Collect(root);
+        Gather(root);
+        string key = AttachmentKey(parts, frame);
+        if (!AttachmentCache.TryGetValue(key, out var source))
+        {
+            source = CollectAttachment(parts, frame);
+            if (AttachmentCache.Count >= AttachmentCacheLimit) AttachmentCache.Clear();
+            AttachmentCache[key] = source;
+        }
+        FitPins(source.Vertices, source.Triangles, frame);
+    }
+
+    private string AttachmentKey(List<AttachmentPart> parts, Transform3D frame)
+    {
+        var key = new System.Text.StringBuilder();
+        key.Append(_rigScale.ToString("F4")).Append('|').Append(Rounded(frame));
+        for (int bone = 0; bone < _skel.GetBoneCount(); bone++) key.Append('|').Append(_skel.GetBoneName(bone));
+        foreach (var part in parts)
+            key.Append('#').Append(part.Mesh.GetRid().Id).Append(':').Append(part.Skin?.GetRid().Id ?? 0).Append(':').Append(Rounded(part.Transform));
+        return key.ToString();
+    }
+
+    private static string Rounded(Transform3D t) =>
+        $"{t.Basis.X.X:F3},{t.Basis.X.Y:F3},{t.Basis.X.Z:F3},{t.Basis.Y.X:F3},{t.Basis.Y.Y:F3},{t.Basis.Y.Z:F3},"
+        + $"{t.Basis.Z.X:F3},{t.Basis.Z.Y:F3},{t.Basis.Z.Z:F3},{t.Origin.X:F3},{t.Origin.Y:F3},{t.Origin.Z:F3}";
+
+    private AttachmentSource CollectAttachment(List<AttachmentPart> parts, Transform3D frame)
+    {
+        var vertices = new List<AttachmentVertex>();
+        var triangles = new List<int>();
+        foreach (var (mesh, skin, transform) in parts)
+        {
+            for (int surface = 0; surface < mesh.GetSurfaceCount(); surface++)
+            {
+                var cached = MeshArraysCache.Get(mesh, surface);
+                var positions = cached.Vertices;
+                var indices = cached.Indices;
+                var bones = cached.Bones;
+                var weights = cached.Weights;
+                int influences = positions.Length > 0 ? bones.Length / positions.Length : 0;
+                int start = vertices.Count;
+                for (int i = 0; i < positions.Length; i++)
+                {
+                    var binding = new List<PinInfluence>();
+                    if (skin != null)
+                        for (int j = 0; j < influences; j++)
+                        {
+                            int at = i * influences + j;
+                            if (weights[at] <= 0) continue;
+                            int bind = bones[at];
+                            var name = skin.GetBindName(bind);
+                            int bone = name.IsEmpty ? skin.GetBindBone(bind) : _skel.FindBone(name);
+                            if (bone < 0) continue;
+                            binding.Add(new PinInfluence(bone, skin.GetBindPose(bind) * positions[i], weights[at]));
+                        }
+                    var restPoint = transform * positions[i];
+                    if (binding.Count > 0)
+                    {
+                        restPoint = Vector3.Zero;
+                        foreach (var influence in binding)
+                            restPoint += (_skel.GetBoneGlobalRest(influence.Bone) * influence.Point) * influence.Weight;
+                        restPoint = frame.AffineInverse() * restPoint;
+                    }
+                    vertices.Add(new AttachmentVertex(restPoint, binding.ToArray()));
+                }
+                if (indices.Length > 0) foreach (int index in indices) triangles.Add(start + index);
+                else for (int i = 0; i < positions.Length; i++) triangles.Add(start + i);
+            }
+        }
+        return new AttachmentSource(vertices, triangles);
+    }
+
+    private void FitPins(List<AttachmentVertex> vertices, List<int> triangles, Transform3D frame)
+    {
         FitCollar(vertices, triangles);
         FitFeet(vertices, frame);
         _pinBindings = new PinInfluence[_nc][];

@@ -31,6 +31,8 @@ public partial class World
         Net.I.PetFedEvent += OnPetFed;
         Net.I.PetFoodRefusedEvent += OnPetFoodRefused;
         Net.I.PetStrikeEvent += OnPetStrike;
+        Net.I.PetHpDeltaEvent += OnPetHpDelta;
+        Net.I.PetMpDeltaEvent += OnPetMpDelta;
         PetHatchInit();
     }
 
@@ -44,6 +46,8 @@ public partial class World
         Net.I.PetFedEvent -= OnPetFed;
         Net.I.PetFoodRefusedEvent -= OnPetFoodRefused;
         Net.I.PetStrikeEvent -= OnPetStrike;
+        Net.I.PetHpDeltaEvent -= OnPetHpDelta;
+        Net.I.PetMpDeltaEvent -= OnPetMpDelta;
         PetHatchDispose();
     }
 
@@ -89,7 +93,7 @@ public partial class World
         root.AddChild(bag);
         for (int i = 0; i < _petBagCells.Length; i++)
         {
-            var cell = new ItemSlotView(PetBagCellSize) { Index = i, CanDrop = CanDropOnPetBag, Dropped = DropOnPetBag };
+            var cell = new ItemSlotView(PetBagCellSize) { Index = i, Veiled = true, CanDrop = CanDropOnPetBag, Dropped = DropOnPetBag };
             cell.RightClicked += c => TakeFromPetBag(c.Index);
             _petBagCells[i] = cell;
             bag.AddChild(cell);
@@ -145,6 +149,7 @@ public partial class World
         RefreshPetUI();
         _petPanel.Visible = true;
         _petShown = true;
+        RefreshPetPlate(Net.I.Pet);
     }
 
     private void ClosePet()
@@ -152,6 +157,7 @@ public partial class World
         if (!_petShown) return;
         _petShown = false;
         _petPanel.Visible = false;
+        RefreshPetPlate(Net.I.Pet);
     }
 
     private void RequestPetMode(int mode)
@@ -215,22 +221,45 @@ public partial class World
         RefreshPetUI();
     }
 
+    private static readonly Color PetModeColour = new("ff00ff");
+    private static readonly Color PetExpColour = new("ffff00");
+    private const string PetExpPlaceholder = "%I64d";
+
     private void OnPetMode(int mode)
     {
-        CombatNotice(mode switch
+        CombatLogAdd(mode switch
         {
-            PetSheet.ModeAttack => "Familiar Attack Mode",
-            PetSheet.ModeLooting => "Familiar Looting Mode",
-            _ => "Familiar Defense Mode",
-        });
+            PetSheet.ModeAttack => SystemText(PetLogText.AttackMode, "Familiar Attack Mode"),
+            PetSheet.ModeLooting => SystemText(PetLogText.LootingMode, "Familiar Looting Mode"),
+            _ => SystemText(PetLogText.DefenseMode, "Familiar Defense Mode"),
+        }, CombatLogKind.Status, PetModeColour);
         RefreshPetUI();
     }
 
     private void OnPetExp(long gained)
     {
-        if (gained > 0) CombatNotice($"Familiar awarded {gained} EXP.");
-        else if (gained < 0) CombatNotice($"Familiar has lost {-gained} EXP.");
+        if (gained != 0)
+            CombatLogAdd((gained > 0
+                    ? SystemText(PetLogText.ExpGained, "Familiar awarded %I64d EXP.")
+                    : SystemText(PetLogText.ExpLost, "Familiar has lost %I64d EXP."))
+                .Replace(PetExpPlaceholder, System.Math.Abs(gained).ToString()), CombatLogKind.Status, PetExpColour);
         RefreshPetUI();
+    }
+
+    private void OnPetHpDelta(int delta)
+    {
+        if (delta < 0)
+            CombatLogAdd(TextTemplate.Fill(SystemText(PetLogText.HpLost, "Familiar sustained %d damage."), -delta), CombatLogKind.Incoming);
+        else
+            CombatLogAdd(TextTemplate.Fill(SystemText(PetLogText.HpRecovered, "Familiar recovered %d HP."), delta), CombatLogKind.Recovery);
+    }
+
+    private void OnPetMpDelta(int delta)
+    {
+        if (delta < 0)
+            CombatLogAdd(TextTemplate.Fill(SystemText(PetLogText.MpUsed, "Familiar employing %d MP."), -delta), CombatLogKind.Spent);
+        else
+            CombatLogAdd(TextTemplate.Fill(SystemText(PetLogText.MpRecovered, "Familiar recovered %d MP."), delta), CombatLogKind.Resource);
     }
 
     private void OnPetFed(int bagSlot, int itemId, int countLeft, int increase)
@@ -244,11 +273,20 @@ public partial class World
 
     private void OnPetStrike(int targetId, int damage)
     {
-        if (damage <= 0 || !_ents.TryGetValue(targetId, out var target)) return;
-        CombatNotice($"Familiar on {target.Name} inflicted {damage} damage.");
+        if (damage == 0 || !_ents.TryGetValue(targetId, out var target)) return;
+        if (damage > 0)
+            CombatLogAdd(TextTemplate.Fill(SystemText(PetLogText.Inflicted, "Familiar on %s inflicted %d damage."), target.Name, damage),
+                CombatLogKind.Damage);
+        else
+            CombatLogAdd(TextTemplate.Fill(SystemText(PetLogText.Healed, "Familiar on %s recovered %d HP."), target.Name, -damage),
+                CombatLogKind.Recovery);
     }
 
-    private void RefreshPetUI() => ShowPetSheet(Net.I.Pet);
+    private void RefreshPetUI()
+    {
+        ShowPetSheet(Net.I.Pet);
+        RefreshPetPlate(Net.I.Pet);
+    }
 
     private void ShowPetSheet(PetSheet? pet)
     {

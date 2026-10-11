@@ -24,7 +24,6 @@ public class LootPacketCoordinator(
     ILogger<LootPacketCoordinator> logger) : ILootPacketCoordinator
 {
     private const byte LootSuccess = 1;
-    private const byte LootError = 0;
     private const int CoinMax = 2_100_000_000;
     private const float PartyCoinRange = 50f;
 
@@ -84,13 +83,19 @@ public class LootPacketCoordinator(
         var bundleId = packet.ReadInt();
         var bundle = sessionManager.Regions.GetBundle(bundleId);
         if (bundle == null)
+        {
+            await session.Client.SendPacket(BundleOpenPacketWriter.Refused(bundleId, BundleOpenPacketWriter.ResultGone));
             return;
+        }
 
         if (bundle.DistanceSquaredTo(session.X, session.Z) > LootBundle.MaxLootRange)
             return;
 
         if (!bundle.CanLoot(session.CharacterId, session.IsInParty ? session.PartyIndex : -1, DateTime.UtcNow.Ticks))
+        {
+            await session.Client.SendPacket(BundleOpenPacketWriter.Refused(bundleId, BundleOpenPacketWriter.ResultNotYours));
             return;
+        }
 
         var snapshot = bundle.SnapshotItems();
 
@@ -113,19 +118,19 @@ public class LootPacketCoordinator(
         var bundle = sessionManager.Regions.GetBundle(bundleId);
         if (bundle == null)
         {
-            await SendItemGetErrorAsync(session);
+            await SendItemGetErrorAsync(session, bundleId);
             return;
         }
 
         if (bundle.DistanceSquaredTo(session.X, session.Z) > LootBundle.MaxLootRange)
         {
-            await SendItemGetErrorAsync(session);
+            await SendItemGetErrorAsync(session, bundleId);
             return;
         }
 
         if (!bundle.CanLoot(session.CharacterId, session.IsInParty ? session.PartyIndex : -1, DateTime.UtcNow.Ticks))
         {
-            await SendItemGetErrorAsync(session);
+            await SendItemGetErrorAsync(session, bundleId);
             return;
         }
 
@@ -133,7 +138,7 @@ public class LootPacketCoordinator(
         {
             if (!sessionManager.Regions.TryClaimBundleSlot(bundleId, slotId, itemId, out var claimedGold) || claimedGold == null)
             {
-                await SendItemGetErrorAsync(session);
+                await SendItemGetErrorAsync(session, bundleId);
                 return;
             }
 
@@ -152,14 +157,14 @@ public class LootPacketCoordinator(
         var itemData = gameDataService.GetItem(itemId);
         if (itemData == null)
         {
-            await SendItemGetErrorAsync(session);
+            await SendItemGetErrorAsync(session, bundleId);
             return;
         }
 
         var snapshot = bundle.SnapshotItems();
         if (slotId >= snapshot.Count || snapshot[slotId].ItemId != itemId)
         {
-            await SendItemGetErrorAsync(session);
+            await SendItemGetErrorAsync(session, bundleId);
             return;
         }
         var peekedCount = snapshot[slotId].Count;
@@ -167,14 +172,14 @@ public class LootPacketCoordinator(
         var slotIndex = session.WithLock(s => s.FindSlotForItem(itemId, gameDataService, peekedCount));
         if (slotIndex < 0)
         {
-            var noRoom = ItemGetPacketWriter.NoRoom();
+            var noRoom = ItemGetPacketWriter.NoRoom(bundleId);
             await session.Client.SendPacket(noRoom);
             return;
         }
 
         if (!sessionManager.Regions.TryClaimBundleSlot(bundleId, slotId, itemId, out var claimed) || claimed == null)
         {
-            await SendItemGetErrorAsync(session);
+            await SendItemGetErrorAsync(session, bundleId);
             return;
         }
 
@@ -203,9 +208,24 @@ public class LootPacketCoordinator(
             picked.Money,
             slotId);
         await session.Client.SendPacket(success);
+        await TellPartyAsync(session, bundleId, itemId, slotId);
 
         await userNotificationService.SendWeightChangeAsync(session);
         await collectionRaceService.HandleItemGainAsync(session, itemId);
+    }
+
+    private async Task TellPartyAsync(UserSession looter, int bundleId, int itemId, ushort slotId)
+    {
+        if (!looter.IsInParty || sessionManager.Parties.GetParty(looter.PartyIndex) is not { } party)
+            return;
+        var notice = ItemGetPacketWriter.PartyMemberLooted(bundleId, itemId, looter.Name, slotId);
+        for (var index = 0; index < PartyGroup.MaxMembers; index++)
+        {
+            if (party.MemberIds[index] < 0 || party.MemberIds[index] == looter.CharacterId)
+                continue;
+            if (sessionManager.GetByCharacterId(party.MemberIds[index]) is { } member && member.ZoneId == looter.ZoneId)
+                await member.Client.SendPacket(notice);
+        }
     }
 
     private async Task ShareCoinsAsync(PartyGroup party, LootBundle bundle, byte zoneId, int itemId, int coins)
@@ -256,9 +276,9 @@ public class LootPacketCoordinator(
         return s.Money;
     });
 
-    private static async Task SendItemGetErrorAsync(UserSession session)
+    private static async Task SendItemGetErrorAsync(UserSession session, int bundleId)
     {
-        var result = ItemGetPacketWriter.Failed(LootError);
+        var result = ItemGetPacketWriter.Failed(bundleId);
         await session.Client.SendPacket(result);
     }
 }

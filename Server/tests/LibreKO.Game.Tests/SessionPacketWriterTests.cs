@@ -23,4 +23,13 @@ public class SessionPacketWriterTests
         packet.ReadByte().Should().Be((byte)GameServerState.Open);
         packet.RemainingBytes.Should().Be(0);
     }
+
+    [Fact]
+    public void ServerFullIsTheBareOpcode()
+    {
+        var packet = SessionPacketWriter.ServerFull();
+
+        packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_SERVER_FULL);
+        packet.RemainingBytes.Should().Be(0);
+    }
 }

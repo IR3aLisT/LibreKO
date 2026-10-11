@@ -42,7 +42,7 @@ public class KnightsTests : GameTestBase
                         Class = 101,
                         MapId = 1,
                         KnightsId = clanId,
-                        Fame = 3
+                        Fame = ClanRules.FameOfficer
                     },
                     new Character
                     {
@@ -81,7 +81,7 @@ public class KnightsTests : GameTestBase
         leader.Name = "Leader";
         leader.Nation = AccountNation.Karus;
         leader.KnightsId = clanId;
-        leader.KnightsFame = 3;
+        leader.KnightsFame = ClanRules.FameOfficer;
         leader.KnightsName = "Heroes";
 
         var recruit = sessionManager.CreateSession(recruitClient, recruitId, accountId: 2);
@@ -575,7 +575,7 @@ public class KnightsTests : GameTestBase
                     Hp = 120,
                     Mp = 80,
                     KnightsId = clanId,
-                    Fame = 3
+                    Fame = ClanRules.FameOfficer
                 });
             });
 
@@ -602,7 +602,7 @@ public class KnightsTests : GameTestBase
         var session = await initializer.InitializeAsync(client);
 
         session.Should().NotBeNull();
-        session!.KnightsFame.Should().Be(3);
+        session!.KnightsFame.Should().Be(ClanRules.FameOfficer);
         session.KnightsName.Should().Be("Sentinels");
     }
 

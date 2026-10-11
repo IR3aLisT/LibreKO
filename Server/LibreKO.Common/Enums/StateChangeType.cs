@@ -7,8 +7,12 @@ public enum StateChangeType : byte
     Abnormal = 3,
     Action = 4,
     Visibility = 5,
+    PartyLeader = 6,
     Stealth = 7,
     CombatStance = 8,
+    SoccerTeam = 11,
+    DevilForm = 12,
+    Title = 14,
     Transformation = 19,
 }
 

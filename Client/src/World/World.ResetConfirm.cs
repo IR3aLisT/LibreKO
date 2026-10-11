@@ -8,10 +8,13 @@ public partial class World
 {
     private const byte ResetRefusedNeedsCoins = 0;
     private const byte ResetRefusedNothingToReset = 2;
+    private const byte ResetRefusedNeedsFirstJob = 3;
     private const byte ResetRefusedItemsEquipped = 4;
     private const int TextResetNeedsCoins = 6086;
     private const int TextResetNothing = 6087;
+    private const int TextResetNeedsFirstJob = 6090;
     private const int TextResetItemsEquipped = 6112;
+    private const int TextResetDone = 12903;
 
     private readonly RedistributionRequest _reset = new();
     private Notice? _resetConfirm;
@@ -86,9 +89,17 @@ public partial class World
     }
 
     private void OnStatResetFinished(
-        bool ok, int money, int[] stats, int maxHp, int maxMp, int ap, int statPoints) => CancelReset();
+        bool ok, int money, int[] stats, int maxHp, int maxMp, int ap, int statPoints)
+    {
+        if (ok) CombatNotice(ItemData.Text(TextResetDone, "Redistribution successful."));
+        CancelReset();
+    }
 
-    private void OnSkillResetFinished(bool ok, int money, int pool) => CancelReset();
+    private void OnSkillResetFinished(bool ok, int money, int pool)
+    {
+        if (ok) CombatNotice(ItemData.Text(TextResetDone, "Redistribution successful."));
+        CancelReset();
+    }
 
     private void OnResetRefused(byte result, int cost)
     {
@@ -97,6 +108,7 @@ public partial class World
             ResetRefusedNeedsCoins => ItemData.Text(TextResetNeedsCoins, "You need %d Coins")
                 .Replace("%d", cost.ToString("n0")),
             ResetRefusedNothingToReset => ItemData.Text(TextResetNothing, "There are no points to reset."),
+            ResetRefusedNeedsFirstJob => ItemData.Text(TextResetNeedsFirstJob, "You must first undergo the 1st job change."),
             ResetRefusedItemsEquipped => ResetItemsEquippedText,
             _ => "",
         };

@@ -149,6 +149,31 @@ public class MonsterStoneTests
     }
 
     [Fact]
+    public async Task TheExpButtonSpendsTheStoneForFiveTimesTheLevelCubedPlusTen()
+    {
+        var rig = new Rig();
+        var session = rig.Player(level: 60);
+
+        await rig.Service.ExpAsync(session, MonsterStoneRules.UniversalStone);
+
+        await rig.Items.Received(1).TryConsumeItemAsync(session, MonsterStoneRules.UniversalStone, 1);
+        await rig.Progression.Received(1).ChangeExperienceAsync(session, 1_080_050);
+        await rig.Entry.DidNotReceiveWithAnyArgs().EnterAloneAsync(default!, default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task TheExpButtonGivesNothingForAnotherItem()
+    {
+        var rig = new Rig();
+        var session = rig.Player(level: 60);
+
+        await rig.Service.ExpAsync(session, NestMinion);
+
+        await rig.Items.DidNotReceiveWithAnyArgs().TryConsumeItemAsync(default!, default, default);
+        await rig.Progression.DidNotReceiveWithAnyArgs().ChangeExperienceAsync(default!, default);
+    }
+
+    [Fact]
     public async Task UsingTheStoneSpendsOneAndSendsThePlayerAloneIntoTheirNest()
     {
         var rig = new Rig();
@@ -274,6 +299,7 @@ public class MonsterStoneTests
         public IGameDataService GameData { get; } = Substitute.For<IGameDataService>();
         public IMagicItemUsageService Items { get; } = Substitute.For<IMagicItemUsageService>();
         public IInstanceEntryService Entry { get; } = Substitute.For<IInstanceEntryService>();
+        public IPlayerProgressionService Progression { get; } = Substitute.For<IPlayerProgressionService>();
         public InstanceRoomRegistry Rooms { get; }
         public MonsterStoneService Service { get; }
         public Dictionary<UserSession, List<Packet>> Sent { get; } = [];
@@ -294,7 +320,7 @@ public class MonsterStoneTests
             Items.CanUseItem(Arg.Any<UserSession>(), MonsterStoneRules.UniversalStone).Returns(true);
             Items.TryConsumeItemAsync(Arg.Any<UserSession>(), Arg.Any<int>(), Arg.Any<int>()).Returns(true);
             Service = new MonsterStoneService(
-                Sessions, GameData, Items, Entry, Rooms, Substitute.For<ILogger<MonsterStoneService>>());
+                Sessions, GameData, Items, Entry, Rooms, Progression, Substitute.For<ILogger<MonsterStoneService>>());
         }
 
         public UserSession Player(byte level, byte zone = Moradon, short hp = 1000, ushort room = 0)

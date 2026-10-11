@@ -23,6 +23,9 @@ public partial class CharSelect : Node3D
     private ColorPickerButton _hairColour = null!;
     private Button _createConfirm = null!;
     private readonly Label[] _statValues = new Label[5];
+    private readonly Label[] _statNames = new Label[5];
+    private Label _createDesc = null!;
+    private const string RecommendedHint = "Recommended for this class";
     private readonly Button[] _statUp = new Button[5];
     private readonly Button[] _statDown = new Button[5];
     private readonly int[] _alloc = new int[5];
@@ -107,6 +110,11 @@ public partial class CharSelect : Node3D
             form.AddChild(_jobBox);
         }
 
+        _createDesc = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
+        _createDesc.AddThemeFontSizeOverride("font_size", 12);
+        _createDesc.AddThemeColorOverride("font_color", UiTheme.TextLo);
+        form.AddChild(_createDesc);
+
         form.AddChild(SectionLabel("Stats"));
         for (int i = 0; i < 5; i++) form.AddChild(BuildStatRow(i));
         _createBonus = new Label { HorizontalAlignment = HorizontalAlignment.Right };
@@ -169,9 +177,15 @@ public partial class CharSelect : Node3D
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 6);
 
-        var label = new Label { Text = StatLabels[index], CustomMinimumSize = new Vector2(44, 0) };
+        var label = new Label
+        {
+            Text = StatLabels[index],
+            CustomMinimumSize = new Vector2(44, 0),
+            MouseFilter = Control.MouseFilterEnum.Stop,
+        };
         label.AddThemeFontSizeOverride("font_size", 13);
         label.AddThemeColorOverride("font_color", UiTheme.TextHi);
+        _statNames[index] = label;
         row.AddChild(label);
 
         _statDown[index] = Ui.MenuButton("◀", 26, 13);
@@ -198,6 +212,23 @@ public partial class CharSelect : Node3D
         row.AddChild(_statUp[index]);
         return row;
     }
+
+    private void RefreshCreateGuide()
+    {
+        string race = Text(StarterStats.RaceTextId(_createRace));
+        string job = Text(StarterStats.ClassTextId(_createClass));
+        _createDesc.Text = race.Length > 0 && job.Length > 0 ? $"{race}\n\n{job}" : race + job;
+        _createDesc.Visible = _createDesc.Text.Length > 0;
+        for (int i = 0; i < _statNames.Length; i++)
+        {
+            bool recommended = StarterStats.Recommended(_createClass, i);
+            _statNames[i].AddThemeColorOverride("font_color", recommended ? UiTheme.GoldVivid : UiTheme.TextHi);
+            string hint = Text(StarterStats.StatHintTextId(i));
+            _statNames[i].TooltipText = recommended ? $"{RecommendedHint}\n{hint}" : hint;
+        }
+    }
+
+    private static string Text(int id) => id > 0 ? ItemData.Text(id, "") : "";
 
     private static Label BuildStepperRow(Control parent, string label, System.Action<int> step)
     {
@@ -323,6 +354,7 @@ public partial class CharSelect : Node3D
     private void PickClass(int cls)
     {
         _createClass = cls;
+        RefreshCreateGuide();
         foreach (Node c in _jobBox.GetChildren())
             if (c is Button b && b.HasMeta("job"))
                 Ui.MarkSelected(b, b.GetMeta("job").AsInt32() == cls);
@@ -400,8 +432,7 @@ public partial class CharSelect : Node3D
 
     private void RefreshCreatePreview()
     {
-        if (_characterModel != null && GodotObject.IsInstanceValid(_characterModel))
-            _characterModel.QueueFree();
+        DetachCharacterModel();
         _characterModel = CharacterPreview.Build(_createRace, _createFace,
             System.Array.Empty<int>(), _createHair, _hairColour.Color);
         if (_characterModel == null) return;

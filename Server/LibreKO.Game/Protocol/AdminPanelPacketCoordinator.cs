@@ -56,6 +56,7 @@ public class AdminPanelPacketCoordinator(
     private const byte ReqSpawnSet = 17;
     private const byte ReqSpawnPersist = 18;
     private const byte ReqCash = 19;
+    private const byte ReqCommands = 20;
 
     private static readonly HashSet<byte> GameMasterOnlySubs =
     [
@@ -121,6 +122,10 @@ public class AdminPanelPacketCoordinator(
         {
             case ReqState:
                 await SendStateAsync(session, granted: true);
+                break;
+
+            case ReqCommands:
+                await client.SendPacket(AdminPanelPacketWriter.Commands(open: false, GmCommandCatalog.All));
                 break;
 
             case ReqCoins:
@@ -441,6 +446,8 @@ public class AdminPanelPacketCoordinator(
             return;
         }
 
+        if (ClassIdHelper.GetNation(session.Class) != nation)
+            session.Class = NationTransferRules.NewClass(session.Class);
         session.Nation = nation;
         session.Race = race;
         await PersistLookAsync(session, nation, race);
@@ -466,10 +473,23 @@ public class AdminPanelPacketCoordinator(
                 await accounts.UpdateAsync(account);
             }
 
-            var character = await characters.GetById(session.CharacterId);
-            if (character != null)
+            foreach (var listed in await characters.GetCharactersByAccount(session.AccountId))
             {
-                character.Race = race;
+                var character = await characters.GetById(listed.Id);
+                if (character == null)
+                    continue;
+                if (character.Id == session.CharacterId)
+                {
+                    character.Race = race;
+                    character.Class = session.Class;
+                }
+                else if (ClassIdHelper.GetNation(character.Class) != nation)
+                {
+                    character.Race = NationTransferRules.ProposedRace(character.Race, character.Class);
+                    character.Class = NationTransferRules.NewClass(character.Class);
+                }
+                else
+                    continue;
                 await characters.UpdateAsync(character);
             }
         }

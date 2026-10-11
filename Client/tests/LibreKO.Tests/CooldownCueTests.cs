@@ -37,12 +37,26 @@ public class CooldownCueTests
     }
 
     [Fact]
-    public void ShortCooldownsAndSkillsOffTheBarStaySilent()
+    public void SkillsOffTheBarAreNotCued()
     {
-        var readyAt = new Dictionary<int, double> { [Slash] = 100.5, [Unbarred] = 100.5 };
+        var readyAt = new Dictionary<int, double> { [Unbarred] = 100.5 };
         var cued = new List<int>();
         CooldownCue.Collect(readyAt, 100.0, 101.0, Hotbar, Recast, cued);
         Assert.Empty(cued);
+    }
+
+    [Fact]
+    public void ShortCooldownsFlashWithoutASound()
+    {
+        var readyAt = new Dictionary<int, double> { [Slash] = 100.5 };
+        var cued = new List<int>();
+        CooldownCue.Collect(readyAt, 100.0, 101.0, Hotbar, Recast, cued);
+        Assert.Equal([Slash], cued);
+        Assert.False(CooldownCue.Sounds(cued, Recast));
+
+        readyAt[Nova] = 100.6;
+        CooldownCue.Collect(readyAt, 100.0, 101.0, Hotbar, Recast, cued);
+        Assert.True(CooldownCue.Sounds(cued, Recast));
     }
 
     [Fact]

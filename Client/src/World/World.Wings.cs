@@ -37,6 +37,7 @@ public partial class World
         public const string Run = "run";
         public const string Breath = "breath";
         public const string Attack = "attack";
+        public const string Hit = "hit";
         public const string Sit = "sit";
         public const string Die = "die";
     }
@@ -146,7 +147,7 @@ public partial class World
             ForceDoubleSided(inst);
             if (enableShine && part.Slot == 0)
                 ItemShine.Apply(inst, gear[InventoryConstants.VisBreast], 0);
-            AttachFxPlugs(inst, $"res://assets/wings/{part.Stem}.fxplug.json");
+            AttachFxPlugs(inst, $"res://assets/wings/{part.Stem}.fxplug.json", turnWithBone: true);
 
             var anim = FindFirst<AnimationPlayer>(inst);
             if (anim != null)
@@ -201,13 +202,52 @@ public partial class World
         return map;
     }
 
+    private const double WingSwitchDelay = 0.2;
+    private const double WingRunLinger = 0.15;
+
+    internal sealed class WingPick
+    {
+        public string? Shown;
+        public string? Pending;
+        public double Since;
+
+        public string Settle(string wanted, double now)
+        {
+            if (wanted is WingState.Die or WingState.Sit || Shown == null)
+                return Accept(wanted);
+            if (wanted == Shown)
+            {
+                Pending = null;
+                return Shown;
+            }
+            if (wanted != Pending)
+            {
+                Pending = wanted;
+                Since = now;
+                return Shown;
+            }
+            return now - Since >= WingSwitchDelay ? Accept(wanted) : Shown;
+        }
+
+        private string Accept(string wanted)
+        {
+            Shown = wanted;
+            Pending = null;
+            return wanted;
+        }
+    }
+
+    private readonly WingPick _selfWingPick = new();
+    private double _selfWingMovedAt = double.MinValue;
+
     private void WingTick()
     {
+        double now = Now();
         foreach (var e in _ents.Values)
         {
             if (e.WingAnims == null) continue;
             if (e.AnimPaused) continue;
-            string state = EntityWingState(e);
+            string state = e.WingPick.Settle(EntityWingState(e, now), now);
             bool active = !e.AnimThrottled;
             for (int s = 0; s < e.WingAnims.Length; s++)
             {
@@ -217,26 +257,33 @@ public partial class World
             }
         }
 
-        string selfState = SelfWingState();
+        string selfState = _selfWingPick.Settle(SelfWingState(now), now);
         for (int s = 0; s < _selfWingAnims.Length; s++)
             if (_selfWingAnims[s] is { } anim)
                 PlayWingClip(anim, ref _selfWingClips[s], selfState);
     }
 
-    private static string EntityWingState(Ent e)
+    private static bool LocomotionClip(string? clip) => clip is "run" or "walk" or "walk_reverse";
+
+    private static string EntityWingState(Ent e, double now)
     {
         if (e.Dead) return WingState.Die;
         if (HoverPosture(e.Hover, e.Sitting, e.ActionRank, e.ActionUntil)) return WingState.Sit;
-        if (e.ActionClip != null || Now() < e.ActionUntil) return WingState.Attack;
-        return e.Clip is "run" or "walk" or "walk_reverse" ? WingState.Run : WingState.Breath;
+        if (LocomotionClip(e.Clip)) return WingState.Run;
+        bool acting = now < e.ActionUntil;
+        if (e.Flinch is { Weight: > 0f } || (acting && e.ActionRank == ActionRankStruck)) return WingState.Hit;
+        return acting ? WingState.Attack : WingState.Breath;
     }
 
-    private string SelfWingState()
+    private string SelfWingState(double now)
     {
         if (_selfDead) return WingState.Die;
         if (HoverPosture(_selfHover, _selfSitting, _selfActionRank, _selfActionUntil)) return WingState.Sit;
-        if (Now() < _selfActionUntil) return WingState.Attack;
-        return _selfClip is "run" or "walk" or "walk_reverse" ? WingState.Run : WingState.Breath;
+        if (LocomotionClip(_selfClip)) _selfWingMovedAt = now;
+        if (now - _selfWingMovedAt <= WingRunLinger) return WingState.Run;
+        bool acting = now < _selfActionUntil;
+        if (_selfFlinch is { Weight: > 0f } || (acting && _selfActionRank == ActionRankStruck)) return WingState.Hit;
+        return acting ? WingState.Attack : WingState.Breath;
     }
 
     internal static void PlayWingClip(AnimationPlayer anim, ref string? clip, string state)
@@ -246,6 +293,7 @@ public partial class World
         {
             WingState.Run => WingAnimSlot.Run,
             WingState.Attack => WingAnimSlot.Attack,
+            WingState.Hit => WingAnimSlot.Hit,
             WingState.Sit => WingAnimSlot.Sit,
             WingState.Die => WingAnimSlot.Die,
             _ => WingAnimSlot.Breath,

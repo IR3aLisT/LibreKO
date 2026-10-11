@@ -30,13 +30,14 @@ public interface IMiscPacketCoordinator
 public class MiscPacketCoordinator(
     IServiceProvider serviceProvider,
     SessionManager sessionManager,
+    IGameDataService gameDataService,
     IWorldPacketCoordinator worldPacketCoordinator,
     IKnightsRuntimeService knightsRuntimeService,
     IMagicItemUsageService magicItemUsageService,
     ISpecialAuctionService specialAuctionService,
+    TimeWeatherBroadcastService timeWeather,
     ILogger<MiscPacketCoordinator> logger) : IMiscPacketCoordinator
 {
-    private const short NoSummonedFamiliars = 0;
     private const byte CommandAuthority = 0x01;
 
     private const byte NameChangeRequest = 0;
@@ -51,8 +52,6 @@ public class MiscPacketCoordinator(
     private const int ScrollOfIdentity = 800032000;
     private const int ClanNameScroll = 800086000;
 
-    private byte santaOrAngelState;
-
     public async Task HandlePremiumAsync(IClient client)
     {
         var session = sessionManager.GetByClientId(client.Id);
@@ -65,7 +64,7 @@ public class MiscPacketCoordinator(
     public async Task SendPremiumInfoAsync(UserSession session)
     {
         var packet = MiscPacketWriter.Premium(
-            session.AccountStatus, session.PremiumType, session.PremiumTime);
+            session.PremiumType, session.PremiumTime, PremiumBonusList.For(session, gameDataService));
         await session.Client.SendPacket(packet);
     }
 
@@ -130,7 +129,7 @@ public class MiscPacketCoordinator(
             return;
 
         var newName = packet.ReadString();
-        if (string.IsNullOrWhiteSpace(newName) || newName.Length is < 3 or > 20)
+        if (string.IsNullOrWhiteSpace(newName) || newName.Length is < 3 or > 20 || !NameRules.IsPlain(newName))
         {
             await SendNameChangeResultAsync(session, NameChangeInvalid);
             return;
@@ -189,7 +188,7 @@ public class MiscPacketCoordinator(
             return;
 
         var newName = packet.ReadString();
-        if (string.IsNullOrWhiteSpace(newName) || newName.Length is < 3 or > 20)
+        if (string.IsNullOrWhiteSpace(newName) || newName.Length is < 3 or > 20 || !NameRules.IsPlain(newName))
         {
             await SendClanNameChangeResultAsync(session, NameChangeInvalid);
             return;
@@ -256,13 +255,13 @@ public class MiscPacketCoordinator(
 
     public async Task HandleSantaAsync(IClient client)
     {
-        var packet = MiscPacketWriter.SantaState(santaOrAngelState);
+        var packet = MiscPacketWriter.SantaState(timeWeather.SantaOrAngel);
         await client.SendPacket(packet);
     }
 
     public async Task SetSantaOrAngelStateAsync(byte state)
     {
-        santaOrAngelState = state;
+        timeWeather.SantaOrAngel = state;
         var packet = MiscPacketWriter.SantaState(state);
         foreach (var session in sessionManager.GetAll())
             await session.Client.SendPacket(packet);
@@ -281,7 +280,8 @@ public class MiscPacketCoordinator(
             return;
 
         var players = (short)Math.Min(sessionManager.OnlineCount, short.MaxValue);
-        var result = MiscPacketWriter.ConcurrentUsers(players, NoSummonedFamiliars);
+        var familiars = (short)Math.Min(sessionManager.GetAll().Count(s => s.Pet != null), short.MaxValue);
+        var result = MiscPacketWriter.ConcurrentUsers(players, familiars);
         await client.SendPacket(result);
     }
 
@@ -330,12 +330,18 @@ public class MiscPacketCoordinator(
         if (session == null || packet.RemainingBytes < 5)
             return;
 
-        _ = packet.ReadByte(); // sub_opcode
+        var kind = packet.ReadByte();
         var r = packet.ReadByte();
         var g = packet.ReadByte();
         var b = packet.ReadByte();
         var c = packet.ReadByte();
         var message = packet.ReadSByteString();
+
+        if (kind == FullMoonShout)
+        {
+            await FullMoonShoutAsync(session, r, g, b, c, message);
+            return;
+        }
 
         bool hasItem = false;
         int itemSlotIndex = -1;
@@ -350,7 +356,7 @@ public class MiscPacketCoordinator(
             }
         }
 
-        if (string.IsNullOrEmpty(message) || message.Length > LogosShoutMaxMessageLen)
+        if (string.IsNullOrEmpty(message) || message.EnumerateRunes().Count() > LogosShoutMaxMessageLen)
         {
             await client.SendPacket(LogosShoutPacketWriter.RegisterRejected(
                 LogosShoutPacketWriter.RegisterRetryLater));
@@ -376,6 +382,22 @@ public class MiscPacketCoordinator(
 
         await sessionManager.BroadcastToAll(broadcast);
         logger.LogInformation("LogoShout from {Name}: {Message}", session.Name, message);
+    }
+
+    private const byte FullMoonShout = 4;
+    private const int FullMoonShoutPartySize = 2;
+    private static readonly TimeSpan FullMoonShoutCooldown = TimeSpan.FromSeconds(600);
+
+    private async Task FullMoonShoutAsync(UserSession session, byte r, byte g, byte b, byte c, string message)
+    {
+        var party = session.IsInParty ? sessionManager.Parties.GetParty(session.PartyIndex) : null;
+        var now = DateTime.UtcNow;
+        if (party == null || party.LeaderId != (short)session.CharacterId || party.MemberCount < FullMoonShoutPartySize
+            || party.BoardType != FullMoonRules.FullMoonBoard || string.IsNullOrEmpty(message)
+            || message.EnumerateRunes().Count() > LogosShoutMaxMessageLen || now - session.LastFullMoonShout < FullMoonShoutCooldown)
+            return;
+        session.LastFullMoonShout = now;
+        await sessionManager.BroadcastToAll(LogosShoutPacketWriter.Broadcast(r, g, b, c, message));
     }
 
     private const byte ReportFile = 9;

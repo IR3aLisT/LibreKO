@@ -10,7 +10,8 @@ public sealed class ExchangePacketWriter
     private const int NoItemExtension = 0;
 
     public readonly record struct TransferredItem(
-        byte Position, int ItemId, ushort Count, short Durability);
+        byte Position, int ItemId, ushort Count, short Durability,
+        int UniqueId = 0, CharacterSealPacketWriter.RingSummary? Ring = null);
 
     public static Packet Sub(byte sub)
     {
@@ -33,13 +34,14 @@ public sealed class ExchangePacketWriter
         return packet;
     }
 
-    public static Packet ItemOffered(byte sub, int itemId, int count, short durability)
+    public static Packet ItemOffered(byte sub, int itemId, int count, short durability,
+        int uniqueId = 0, CharacterSealPacketWriter.RingSummary? ring = null)
     {
         var packet = Sub(sub);
         packet.WriteInt(itemId);
         packet.WriteInt(count);
         packet.WriteShort(durability);
-        packet.WriteInt(NoItemExtension);
+        WriteExtension(packet, uniqueId, ring);
         return packet;
     }
 
@@ -57,9 +59,20 @@ public sealed class ExchangePacketWriter
             packet.WriteUShort(item.Count);
             packet.WriteShort(item.Durability);
             packet.WriteByte(0);
-            packet.WriteInt(NoItemExtension);
+            WriteExtension(packet, item.UniqueId, item.Ring);
         }
 
         return packet;
+    }
+
+    private static void WriteExtension(Packet packet, int uniqueId, CharacterSealPacketWriter.RingSummary? ring)
+    {
+        if (uniqueId == 0 || ring is not { } summary)
+        {
+            packet.WriteInt(NoItemExtension);
+            return;
+        }
+        packet.WriteInt(uniqueId);
+        CharacterSealPacketWriter.WriteSummary(packet, summary);
     }
 }

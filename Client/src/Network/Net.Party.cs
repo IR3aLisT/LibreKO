@@ -23,6 +23,14 @@ public partial class Net
 
     public event Action? PartyDisbandEvent;
 
+    public event Action<CommanderNamedReply>? PartyCommanderEvent;
+
+    public event Action<CommanderMarkReply>? CommanderMarkEvent;
+
+    public event Action<byte>? CommanderOrderEvent;
+
+    public int PartyCommanderId { get; private set; } = -1;
+
     public event Action<bool>? PartyBbsRegisterEvent;
 
     public event Action? PartyBbsDeleteEvent;
@@ -30,10 +38,14 @@ public partial class Net
     public event Action<int, int, List<PartyBbsEntry>>? PartyBbsListEvent;
 
     public event Action? PartyBbsWantedFailEvent;
+    public event Action<PartyBoardInvite>? PartyBbsInviteEvent;
 
     private readonly List<PartyMember> _party = new();
     private readonly Dictionary<int, HashSet<byte>> _partyStatus = new();
     private bool _partyJoining;
+    public byte PartyType { get; private set; }
+    public byte PartyBoardMode { get; private set; }
+    private const int MemberTailBytes = 2 + sizeof(int) + 1;
 
     public IReadOnlyList<PartyMember> Party => _party;
 
@@ -54,6 +66,7 @@ public partial class Net
         _party.Clear();
         _partyStatus.Clear();
         _partyJoining = false;
+        PartyCommanderId = -1;
     }
 
     private PartyMember SelfPartyMember() =>
@@ -87,13 +100,14 @@ public partial class Net
 
     public static class PartyRequest
     {
-        public const byte Create = 1, Permit = 2, Insert = 3, Remove = 4, Delete = 5, Promote = 28;
+        public const byte Create = 1, Permit = 2, Insert = 3, Remove = 4, Delete = 5, Promote = 28,
+            CommanderAppoint = 30, CommanderMark = 31, CommanderOrder = 32;
     }
 
     public const byte SubPartyInvite = 2, SubPartyMemberInfo = 3, SubPartyMemberLeft = 4,
                       SubPartyDisband = 5, SubPartyVitals = 6, SubPartyLevel = 7,
                       SubPartyClass = 8, SubPartyStatusEffect = 9, SubPartyCommander = 30,
-                      SubPartyTargetNumber = 31, SubPartyAlert = 32;
+                      SubPartyCommanderMark = 31, SubPartyCommanderOrder = 32;
 
     public const short PartyStatusMemberRecord = 1;
 
@@ -124,6 +138,14 @@ public partial class Net
                 int cls = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
                 int maxMp = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
                 int mp = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
+                if (p.RemainingBytes >= MemberTailBytes)
+                {
+                    p.ReadByte();
+                    p.ReadByte();
+                    int marked = p.ReadInt();
+                    PartyType = p.ReadByte();
+                    if (id == MyCharId && marked >= 0) CommanderMarkEvent?.Invoke(new CommanderMarkReply(marked, false));
+                }
                 var member = new PartyMember(id, successCode, name, maxHp, hp, level, cls, maxMp, mp);
                 ApplyPartyMember(member);
                 PartyMemberEvent?.Invoke(member);
@@ -146,6 +168,7 @@ public partial class Net
                 if (idx >= 0) _party.RemoveAt(idx);
                 _partyStatus.Remove(removedId);
                 if (removedId == MyCharId) ClearParty("the server removed us from the party (GS_PARTY sub 4)");
+                if (removedId == PartyCommanderId) PartyCommanderId = -1;
                 PartyRemovedEvent?.Invoke(removedId, removedName);
                 break;
             }
@@ -203,6 +226,22 @@ public partial class Net
                 PartyMemberStatusEvent?.Invoke(cid, statusType, applied);
                 break;
             }
+            case SubPartyWarBoard:
+                HandlePartyWarBoard(p);
+                break;
+            case SubPartyCommander:
+                if (CommanderNamedReply.Read(p) is { } named)
+                {
+                    PartyCommanderId = named.CharId;
+                    PartyCommanderEvent?.Invoke(named);
+                }
+                break;
+            case SubPartyCommanderMark:
+                if (CommanderMarkReply.Read(p) is { } mark) CommanderMarkEvent?.Invoke(mark);
+                break;
+            case SubPartyCommanderOrder:
+                if (p.RemainingBytes >= 1) CommanderOrderEvent?.Invoke(p.ReadByte());
+                break;
 
         }
     }
@@ -210,7 +249,7 @@ public partial class Net
     private void HandlePartyBbs(Packet p)
     {
         if (p.RemainingBytes < 2) return;
-        p.ReadByte();
+        PartyBoardMode = p.ReadByte();
         byte sub = p.ReadByte();
         switch (sub)
         {
@@ -225,6 +264,9 @@ public partial class Net
                 break;
             case 0x0B:
                 ParseBbsList(p);
+                break;
+            case PartyBoardInvite.Sub:
+                if (PartyBoardInvite.Read(p) is { } invite) PartyBbsInviteEvent?.Invoke(invite);
                 break;
         }
     }
@@ -244,8 +286,8 @@ public partial class Net
             string name = p.ReadString();
             int classOrWanted = p.ReadInt();
             int level = p.ReadByte();
-            byte type = p.ReadByte();
             p.ReadByte();
+            byte type = p.ReadByte();
             string message = p.ReadSByteString();
             int zoneId = p.ReadShort();
             int memberCount = p.ReadByte();

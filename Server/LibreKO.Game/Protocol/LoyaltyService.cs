@@ -1,4 +1,5 @@
-﻿using LibreKO.Common.Enums;
+﻿using LibreKO.Common.Domain.Services;
+using LibreKO.Common.Enums;
 using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
 
@@ -7,17 +8,32 @@ namespace LibreKO.Game.Protocol;
 public interface ILoyaltyService
 {
     Task ChangeAsync(UserSession session, int changeAmount);
+    Task AwardKillAsync(UserSession session, int amount);
     Task SetAsync(UserSession session, int loyalty);
     Task DonateToKnightsAsync(UserSession session, int amount);
 }
 
 public class LoyaltyService(
     TimeWeatherBroadcastService timeWeather,
+    IGameDataService gameData,
     SessionManager sessionManager,
     IClanStandingService clanStanding,
     IAchievementProgressService achievementProgressService) : ILoyaltyService
 {
-    public async Task ChangeAsync(UserSession session, int changeAmount)
+    public Task ChangeAsync(UserSession session, int changeAmount) =>
+        ApplyAsync(session, changeAmount < 0 ? changeAmount : timeWeather.ApplyNpBonus(changeAmount));
+
+    public Task AwardKillAsync(UserSession session, int amount)
+    {
+        if (amount <= 0)
+            return ChangeAsync(session, amount);
+
+        var premium = gameData.GetPremiumProperty(session.PremiumType, PremiumPropertyType.Loyalty);
+        session.DailyPremiumLoyalty += premium;
+        return ApplyAsync(session, timeWeather.ApplyNpBonus(amount) + premium);
+    }
+
+    private async Task ApplyAsync(UserSession session, int changeAmount)
     {
         if (changeAmount < 0)
         {
@@ -25,7 +41,6 @@ public class LoyaltyService(
         }
         else
         {
-            changeAmount = timeWeather.ApplyNpBonus(changeAmount);
             session.Loyalty += changeAmount - AutoContribution(session, changeAmount);
             session.MonthlyLoyalty += changeAmount;
             session.DailyLoyalty += changeAmount;

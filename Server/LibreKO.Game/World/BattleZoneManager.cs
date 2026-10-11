@@ -4,6 +4,9 @@ namespace LibreKO.Game.World;
 
 public class BattleZoneManager
 {
+    public bool CastleSiegeOpen { get; set; }
+    public bool KrowazOpen { get; set; }
+
     // Battle status
     public const byte NO_BATTLE = 0;
     public const byte NATION_BATTLE = 1;
@@ -88,6 +91,11 @@ public class BattleZoneManager
     public ushort ElmoMonumentPoint { get; set; }
     public byte KarusMonuments { get; set; }
     public byte ElmoMonuments { get; set; }
+    public const int MonumentCount = 7;
+    public const int MonumentCapturePoints = 2;
+    public const int MonumentSweepPoints = 10;
+    private static readonly short[] MonumentTraps = [5, 2, 3, 4, 7, 6, 1];
+    public byte[] MonumentOwners { get; } = new byte[MonumentCount];
 
     // Flags
     public bool KarusOpenFlag { get; set; }
@@ -122,6 +130,7 @@ public class BattleZoneManager
         ElmoMonumentPoint = 0;
         KarusMonuments = 0;
         ElmoMonuments = 0;
+        Array.Clear(MonumentOwners);
         KarusOpenFlag = false;
         ElmoradOpenFlag = false;
         BanishFlag = false;
@@ -153,6 +162,7 @@ public class BattleZoneManager
         ElmoMonumentPoint = 0;
         KarusMonuments = 0;
         ElmoMonuments = 0;
+        Array.Clear(MonumentOwners);
         KarusOpenFlag = false;
         ElmoradOpenFlag = false;
         BattleSaved = false;
@@ -206,26 +216,23 @@ public class BattleZoneManager
         return 0;
     }
 
-    public void CaptureMonument(byte nation)
+    public static int MonumentIndexOfTrap(short trap) => Array.IndexOf(MonumentTraps, trap);
+
+    public bool CaptureMonumentAt(int index, byte nation)
     {
-        if (nation == 1) // Karus
-        {
-            KarusMonumentPoint += 2;
-            KarusMonuments++;
-            if (KarusMonuments >= 7)
-                KarusMonumentPoint += 10;
-            if (ElmoMonuments > 0)
-                ElmoMonuments--;
-        }
-        else // Elmorad
-        {
-            ElmoMonumentPoint += 2;
-            ElmoMonuments++;
-            if (ElmoMonuments >= 7)
-                ElmoMonumentPoint += 10;
-            if (KarusMonuments > 0)
-                KarusMonuments--;
-        }
+        if (index < 0 || index >= MonumentCount || MonumentOwners[index] == nation)
+            return false;
+
+        MonumentOwners[index] = nation;
+        KarusMonuments = (byte)MonumentOwners.Count(owner => owner == (byte)AccountNation.Karus);
+        ElmoMonuments = (byte)MonumentOwners.Count(owner => owner == (byte)AccountNation.ElMorad);
+        bool sweep = (nation == (byte)AccountNation.Karus ? KarusMonuments : ElmoMonuments) == MonumentCount;
+        var gained = (ushort)(MonumentCapturePoints + (sweep ? MonumentSweepPoints : 0));
+        if (nation == (byte)AccountNation.Karus)
+            KarusMonumentPoint += gained;
+        else
+            ElmoMonumentPoint += gained;
+        return true;
     }
 
     public byte DetermineWinner()

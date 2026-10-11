@@ -5,7 +5,7 @@ namespace LibreKO.Domain;
 
 public static class CooldownCue
 {
-    public const float MinRecastSeconds = 2f;
+    public const float MinSoundRecastSeconds = 2f;
 
     public static void Collect(
         Dictionary<int, double> readyAt, double since, double now,
@@ -17,8 +17,15 @@ public static class CooldownCue
         {
             if (until <= since || until > now) continue;
             if (Array.IndexOf(hotbar, skillId) < 0) continue;
-            if (recastSeconds(skillId) < MinRecastSeconds) continue;
+            if (recastSeconds(skillId) <= 0f) continue;
             into.Add(skillId);
         }
+    }
+
+    public static bool Sounds(List<int> cued, Func<int, float> recastSeconds)
+    {
+        foreach (int skillId in cued)
+            if (recastSeconds(skillId) >= MinSoundRecastSeconds) return true;
+        return false;
     }
 }

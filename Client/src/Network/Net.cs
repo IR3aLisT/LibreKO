@@ -24,11 +24,13 @@ public partial class Net : Node
     public event Action<int, int, int, int>? EntityHpEvent;
     public event Action<int, int, int>? EntityHpSyncEvent;
 
-    public event Action<int, int, int, int>? AttackEvent;
+    public event Action<int, int, int, int, bool>? AttackEvent;
     public event Action<int, int, int, int, short[]>? MagicEvent;
     public event Action<int, int>? DeadEvent;
     public event Action<int, int, int>? SelfHpEvent;
     public event Action<int, int>? SelfMpEvent;
+
+    public event Action<int, int>? SelfStaminaEvent;
     public event Action<float, float>? RegeneEvent;
     public event Action<int[]>? SkillDataEvent;
     public event Action? SkillBarClearEvent;
@@ -38,7 +40,7 @@ public partial class Net : Node
     public event Action<int, ItemSlot>? InventorySlotEvent;
     public event Action<int, int>? ItemGainedEvent;
     public event Action<ItemSlot[]>? InventoryGridRefreshEvent;
-    public event Action<bool>? ItemRemoveResultEvent;
+    public event Action<bool, int>? ItemRemoveResultEvent;
     public event Action<int, int, int, short>? LookChangeEvent;
 
     public event Action<int, int, int, int, int, int>? PointChangeEvent;
@@ -49,6 +51,9 @@ public partial class Net : Node
     public event Action<int, int>? TimeEvent;
     public event Action<int, int>? WeatherEvent;
     public event Action<string>? NoticeEvent;
+    public event Action<string>? TradeBlockedEvent;
+    public event Action? EventTitlesChangedEvent;
+    public EventTitles EventTitles { get; } = new();
     public event Action<float, float>? WarpEvent;
 
     private readonly Dictionary<int, EntitySnapshot> _known = new();
@@ -67,6 +72,7 @@ public partial class Net : Node
     {
         _known.Remove(id);
         _gmFxStates.Remove(id);
+        _rankAuraHidden.Remove(id);
         _knownStalls.Remove(id);
         EntityOutEvent?.Invoke(id);
     }
@@ -131,6 +137,7 @@ public partial class Net : Node
         _reconnectKickSent = false;
         ResetPendingOperations();
         MyCharId = 0;
+        ForgetSkillBar();
         PingMs = -1;
         _pingOutstanding = false;
         _pingAccum = 0;
@@ -168,6 +175,7 @@ public partial class Net : Node
         }
         ResetPendingOperations();
         MyCharId = 0;
+        ForgetSkillBar();
     }
 
     private void ResetPendingOperations()
@@ -208,11 +216,7 @@ public partial class Net : Node
             SendVersionCheck();
         }
         bool dropped = !_conn.Connected && _connectedFired;
-        while (_conn.Incoming.TryDequeue(out var p))
-        {
-            try { Handle(p); }
-            catch (Exception e) { Diag.Report($"packet 0x{p.GetOpcode():X2}", e); }
-        }
+        DrainIncoming();
         if (dropped && _connectedFired)
         {
             _conn.Close();
@@ -233,6 +237,18 @@ public partial class Net : Node
 
         SchedulePing(delta);
         ReconnectTick(delta);
+    }
+
+    private void DrainIncoming()
+    {
+        while (_conn.Incoming.TryDequeue(out var p))
+        {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            int size = p.RemainingBytes;
+            try { Handle(p); }
+            catch (Exception e) { Diag.Report($"packet 0x{p.GetOpcode():X2}", e); }
+            Diag.Hitch($"packet 0x{p.GetOpcode():X2} ({size} bytes)", started);
+        }
     }
 
     private void SchedulePing(double delta)
@@ -277,6 +293,7 @@ public partial class Net : Node
             case GameOpcodes.GS_PING:             HandlePing(p); break;
             case GameOpcodes.GS_LOGIN:            HandleLogin(p); break;
             case GameOpcodes.GS_KICKOUT:          HandleKickOut(p); break;
+            case GameOpcodes.GS_SERVER_FULL:      LeaveToLogin(ItemData.Text(TextServerFull, "Server is full now. Please try later. Thank you.")); break;
             case GameOpcodes.GS_NATION_SELECT:    HandleNationSelect(p); break;
             case GameOpcodes.GS_CREATE_CHARACTER: HandleCreateCharacter(p); break;
             case GameOpcodes.GS_ALLCHAR_INFO_REQ: ParseCharList(p); break;
@@ -307,6 +324,7 @@ public partial class Net : Node
             case GameOpcodes.GS_DEAD:          HandleDead(p); break;
             case GameOpcodes.GS_HP_CHANGE:     HandleHpChange(p); break;
             case GameOpcodes.GS_MSP_CHANGE:    HandleMspChange(p); break;
+            case GameOpcodes.GS_SP_CHANGE:     HandleStaminaChange(p); break;
             case GameOpcodes.GS_REGENE:        HandleRegene(p); break;
             case GameOpcodes.GS_SKILLDATA:     HandleSkillData(p); break;
 
@@ -383,6 +401,13 @@ public partial class Net : Node
             case GameOpcodes.GS_NAME_CHANGE:       HandleNameChange(p); break;
             case GameOpcodes.GS_GENDER_CHANGE:     HandleGenderChange(p); break;
             case GameOpcodes.GS_NATION_TRANSFER:   HandleNationTransfer(p); break;
+            case GameOpcodes.GS_ZONE_TERRAIN:      HandleZoneTerrain(p); break;
+            case GameOpcodes.GS_SIEGE_TOWER:       HandleSiegeTower(p); break;
+            case GameOpcodes.GS_VANGUARD:          HandleVanguard(p); break;
+            case GameOpcodes.GS_KNIGHT_ROYALE:     HandleKnightRoyale(p); break;
+            case GameOpcodes.GS_AUTHORITY_CHANGE:  HandleAuthorityChange(p); break;
+            case GameOpcodes.GS_EXP_SEAL:          HandleExpSeal(p); break;
+            case GameOpcodes.GS_EFFECT:            HandleEffect(p); break;
             case GameOpcodes.GS_KING:              HandleKing(p); break;
             case GameOpcodes.GS_SIEGE:             HandleSiege(p); break;
             case GameOpcodes.GS_PVP:               HandlePvp(p); break;
@@ -390,11 +415,13 @@ public partial class Net : Node
             case GameOpcodes.GS_CLAN_WAREHOUSE:    HandleClanWarehouse(p); break;
             case GameOpcodes.GS_VIP_WAREHOUSE:     HandleVipWarehouse(p); break;
             case GameOpcodes.GS_CLAN_BATTLE:       HandleClanBattle(p); break;
-            case GameOpcodes.GS_CLANPOINTS_BATTLE: HandleClanBattlePoints(p); break;
+            case GameOpcodes.GS_CLANPOINTS_BATTLE: HandleIdentityCheck(p); break;
             case GameOpcodes.GS_CLAN_PREMIUM:      HandleClanPremium(p); break;
+            case GameOpcodes.GS_TARGET_STATE:      HandleTargetState(p); break;
             case GameOpcodes.GS_OBJECT_EVENT:      HandleObjectEvent(p); break;
             case GameOpcodes.GS_REPORT:            HandleReport(p); break;
             case GameOpcodes.GS_ZONE_CONCURRENT:   HandleZoneConcurrent(p); break;
+            case GameOpcodes.GS_STORY:             HandleStory(p); break;
 
             case GameOpcodes.GS_AWAKEN:            HandleAwaken(p); break;
             case GameOpcodes.GS_CHANGE_HAIR:       HandleChangeHair(p); break;
@@ -403,17 +430,23 @@ public partial class Net : Node
             case GameOpcodes.GS_MAIL:              HandleMail(p); break;
             case GameOpcodes.GS_AUCTION:           HandleAuction(p); break;
             case GameOpcodes.GS_EVENT_BOARD:       HandleEventBoard(p); break;
+            case GameOpcodes.GS_EVENT_SCHEDULE:    HandleEventSchedule(p); break;
             case GameOpcodes.GS_BOUNTY:            HandleBounty(p); break;
             case GameOpcodes.GS_TOURNAMENT:        HandleTournament(p); break;
+            case GameOpcodes.GS_RANKER_MESSAGE:    HandleRankerMessage(p); break;
+            case GameOpcodes.GS_DAILY_RANK:        HandleDailyRank(p); break;
             case GameOpcodes.GS_PRESET:            HandlePreset(p); break;
             case GameOpcodes.GS_MESSENGER:         HandleMessenger(p); break;
             case GameOpcodes.GS_FORCES:            HandleForces(p); break;
-            case GameOpcodes.GS_CHATROOM:          HandleChatRoom(p); break;
+            case GameOpcodes.GS_NATION_CHAT:       HandleNationChat(p); break;
+            case GameOpcodes.GS_KILL_ASSIST:       HandleKillAssist(p); break;
+            case GameOpcodes.GS_CONTINOUS_PACKET:  HandleContinuous(p); break;
             case GameOpcodes.GS_NPC_EVENT:         HandleNpcEvent(p); break;
             case GameOpcodes.GS_FISHING_HALL:      HandleFishingHall(p); break;
             case GameOpcodes.GS_GUARD_PET:         HandleGuardPet(p); break;
             case GameOpcodes.GS_GLOBAL_MAP:        HandleGlobalMap(p); break;
             case GameOpcodes.GS_GENIE_SYSTEM:      HandleGenieSystem(p); break;
+            case GameOpcodes.GS_USER_OPTION:       HandleUserOption(p); break;
             case GameOpcodes.GS_GENIE:             HandleGenie(p); break;
             case GameOpcodes.GS_CLIENT_SETTINGS:   HandleClientSettings(p); break;
             case GameOpcodes.GS_RENTAL:            HandleRental(p); break;

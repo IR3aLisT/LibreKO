@@ -9,32 +9,24 @@ namespace LibreKO.Game.Tests;
 public class NationPacketWriterTests
 {
     private const byte SiegeSub = 3;
+    private const byte WarStatusSub = 2;
     private const byte RankTypePkZone = 1;
 
     [Fact]
-    public void CastleFlagIsTheSameWidthWithAndWithoutAMasterClan()
+    public void TheWarStatusIsThe2619Shape()
     {
-        var owned = SiegePacketWriter.CastleFlag(
-            SiegeSub, new SiegePacketWriter.ClanBanner(42, 7, 3, 1)).GetData().Length;
-        var unowned = SiegePacketWriter.CastleFlag(SiegeSub, null).GetData().Length;
-
-        owned.Should().Be(unowned);
-    }
-
-    [Fact]
-    public void CastleFlagCarriesTheBannerFields()
-    {
-        var packet = SiegePacketWriter.CastleFlag(
-            SiegeSub, new SiegePacketWriter.ClanBanner(42, 7, 3, 1));
+        var packet = SiegePacketWriter.WarStatus(2, 42, 7, 40, 840, 3600, "Wolves");
         packet.ResetOffset();
 
         packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_SIEGE);
-        packet.ReadByte().Should().Be(SiegeSub);
-        packet.ReadByte().Should().Be(0);
-        packet.ReadUShort().Should().Be(42);
-        packet.ReadUShort().Should().Be(7);
-        packet.ReadByte().Should().Be(3);
-        packet.ReadByte().Should().Be(1);
+        packet.ReadByte().Should().Be(WarStatusSub);
+        packet.ReadByte().Should().Be(2);
+        packet.ReadShort().Should().Be(42);
+        packet.ReadShort().Should().Be(7);
+        packet.ReadShort().Should().Be(40);
+        packet.ReadInt().Should().Be(840);
+        packet.ReadShort().Should().Be(3600);
+        packet.ReadSByteString().Should().Be("Wolves");
         packet.RemainingBytes.Should().Be(0);
     }
 
@@ -72,39 +64,82 @@ public class NationPacketWriterTests
     [Fact]
     public void PkZoneRankWritesBothNationsThenTheCallersOwnRank()
     {
-        var karus = new[] { new RankPacketWriter.RankEntry("Aurelia", 1, 42, 7, "Wolves", 500) };
-        var packet = RankPacketWriter.PkZone(RankTypePkZone, karus, [], 3, 500);
+        var karus = new[] { new RankPacketWriter.RankEntry("Aurelia", 1, 42, 7, "Wolves", 500, 12, 4) };
+        var packet = RankPacketWriter.PkZone(RankTypePkZone, karus, [], 3, 500, 9);
         packet.ResetOffset();
 
         packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_RANK);
         packet.ReadByte().Should().Be(RankTypePkZone);
         packet.ReadUShort().Should().Be(1);
-        packet.ReadSByteString().Should().Be("Aurelia");
+        packet.ReadString().Should().Be("Aurelia");
         packet.ReadByte().Should().Be(1);
         packet.ReadUShort().Should().Be(42);
         packet.ReadUShort().Should().Be(7);
-        packet.ReadSByteString().Should().Be("Wolves");
+        packet.ReadString().Should().Be("Wolves");
         packet.ReadInt().Should().Be(500);
-        packet.ReadUShort().Should().Be(RankPacketWriter.NoPremiumBonus);
-        packet.ReadByte().Should().Be(RankPacketWriter.NoSymbolRank);
+        packet.ReadUShort().Should().Be(12);
+        packet.ReadByte().Should().Be(4);
         packet.ReadUShort().Should().Be(0);
         packet.ReadUShort().Should().Be(3);
         packet.ReadInt().Should().Be(500);
-        packet.ReadUShort().Should().Be(RankPacketWriter.NoPremiumBonus);
+        packet.ReadUShort().Should().Be(9);
         packet.RemainingBytes.Should().Be(0);
     }
 
     [Fact]
-    public void ChaosDungeonRankEndsWithItsTrailingConstant()
+    public void TheEmptyBorderDefenseWarBoardEndsWithTwoFourByteTrailers()
     {
-        var packet = RankPacketWriter.ChaosDungeon(3);
+        var packet = RankPacketWriter.BorderDefenseWar(2, [], [], 0, 0);
         packet.ResetOffset();
         packet.ReadByte();
-        packet.ReadByte();
-        packet.ReadInt();
-        packet.ReadInt();
+        packet.ReadUShort().Should().Be(0);
+        packet.ReadUShort().Should().Be(0);
+        packet.ReadInt().Should().Be(0);
+        packet.ReadInt().Should().Be(0);
+        packet.RemainingBytes.Should().Be(0);
+    }
 
-        packet.ReadInt().Should().Be(RankPacketWriter.ChaosDungeonTrailer);
+    [Fact]
+    public void BorderDefenseWarRowsCarryNameNationClanAndPointsThenTheExp()
+    {
+        var karus = new[] { new RankPacketWriter.RankEntry("Rikka", 1, 12, 3, "Olympus", 21) };
+        var elmorad = new[] { new RankPacketWriter.RankEntry("Zeus", 2, 0, 0, "", 7) };
+
+        var packet = RankPacketWriter.BorderDefenseWar(2, karus, elmorad, 150000, 0);
+        packet.ResetOffset();
+
+        packet.ReadByte().Should().Be(2);
+        packet.ReadUShort().Should().Be(1);
+        packet.ReadString().Should().Be("Rikka");
+        packet.ReadByte().Should().Be(1);
+        packet.ReadUShort().Should().Be(12);
+        packet.ReadUShort().Should().Be(3);
+        packet.ReadString().Should().Be("Olympus");
+        packet.ReadInt().Should().Be(21);
+        packet.ReadUShort().Should().Be(1);
+        packet.ReadString().Should().Be("Zeus");
+        packet.ReadByte().Should().Be(2);
+        packet.ReadUShort().Should().Be(0);
+        packet.ReadUShort().Should().Be(0);
+        packet.ReadString().Should().Be("");
+        packet.ReadInt().Should().Be(7);
+        packet.ReadUInt().Should().Be(150000u);
+        packet.ReadUInt().Should().Be(0u);
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void ChaosDungeonRankCarriesRowsThenTwoExpFields()
+    {
+        var packet = RankPacketWriter.ChaosDungeon(3, [new RankPacketWriter.ChaosRow("Zeus", 7, 2)], 1500, 3000);
+        packet.ResetOffset();
+        packet.ReadByte().Should().Be(3);
+        packet.ReadByte().Should().Be(1);
+        packet.ReadString().Should().Be("Zeus");
+        packet.ReadShort().Should().Be(7);
+        packet.ReadShort().Should().Be(2);
+        packet.ReadUInt().Should().Be(1500u);
+        packet.ReadUInt().Should().Be(3000u);
         packet.RemainingBytes.Should().Be(0);
     }
 

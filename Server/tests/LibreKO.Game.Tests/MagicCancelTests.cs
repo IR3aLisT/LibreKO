@@ -317,6 +317,48 @@ public class MagicCancelTests : GameTestBase
         caster.ActiveBuffs.Should().NotContainKey(instantMagic, "instant magic is spent on that spell");
     }
 
+    [Fact]
+    public async Task InstantMagicKeepsTheCastTime()
+    {
+        const int instantMagic = 110820;
+        using var provider = CreateProvider(
+            _ => { },
+            gameData =>
+            {
+                gameData.GetMagic(instantMagic).Returns(new MagicData { Id = instantMagic, Type1 = 4, Moral = 1 });
+                gameData.GetMagic(FireBlast).Returns(new MagicData
+                {
+                    Id = FireBlast, Type1 = 3, Moral = 7, Range = 35, CastTime = 20, ReCastTime = 50,
+                });
+                gameData.MagicType4Table.Returns(new Dictionary<int, MagicType4Data>
+                {
+                    [instantMagic] = new() { Id = instantMagic, BuffType = (byte)BuffType.InstantMagic, Duration = 180 },
+                });
+                gameData.MagicType3Table.Returns(new Dictionary<int, MagicType3Data>
+                {
+                    [FireBlast] = new() { Id = FireBlast, DirectType = 1, FirstDamage = -120, Attribute = 1 },
+                });
+            });
+        var (caster, client, _) = CreateArcher(provider);
+        caster.ActiveBuffs[instantMagic] = new ActiveBuff
+        {
+            MagicId = instantMagic, BuffType = BuffType.InstantMagic, Duration = 180,
+            ExpireTicks = DateTime.UtcNow.AddMinutes(3).Ticks,
+        };
+        var worm = provider.GetRequiredService<SessionManager>().Regions.SpawnNpc(new NpcInstance
+        {
+            IsMonster = true, NpcId = 750, Name = "Worm", ZoneId = 21, X = 104, Z = 100, SpawnX = 104,
+            SpawnZ = 100, Hp = 5000, MaxHp = 5000, Ac = 5, EvadeRate = 1,
+        });
+        var coordinator = provider.GetRequiredService<IMagicPacketCoordinator>();
+
+        await coordinator.HandleAsync(client, Magic(MagicProcessOpcode.Casting, FireBlast, caster, worm.UniqueId));
+        await coordinator.HandleAsync(client, Magic(MagicProcessOpcode.Effecting, FireBlast, caster, worm.UniqueId));
+
+        worm.Hp.Should().Be(5000, "the spell still needs its full cast");
+        caster.ActiveBuffs.Should().ContainKey(instantMagic, "a refused release does not spend instant magic");
+    }
+
     private static MagicData Ranged(int id, int castTenths) => new()
     {
         Id = id,

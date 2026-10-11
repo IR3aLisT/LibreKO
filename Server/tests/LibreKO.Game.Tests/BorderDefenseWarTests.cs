@@ -332,6 +332,50 @@ public class BorderDefenseWarTests
     }
 
     [Fact]
+    public async Task RankingListsEachNationByPersonalPointsWithTheVictoryExp()
+    {
+        _gameDataService.TempleEventRewards.Returns(
+        [
+            new TempleEventRewardData { Event = TempleEvent.BorderDefenseWar, Outcome = TempleEventRewardOutcome.Win, ExpPercent = 100 },
+        ]);
+        var service = CreateService();
+        var karusA = CreateTestSession(1, AccountNation.Karus);
+        var karusB = CreateTestSession(3, AccountNation.Karus);
+        var elmoPlayer = CreateTestSession(2, AccountNation.ElMorad);
+
+        await service.StartMatchesAsync([karusA.CharacterId, karusB.CharacterId, elmoPlayer.CharacterId], 1800);
+        await service.OnPlayerKilledAsync(elmoPlayer, karusB);
+        await service.OnPlayerKilledAsync(elmoPlayer, karusB);
+        await service.OnPlayerKilledAsync(karusA, elmoPlayer);
+
+        var packet = service.BuildRanking(karusA, 2);
+        packet.ResetOffset();
+        packet.ReadByte().Should().Be(2);
+        packet.ReadUShort().Should().Be(2);
+        packet.ReadString().Should().Be(karusB.Name);
+        packet.ReadByte();
+        packet.ReadUShort();
+        packet.ReadUShort();
+        packet.ReadString();
+        packet.ReadInt().Should().Be(2 * BorderDefenseWarService.PointsPerKill);
+        packet.ReadString().Should().Be(karusA.Name);
+        packet.ReadByte();
+        packet.ReadUShort();
+        packet.ReadUShort();
+        packet.ReadString();
+        packet.ReadInt().Should().Be(0);
+        packet.ReadUShort().Should().Be(1);
+        packet.ReadString().Should().Be(elmoPlayer.Name);
+        packet.ReadByte();
+        packet.ReadUShort();
+        packet.ReadUShort();
+        packet.ReadString();
+        packet.ReadInt().Should().Be(BorderDefenseWarService.PointsPerKill);
+        packet.ReadUInt().Should().Be((uint)TempleEventHelpers.CalculateBaseExp(karusA.Level));
+        packet.ReadUInt().Should().Be(BorderDefenseWarService.NoBonusExp);
+    }
+
+    [Fact]
     public async Task FinishAllMatchesAsync_EqualScore_ResolvesWinnerByKills()
     {
         var service = CreateService();
@@ -378,6 +422,9 @@ public class BorderDefenseWarTests
             Substitute.For<IStealthService>(),
             Substitute.For<ICollectionRaceService>(),
             CreateService(),
+            Substitute.For<IRespawnBlinkService>(),
+            Substitute.For<ISoccerService>(),
+            Substitute.For<IKrowazTrapService>(),
             Substitute.For<ILogger<WorldMovementService>>());
 
         await movementService.HandleHomeAsync(session.Client);

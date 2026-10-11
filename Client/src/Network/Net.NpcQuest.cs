@@ -62,6 +62,8 @@ public partial class Net
 
     private void HandleSelectMsg(Packet p)
     {
+        if (TryHandleDashboard(p)) return;
+        if (p.RemainingBytes < NpcDialog.MinimumBytes) return;
         try
         {
             NpcDialogEvent?.Invoke(NpcDialog.Read(p));

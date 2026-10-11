@@ -39,6 +39,7 @@ public partial class World
 
         Net.I.GenieStatusEvent += OnGenieStatus;
         Net.I.GenieClaimEvent += OnGenieClaim;
+        GenieSubInit();
     }
 
     private void GenieDispose()

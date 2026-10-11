@@ -15,7 +15,8 @@ public class MagicOverTimeService(
     ICombatNotificationService combatNotificationService,
     IEventSystemsPacketCoordinator eventSystemsPacketCoordinator,
     IUserNotificationService userNotificationService,
-    ILogger<MagicOverTimeService> logger)
+    ILogger<MagicOverTimeService> logger,
+    IPartyWarBoardService? partyWarBoard = null)
 {
     private const byte PotionItemGroup = 9;
     private const byte OverTimeTickSeconds = 2;
@@ -144,6 +145,21 @@ public class MagicOverTimeService(
             return;
         }
 
+        if (targetId == PartyWideTarget)
+        {
+            foreach (var actualTargetId in actualTargetIds)
+                await sessionManager.Regions.SendToRegion(
+                    caster,
+                    MagicProcessPacketWriter.Create(
+                        MagicProcessOpcode.Effecting,
+                        skillId,
+                        (short)caster.CharacterId,
+                        actualTargetId,
+                        data),
+                    excludeSender: false);
+            return;
+        }
+
         await sessionManager.Regions.SendToRegion(
             caster,
             MagicProcessPacketWriter.Create(
@@ -154,6 +170,8 @@ public class MagicOverTimeService(
                 data),
             excludeSender: false);
     }
+
+    private const int PartyWideTarget = -1;
 
     private void ResolveOverTimeTargets(
         UserSession caster,
@@ -381,8 +399,11 @@ public class MagicOverTimeService(
 
         if (restored > 0)
         {
+            var before = target.Hp;
             target.Hp = (short)Math.Min(target.MaxHp, target.Hp + restored);
             await combatLifecycleService.SendHpChangeAsync(target);
+            if (caster.CharacterId != target.CharacterId)
+                partyWarBoard?.CountHealing(caster, target.Hp - before);
         }
     }
 

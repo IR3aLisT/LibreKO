@@ -18,8 +18,13 @@ public static class StateChange
     public const byte Abnormal = 3;
     public const byte Action = 4;
     public const byte Visibility = 5;
+    public const byte PartyLeader = 6;
     public const byte Stealth = 7;
     public const byte CombatStance = 8;
+    public const byte DevilForm = 12;
+    public const byte Title = 14;
+    public const byte WarPoint = 16;
+    public const byte ExpeditionSide = 18;
     public const byte Transformation = 19;
 
     public const byte StanceRelaxed = 0;

@@ -19,9 +19,11 @@ public partial class World
         {
             _questUiRefreshQueued = false;
             if (!IsInsideTree()) return;
-            RefreshQuestLog();
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (QuestsTabOpen()) RefreshQuestLog();
             RefreshTracker();
             RefreshNpcQuestMarkers();
+            Diag.Hitch("quest refresh", started);
         }).CallDeferred();
     }
 
@@ -75,11 +77,12 @@ public partial class World
     private void ShowQuestView(QuestView view)
     {
         _questRewardChoice = _questRewardSelection.ChoiceIndex(view.QuestId, view.Options);
-        BeginNpcDialog(view.Title, "");
-        _npcBody.GetParent<Control>().Visible = false;
+        BeginNpcDialog(GameData.I != null ? GameData.I.NpcName(view.NpcId, false) : view.Title, "");
+        _npcBodyPanel.Visible = false;
         _npcQuestScroll.Visible = true;
         _npcQuestScroll.ScrollVertical = 0;
         foreach (var child in _npcQuestContent.GetChildren()) { _npcQuestContent.RemoveChild(child); child.QueueFree(); }
+        _npcQuestContent.AddChild(QuestTitleLine(view));
         _npcQuestContent.AddChild(QuestParagraph(
             view.Dialogue.Length > 0 ? view.Dialogue : view.Journal, UiTheme.TextHi));
 
@@ -92,9 +95,12 @@ public partial class World
             {
                 var goal = view.Objectives.Groups[index];
                 var name = goal.Name ?? (GameData.I != null ? GameData.I.NpcName(goal.Monsters[0], true) : "Creature");
-                hunt.AddChild(QuestObjectiveTarget(QuestValueRow(name, $"{view.Counts[index]} / {goal.Count}",
-                    view.Counts[index] >= goal.Count ? UiTheme.Good : UiTheme.GoldBright),
-                    view.QuestId, index, goal.HasTarget));
+                var huntRow = new VBoxContainer();
+                huntRow.AddThemeConstantOverride("separation", 3);
+                huntRow.AddChild(QuestValueRow(name, $"{view.Counts[index]} / {goal.Count}",
+                    view.Counts[index] >= goal.Count ? UiTheme.Good : UiTheme.GoldBright));
+                huntRow.AddChild(QuestHuntBar(view.Counts[index], goal.Count));
+                hunt.AddChild(QuestObjectiveTarget(huntRow, view.QuestId, index, goal.HasTarget));
             }
         }
         var deliveries = view.Transfers.Where(t => t.Take).ToArray();
@@ -137,12 +143,14 @@ public partial class World
         {
             var choice = QuestSection("Choose one");
             var marks = new List<Label>();
+            var frames = new List<PanelContainer>();
             for (var index = 0; index < view.Options.Length; index++)
             {
                 var option = view.Options[index];
                 var row = QuestItemRow(option.DisplayItemId, QuestTransferName(option),
                     $"{option.Count:n0}  ○", UiTheme.GoldBright);
                 marks.Add(row.GetChild<Label>(row.GetChildCount() - 1));
+                frames.Add(row.GetChild<PanelContainer>(0));
                 choice.AddChild(QuestRewardOption(row, index, () =>
                 {
                     _questRewardSelection.Choose(view.QuestId, option);
@@ -156,6 +164,7 @@ public partial class World
                     var chosen = index == _questRewardChoice;
                     marks[index].Text = $"{view.Options[index].Count:n0}  {(chosen ? "●" : "○")}";
                     marks[index].AddThemeColorOverride("font_color", chosen ? UiTheme.Good : UiTheme.GoldBright);
+                    frames[index].AddThemeStyleboxOverride("panel", QuestIconFrame(view.Options[index].DisplayItemId, chosen));
                 }
             }
             onRewardChosen = PaintChoice;
@@ -175,7 +184,7 @@ public partial class World
         Button Action(string label, System.Action run, bool enabled = true)
         {
             var button = new Button { Text = label, CustomMinimumSize = new Vector2(0, 36), SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, Disabled = !enabled };
-            if (!enabled) button.TooltipText = "Choose a reward first";
+            if (!enabled) button.TooltipText = ChooseRewardFirst;
             button.Pressed += () => { CloseNpcDialog(); run(); };
             actions.AddChild(button);
             return button;
@@ -190,19 +199,20 @@ public partial class World
             {
                 paint?.Invoke();
                 confirm.Disabled = _questRewardChoice < 0;
-                confirm.TooltipText = confirm.Disabled ? "Choose a reward first" : "";
+                confirm.TooltipText = confirm.Disabled ? ChooseRewardFirst : "";
             };
         }
         if (!view.CanClaim && view.State is QuestViewState.InProgress or QuestViewState.Claimable)
             Action("Abandon", () => Net.I.SendQuestAbandon(view.QuestId));
         Action(view.CanAccept ? "Reject" : "Close", () => { });
         EndNpcDialog(view.Topics.Length + 1);
-        Callable.From(FitQuestPanel).CallDeferred();
+        _npcQuestScroll.CustomMinimumSize = Vector2.Zero;
+        ((SceneTree)Engine.GetMainLoop()).Connect(SceneTree.SignalName.ProcessFrame, Callable.From(FitQuestPanel), (uint)ConnectFlags.OneShot);
     }
 
     private void FitQuestPanel()
     {
-        if (!IsInstanceValid(_npcPanel) || !_npcQuestScroll.Visible) return;
+        if (!IsInstanceValid(_npcPanel) || !_npcPanel.IsInsideTree() || !_npcQuestScroll.Visible) return;
         var viewport = _npcPanel.GetViewportRect().Size;
         var room = Mathf.Max(100, viewport.Y - 80 - _npcMenuScroll.CustomMinimumSize.Y);
         _npcQuestScroll.CustomMinimumSize = new Vector2(0, Mathf.Min(_npcQuestContent.GetCombinedMinimumSize().Y, room));
@@ -274,10 +284,29 @@ public partial class World
     }
 
     private const float QuestRowIconSide = 32f;
+    private const int TextChooseRewardFirst = 7435;
+    private static string ChooseRewardFirst =>
+        ItemData.Text(TextChooseRewardFirst, "First select the item you would like to receive as your reward.");
+    private const float QuestHuntBarHeight = 4f;
+    private const float QuestGlyphInset = 0.18f;
+    private const int TextQuestUnderWay = 7422;
+    private const int TextQuestBeforeReward = 7423;
+    private const int TextQuestComplete = 7424;
+    private static readonly Color QuestHuntTrack = new(0.05f, 0.05f, 0.05f, 0.9f);
 
     private Control QuestItemRow(int itemId, string name, string value, Color color)
     {
         var row = QuestValueRow(name, value, color);
+        var frame = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        frame.AddThemeStyleboxOverride("panel", QuestIconFrame(itemId, false));
+        frame.AddChild(QuestRewardGlyph(itemId) ?? QuestItemIcon(itemId));
+        row.AddChild(frame);
+        row.MoveChild(frame, 0);
+        return QuestItemHover(row, itemId);
+    }
+
+    private static TextureRect QuestItemIcon(int itemId)
+    {
         var icon = new TextureRect
         {
             Texture = ItemData.Icon(itemId),
@@ -286,9 +315,72 @@ public partial class World
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
-        row.AddChild(icon);
-        row.MoveChild(icon, 0);
-        return QuestItemHover(row, itemId);
+        UpgradeBadge.Show(icon, itemId);
+        return icon;
+    }
+
+    private static Control? QuestRewardGlyph(int itemId)
+    {
+        string? glyph = itemId switch
+        {
+            QuestData.CoinItemId => "system/coins",
+            QuestData.ExpItemId => "system/level",
+            QuestData.LadderPointItemId => "system/medal",
+            _ => null,
+        };
+        if (glyph == null) return null;
+        var box = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        int inset = Mathf.RoundToInt(QuestRowIconSide * QuestGlyphInset);
+        foreach (var margin in new[] { "margin_left", "margin_right", "margin_top", "margin_bottom" })
+            box.AddThemeConstantOverride(margin, inset);
+        float side = QuestRowIconSide - 2 * inset;
+        var image = UiIcons.Image(glyph, new Vector2(side, side), UiTheme.GoldBright);
+        image.MouseFilter = Control.MouseFilterEnum.Ignore;
+        box.AddChild(image);
+        return box;
+    }
+
+    private static StyleBoxFlat QuestIconFrame(int itemId, bool chosen) =>
+        UiTheme.Slot(chosen ? UiTheme.GoldBright : QuestData.IsVirtualReward(itemId) ? null : ItemGrade.Tint(itemId), chosen);
+
+    private static Control QuestHuntBar(int count, int goal)
+    {
+        var track = new ColorRect
+        {
+            Color = QuestHuntTrack,
+            CustomMinimumSize = new Vector2(0, QuestHuntBarHeight),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        var fill = new ColorRect
+        {
+            Color = count >= goal ? UiTheme.Good : UiTheme.GoldBright,
+            AnchorRight = goal > 0 ? Mathf.Clamp((float)count / goal, 0f, 1f) : 1f,
+            AnchorBottom = 1f,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        track.AddChild(fill);
+        return track;
+    }
+
+    private Control QuestTitleLine(QuestView view)
+    {
+        var line = new HBoxContainer();
+        line.AddThemeConstantOverride("separation", 8);
+        var title = UiTheme.Text(view.Title, 15, UiTheme.GoldBright);
+        title.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        title.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        line.AddChild(title);
+        (int TextId, string Fallback, Color Colour)? state = view.State switch
+        {
+            QuestViewState.InProgress => (TextQuestUnderWay, "[Under way]", UiTheme.TextLo),
+            QuestViewState.Claimable => (TextQuestBeforeReward, "[Before compensation]", UiTheme.GoldBright),
+            QuestViewState.Completed => (TextQuestComplete, "[Complete]", UiTheme.Good),
+            _ => null,
+        };
+        if (state is { } word)
+            line.AddChild(UiTheme.Text(ItemData.Text(word.TextId, word.Fallback), 12, word.Colour, HorizontalAlignment.Right));
+        return line;
     }
 
     private static bool HasItemCard(int itemId) =>

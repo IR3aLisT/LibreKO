@@ -1,0 +1,80 @@
+[
+  {
+    "Id": 2,
+    "GradeClass": 3,
+    "Band": 2,
+    "Rolls": 2
+  },
+  {
+    "Id": 3,
+    "GradeClass": 4,
+    "Band": 2,
+    "Rolls": 2
+  },
+  {
+    "Id": 4,
+    "GradeClass": 5,
+    "Band": 2,
+    "Rolls": 2
+  },
+  {
+    "Id": 6,
+    "GradeClass": 8,
+    "Band": 2,
+    "Rolls": 2
+  },
+  {
+    "Id": 7,
+    "GradeClass": 31,
+    "Band": 5,
+    "Rolls": 1
+  },
+  {
+    "Id": 8,
+    "GradeClass": 32,
+    "Band": 3,
+    "Rolls": 3
+  },
+  {
+    "Id": 9,
+    "GradeClass": 33,
+    "Band": 3,
+    "Rolls": 3
+  },
+  {
+    "Id": 10,
+    "GradeClass": 34,
+    "Band": 3,
+    "Rolls": 3
+  },
+  {
+    "Id": 11,
+    "GradeClass": 35,
+    "Band": 3,
+    "Rolls": 3
+  },
+  {
+    "Id": 12,
+    "GradeClass": 37,
+    "Band": 3,
+    "Rolls": 3
+  },
+  {
+    "Id": 13,
+    "GradeClass": 38,
+    "Band": 3,
+    "Rolls": 3
+  },
+  {
+    "Id": 14,
+    "GradeClass": 21,
+    "Band": 4,
+    "Rolls": 1
+  },
+  {
+    "Id": 15,
+    "GradeClass": 22,
+    "Band": 5,
+    "Rolls": 1
+  }
+]

@@ -152,7 +152,7 @@ public partial class World
             CustomMinimumSize = new Vector2(26, 22),
             FocusMode = Control.FocusModeEnum.None,
         };
-        btn.Pressed += pressed;
+        HoldRepeat.Attach(btn, pressed);
         return btn;
     }
 
@@ -302,19 +302,19 @@ public partial class World
         Net.I.SendSkillPreset(plan.Trees, Mastery.Pool - spent);
     }
 
+    private static readonly Color PresetResultColour = new(1f, 0f, 0f);
+
+    private void PresetResultLine(int kind, int result)
+    {
+        var (id, fallback, withCode) = PresetTexts.For(kind, result);
+        string text = ItemData.Text(id, fallback);
+        CombatNotice(withCode ? $"{text}{result}" : text, PresetResultColour);
+    }
+
     private void OnPresetStatResult(int result, PresetStatState state)
     {
-        if (result != Net.PresetApplied)
-        {
-            CombatNotice(result switch
-            {
-                Net.PresetStatNeedsRedistribution => "Redistribute your stats before applying a plan.",
-                Net.PresetStatClassError => "Your class cannot use a stat plan.",
-                Net.PresetStatPointsMismatch => "The plan no longer matches your stat points.",
-                _ => "The stat plan could not be applied.",
-            });
-            return;
-        }
+        PresetResultLine(PresetTexts.StatKind, result);
+        if (result != Net.PresetApplied) return;
 
         Sheet.ApplyReset(state.Stats, state.Points, state.TotalHit);
         Sheet.SetMaxWeight(state.MaxWeight);
@@ -323,32 +323,18 @@ public partial class World
         StorePresetPlan(PresetStatKind, ActivePreset.Stats);
         RefreshStatsUI();
         RefreshPresetUI();
-        CombatNotice("Stat plan applied.");
     }
 
     private void OnPresetSkillResult(int result, PresetSkillState state)
     {
-        if (result != Net.PresetApplied)
-        {
-            CombatNotice(result switch
-            {
-                Net.PresetSkillNeedsRedistribution => "Redistribute your mastery before applying a plan.",
-                Net.PresetSkillLevelTooLow => $"Mastery plans need level {MasteryPoints.MinLevel} or above.",
-                Net.PresetSkillNeedsFirstJobChange => "Mastery plans unlock after your first class change.",
-                Net.PresetSkillNeedsSecondJobChange => "That mastery unlocks after your second class change.",
-                Net.PresetSkillMasterFailed => "Your master skill points are above what your level allows.",
-                Net.PresetSkillPointsMismatch => "The plan no longer matches your mastery points.",
-                _ => "The mastery plan could not be applied.",
-            });
-            return;
-        }
+        PresetResultLine(PresetTexts.SkillKind, result);
+        if (result != Net.PresetApplied) return;
 
         Mastery.ApplyTrees(state.Trees, state.Pool);
         System.Array.Clear(ActivePreset.Trees);
         StorePresetPlan(PresetSkillKind, ActivePreset.Trees);
         RefreshMasteryUI();
         RefreshPresetUI();
-        CombatNotice("Mastery plan applied.");
     }
 
     private void LoadPresetPlans()

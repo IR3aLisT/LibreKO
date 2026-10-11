@@ -10,6 +10,12 @@ public partial class World
         if (_selfDead) return;
         var s = SkillData.Get(id);
         if (s == null) return;
+        if (BeginContinuance(s)) return;
+        if (SkillsLocked())
+        {
+            CombatNotice(SystemText(TextCastingFailed, "Casting failed"));
+            return;
+        }
 
         if (!SkillRequirementMet(s))
         {
@@ -32,17 +38,57 @@ public partial class World
         if (SkillOnCooldown(s, now)) return;
         if (GroupCooldownBlocker(s, now) is { } blocker)
         {
-            CombatNotice(GroupCooldownNotice(blocker, now));
+            CombatNotice(GroupCooldownNotice(s, blocker, now), CooldownRefusalColour);
             return;
         }
         if (!s.IsNonAction && SelfCasting(now)) return;
         if (HasPendingCast(id)) return;
+        if (TradeHoldsInput) return;
         if (!Vitals.HasMana(s.Msp))
         {
-            CombatNotice("Not enough mana.");
+            CombatNotice(SkillCost.ManaShortText(_selfClass) == SkillCost.TextNotEnoughMp
+                ? SystemText(SkillCost.TextNotEnoughMp, "Skill Failed - Not enough MP")
+                : SystemText(SkillCost.TextNotEnoughSp, "Skill failed - Not enough SP"));
+            return;
+        }
+        if (!Vitals.HasStamina(s.Sp))
+        {
+            CombatNotice(SystemText(SkillCost.TextNotEnoughVp, "Skill Failed - Insufficient VP"));
+            return;
+        }
+        if (SkillCost.HpShort(Vitals.Hp, s.Hp))
+        {
+            CombatNotice(SystemText(SkillCost.TextNotEnoughHp, "Skill failed - Not enough HP"));
+            return;
+        }
+        if (s.Id == ZoneBoundSkill && _zone != ZoneBoundSkillZone)
+        {
+            CombatNotice(SystemText(TextSkillWrongZone, "You cannot use %s from this zone.", s.Name));
+            return;
+        }
+        if (!SoccerSkillAllowed(s))
+        {
+            CombatNotice(SystemText(TextSkillWrongZone, "You cannot use %s from this zone.", s.Name));
+            return;
+        }
+        if (s.Id is CoinSkillA or CoinSkillB && Sheet.Gold < CoinSkillFloor)
+        {
+            CombatNotice(ItemData.Text(TextSkillNeedsCoins, "Skill failed - You need to have more than %d Noah.")
+                .Replace("%d", CoinSkillFloor.ToString()));
             return;
         }
         if (!CanCastWithGear(s, announce: true)) return;
+        if (s.IsRanged && s.NeedArrow > 0 && SelfTransformedNonHumanoid())
+        {
+            CombatNotice(ItemData.Text(TextBowWhileTransformed, "You cannot use your bow while transforming."));
+            return;
+        }
+        if (s.Id is >= RepairHammerFirst and <= RepairHammerLast && !WearsHammerRepairable())
+        {
+            CombatNotice(ItemData.Text(TextNoHammerTarget, "You are not equipped with a 0 durability irreparable item."));
+            return;
+        }
+        if (!s.IsNonAction && _selfSitting) StandUp();
 
         if (s.IsMeleeArea)
         {
@@ -56,14 +102,14 @@ public partial class World
         int target;
         if (s.IsEnemy)
         {
-            bool selectedInRange =
+            bool selectedValid =
                 _selectedId >= 0
                 && _ents.TryGetValue(_selectedId, out var te)
                 && te.Attackable
-                && !te.Dead
-                && InSkillRange(_selectedId, s);
-            target = selectedInRange ? _selectedId : -1;
-            if (target < 0) return;
+                && (!te.Dead || Gestures.IsCorpseSkill(s.Id));
+            if (!selectedValid) return;
+            if (!AnnounceReach(SkillReachTo(_selectedId, s)) || !AnnounceSight(s, _selectedId)) return;
+            target = _selectedId;
             FaceToward(_myId, target);
         }
         else if (s.IsDeadFriend)
@@ -75,16 +121,43 @@ public partial class World
         else
         {
             target = FriendlyCastTarget(s);
+            if (target < 0) return;
             if (target != _myId) FaceToward(_myId, target);
         }
 
-        bool instant = SpendInstantMagic(s);
+        bool skipCooldown = SpendInstantMagic(s);
         Net.I.SendMagic(1, id, target);
-        QueuePendingStage(id, target, s.HasFlyingStage ? PendingFlying : PendingEffecting, instant ? 0 : CastDelay(s));
-        BeginLocalCast(s, instant);
+        if (s.Cast <= 0) _attackChain.Record(AttackChain.InstantSkill, Now());
+        QueuePendingStage(id, target, s.HasFlyingStage ? PendingFlying : PendingEffecting, CastDelay(s));
+        BeginLocalCast(s, skipCooldown);
+    }
+
+    private const int TextBowWhileTransformed = 7650;
+    private const int TextNoHammerTarget = 15152;
+    private const int RepairHammerFirst = 490215;
+    private const int RepairHammerLast = 490217;
+    private const byte HammerRepairableFlag = 2;
+    private static readonly int[] HammerArmourSlots =
+    {
+        InventoryConstants.Head, InventoryConstants.Breast, InventoryConstants.Leg,
+        InventoryConstants.Glove, InventoryConstants.Foot,
+    };
+
+    private bool SelfTransformedNonHumanoid() =>
+        _selfTransformSkill != 0
+        && _selfBody?.GetNodeOrNull<Node3D>(TransformNodeName) is { } worn
+        && !(worn.HasMeta(WornAccessoriesMeta) && worn.GetMeta(WornAccessoriesMeta).AsBool());
+
+    private bool WearsHammerRepairable()
+    {
+        foreach (int slot in HammerArmourSlots)
+            if (slot < Inv.Length && !Inv[slot].IsEmpty && Inv[slot].Durability <= 0 && Inv[slot].Flag == HammerRepairableFlag)
+                return true;
+        return false;
     }
 
     private const int InstantMagicBuffType = 23;
+    private readonly HashSet<int> _instantCasts = new();
 
     private bool SpendInstantMagic(SkillData.Skill s)
     {
@@ -95,6 +168,7 @@ public partial class World
             if (end <= now || SkillData.Get(buffSkillId) is not { Type1: MagicType.Buff, BuffType: InstantMagicBuffType }) continue;
             DropBuffChip(buffSkillId);
             Net.I.BuffEnds.Remove(buffSkillId);
+            _instantCasts.Add(s.Id);
             return true;
         }
         return false;
@@ -107,10 +181,19 @@ public partial class World
             ? model.AsInt32() : 0;
 
     private const int TextSkillTooFar = 4009;
+    private const int TextSkillTooNear = 4014;
+    private const int TextSkillBlocked = 4010;
     private const int TextSkillNoItem = 4007;
     private const int TextSkillImproperItem = 4005;
     private const int TextEquipWeapon = 7658;
     private const int TextNoClassStoneFirst = 7606;
+    private const int TextSkillNeedsCoins = 4012;
+    private const int TextSkillWrongZone = 4331;
+    private const int CoinSkillA = 490076;
+    private const int CoinSkillB = 490084;
+    private const int CoinSkillFloor = 100000;
+    private const int ZoneBoundSkill = 500073;
+    private const int ZoneBoundSkillZone = 84;
     private const int FirstStoneFamily = 1;
     private const int LastStoneFamily = 4;
 
@@ -121,23 +204,30 @@ public partial class World
             CombatNotice("Select a target first.");
             return null;
         }
-        if (!InSkillRange(_selectedId, s))
-        {
-            CombatNotice(SystemText(TextSkillTooFar, "Skill failed - Too far"));
-            return null;
-        }
+        if (!AnnounceReach(SkillReachTo(_selectedId, s))) return null;
         FaceToward(_myId, _selectedId);
         return target.Body.GlobalPosition;
     }
 
     private int FriendlyCastTarget(SkillData.Skill s)
     {
-        if (!s.IsFriendly || _selectedId < 0 || _selectedId == _myId) return _myId;
-        if (!_ents.TryGetValue(_selectedId, out var e)) return _myId;
-        if (e.IsNpc || e.Dead || e.Attackable) return _myId;
-        if (s.Moral == SkillTarget.Party && !IsPartyMember(_selectedId)) return _myId;
-        return InSkillRange(_selectedId, s) ? _selectedId : _myId;
+        if (!s.IsFriendly) return _myId;
+        bool self = _selectedId == _myId;
+        bool hasSelection = self || (_selectedId >= 0 && _ents.ContainsKey(_selectedId));
+        bool valid = self || (_ents.TryGetValue(_selectedId, out var e) && !e.IsNpc && !e.Dead && !e.Attackable);
+        bool inParty = self || IsPartyMember(_selectedId);
+        int pick = PartyPick();
+        return FriendlyTarget.Choose(s.Moral, hasSelection, valid, inParty, pick >= 0) switch
+        {
+            FriendlyPick.Self => _myId,
+            FriendlyPick.PartyPick => pick,
+            FriendlyPick.Selected when self => _myId,
+            FriendlyPick.Selected => AnnounceReach(SkillReachTo(_selectedId, s)) ? _selectedId : -1,
+            _ => -1,
+        };
     }
+
+    private int PartyPick() => _partyPick >= 0 && IsPartyMember(_partyPick) ? _partyPick : -1;
 
     private static bool IsPartyMember(int charId)
     {
@@ -151,35 +241,36 @@ public partial class World
         if (_selectedId < 0 || _selectedId == _myId) return -1;
         if (!_ents.TryGetValue(_selectedId, out var e)) return -1;
         if (e.IsNpc || !e.Dead || e.Attackable) return -1;
-        return InSkillRange(_selectedId, s) ? _selectedId : -1;
+        return AnnounceReach(SkillReachTo(_selectedId, s)) && AnnounceSight(s, _selectedId) ? _selectedId : -1;
     }
 
     private bool CanCastWithGear(SkillData.Skill s, bool announce = false)
     {
         var gear = SelfGear();
-        switch (WeaponAnimation.CheckGear(s.ItemGroup, HeldItemClass(gear, 6), HeldItemClass(gear, 7)))
+        int right = HeldItemClass(gear, InventoryConstants.VisRightHand), left = HeldItemClass(gear, InventoryConstants.VisLeftHand);
+        if (!SkillUsable.GearAllows(s.NeedWeapon, right, left))
         {
-            case WeaponAnimation.GearCheck.NoWeapon:
-                if (announce) CombatNotice(SystemText(TextEquipWeapon, "Please equip your weapon."));
-                return false;
-            case WeaponAnimation.GearCheck.WrongWeapon:
-                if (announce) CombatNotice(SystemText(TextSkillImproperItem, "Skill failed - Improper item"));
-                return false;
+            if (announce)
+                CombatNotice(WeaponAnimation.IsWeapon(right) || WeaponAnimation.IsWeapon(left)
+                    ? SystemText(TextSkillImproperItem, "Skill failed - Improper item")
+                    : SystemText(TextEquipWeapon, "Please equip your weapon."));
+            return false;
         }
         if (s.UseItem != 0 && !s.IsResurrect && ItemData.Get(s.UseItem) != null)
         {
             if (CountInBackpack(s.UseItem) < 1)
             {
-                CombatNotice(SystemText(TextSkillNoItem, "Skill failed - Not enough item"));
+                if (announce) CombatNotice(SystemText(TextSkillNoItem, "Skill failed - Not enough item"));
                 return false;
             }
             int need = s.IsRanged ? Mathf.Max(1, s.NeedArrow) : 1;
             if (CountInBackpack(s.ConsumedItem) < need)
             {
                 int family = CharacterClassCatalog.Family(_selfClass);
-                CombatNotice(SystemText(s.IsMasterScrollSkill && family is >= FirstStoneFamily and <= LastStoneFamily
-                    ? TextNoClassStoneFirst + family - FirstStoneFamily
-                    : TextSkillNoItem, "Skill failed - Not enough item"));
+                if (announce)
+                    CombatNotice(SystemText(s.IsMasterScrollSkill && family is >= FirstStoneFamily and <= LastStoneFamily
+                        ? TextNoClassStoneFirst + family - FirstStoneFamily
+                        : TextSkillNoItem, "Skill failed - Not enough item"));
                 return false;
             }
         }
@@ -194,24 +285,100 @@ public partial class World
         return n;
     }
 
-    private bool InSkillRange(int id, SkillData.Skill s)
+    private bool InSkillRange(int id, SkillData.Skill s) => SkillReachTo(id, s) == SkillReachVerdict.InRange;
+
+    private SkillReachVerdict SkillReachTo(int id, SkillData.Skill s) =>
+        _ents.TryGetValue(id, out var e)
+            ? SkillReachToPoint(s, e.Body.GlobalPosition, e.Radius, !e.IsNpc)
+            : SkillReachVerdict.TooFar;
+
+    private SkillReachVerdict SkillReachToPoint(SkillData.Skill s, Vector3 point, float targetRadius, bool targetIsPlayer) =>
+        SkillReach.Check(new SkillReachQuery
+        {
+            SkillId = s.Id,
+            Type1 = s.Type1,
+            Type2 = s.Type2,
+            Range = s.Range,
+            SelfAnim2 = s.SelfAnim2,
+            Distance = point.DistanceTo(_self.GlobalPosition),
+            CasterRadius = _ents.TryGetValue(_myId, out var me) ? me.Radius : DefaultBodyRadius,
+            TargetRadius = targetRadius,
+            TargetIsPlayer = targetIsPlayer,
+            Zone = _zone,
+            MeleeWeaponReach = HandWeaponReach(rightFirst: true),
+            RangedWeaponReach = HandWeaponReach(rightFirst: false),
+            RangedAddRangePercent = s.AddRange,
+            MeleeReachBonus = ActiveReachBonus(),
+        });
+
+    private bool AnnounceReach(SkillReachVerdict verdict)
     {
-        if (!_ents.TryGetValue(id, out var e)) return false;
-        float reach = SkillCastRange(s) + e.Radius + 1f;
-        return e.Body.GlobalPosition.DistanceTo(_self.GlobalPosition) <= reach;
+        switch (verdict)
+        {
+            case SkillReachVerdict.InRange:
+                return true;
+            case SkillReachVerdict.TooFar:
+                CombatNotice(SystemText(TextSkillTooFar, "Skill failed - Too far"));
+                break;
+            case SkillReachVerdict.TooNear:
+                CombatNotice(SystemText(TextSkillTooNear, "Skill Failed - Too near"));
+                break;
+        }
+        return false;
     }
 
-    private float SkillCastRange(SkillData.Skill s)
+    private const float SightShortfall = 0.2f;
+
+    private bool AnnounceSight(SkillData.Skill s, int targetId)
     {
-        if (s.Range > 0) return s.Range;
-        if (s.IsMelee) return Mathf.Max(MeleeReach, MeleeWeaponReach());
-        if (s.IsRanged && RangedWeaponItem() is var bow && bow != 0)
+        if (!_ents.TryGetValue(targetId, out var target) || !SkillSightBlocked(s, target)) return true;
+        CombatNotice(SystemText(TextSkillBlocked, "Skill failed - Blocked by an object"));
+        return false;
+    }
+
+    private bool SkillSightBlocked(SkillData.Skill s, Ent target)
+    {
+        if (NoClip || _objCollision == null || !_ents.TryGetValue(_myId, out var me)) return false;
+        if (!SkillReach.SightChecked(s.Moral, target.Attackable, s.Id)) return false;
+
+        var from = MidBody(me);
+        var to = MidBody(target);
+        var span = to - from;
+        float length = span.Length();
+        if (length > SightShortfall) to -= span / length * SightShortfall;
+
+        var query = PhysicsRayQueryParameters3D.Create(from, to, WorldCollisionLayer);
+        query.Exclude = SightExclusions();
+        return GetWorld3D().DirectSpaceState.IntersectRay(query).Count > 0;
+    }
+
+    private Godot.Collections.Array<Rid> SightExclusions()
+    {
+        var excluded = new Godot.Collections.Array<Rid>();
+        if (_selfBody != null) excluded.Add(_selfBody.GetRid());
+        foreach (var e in _ents.Values)
+            if (e.BridgeFloor != null && GodotObject.IsInstanceValid(e.BridgeFloor)) excluded.Add(e.BridgeFloor.GetRid());
+        if (!SkillReach.ObjectsBlockSight(_zone))
+            foreach (var gate in _gateColliders)
+                if (gate.Body != null) excluded.Add(gate.Body.GetRid());
+        return excluded;
+    }
+
+    private static Vector3 MidBody(Ent e) => e.Body.GlobalPosition + Vector3.Up * (EntityLocalBox(e).Size.Y * 0.5f);
+
+    private const float DefaultBodyRadius = 0.9f;
+    private const int ReachBuffType = 43;
+    private const string ReachBuffAmountKey = "SpecialAmount";
+
+    private float ActiveReachBonus()
+    {
+        double now = Now();
+        foreach (var (buffSkillId, end) in Net.I.BuffEnds)
         {
-            float itemRange = (ItemData.Get(bow)?.Range ?? 0) / 10f;
-            float scale = s.AddRange > 0 ? s.AddRange / 100f : 1f;
-            if (itemRange > 0) return Mathf.Max(DefaultSkillRange, itemRange * scale);
+            if (end <= now || SkillData.Get(buffSkillId) is not { Type1: MagicType.Buff, BuffType: ReachBuffType } buff) continue;
+            return buff.Effect.TryGetValue(ReachBuffAmountKey, out var amount) ? amount.AsInt32() : 0;
         }
-        return DefaultSkillRange;
+        return 0f;
     }
 
     private static double CastDelay(SkillData.Skill s) => Mathf.Max(0f, s.CastSeconds);
@@ -277,18 +444,21 @@ public partial class World
         if (s.SelfFx1 == null) return;
         SpawnOwnedFx(casterId, s.Id, 1, s.SelfFx1, s.SelfPart1);
         ScheduleSkillFxStop(casterId, s.Id, 1, Now() + s.CastSeconds + CastFxGraceSeconds);
-        if (s.HasCastPhase) AudioFxAt(s.SelfFx1Id, casterId);
+        if (s.HasCastPhase && !SameSound(s.SelfFx1Id, s.FlyingFxId)) AudioFxAt(s.SelfFx1Id, casterId);
     }
 
-    private void BeginLocalCast(SkillData.Skill s, bool instant = false)
+    private static bool SameSound(int castFx, int flyingFx) =>
+        flyingFx != 0 && SoundCatalog.FxSound(castFx) is var sound and not 0 && sound == SoundCatalog.FxSound(flyingFx);
+
+    private void BeginLocalCast(SkillData.Skill s, bool skipCooldown = false)
     {
-        if (!instant) StartSkillCooldown(s);
+        if (!skipCooldown) StartSkillCooldown(s);
         StartCastFx(_myId, s);
         if (s.IsPotion) AudioFxAt(s.TargetFxId, _myId);
-        if (!instant) BeginCast(s);
+        BeginCast(s);
         if (s.IsNonAction) return;
         PlaySkillAction(_myId, SkillAnim(_myId, s, false), ClipsForCast(s), ActionRankSkill);
-        if (!instant) StretchCastAnimation(s);
+        StretchCastAnimation(s);
     }
 
     private bool SelfCasting(double now) =>
@@ -325,7 +495,7 @@ public partial class World
 
     private SkillData.Skill? GroupCooldownBlocker(SkillData.Skill s, double now)
     {
-        if (s.CooldownGroup == 0) return null;
+        if (!CooldownGroups.Shares(s.CooldownGroup)) return null;
         foreach (var (id, until) in _skillReady)
         {
             if (id == s.Id || now >= until) continue;
@@ -335,8 +505,11 @@ public partial class World
         return null;
     }
 
-    private string GroupCooldownNotice(SkillData.Skill blocker, double now) =>
-        $"{blocker.Name} is available in {Mathf.CeilToInt((float)(_skillReady[blocker.Id] - now))} seconds";
+    private static readonly Color CooldownRefusalColour = new("ff3b3b");
+
+    private string GroupCooldownNotice(SkillData.Skill pressed, SkillData.Skill blocker, double now) =>
+        TextTemplate.Fill(SystemText(CooldownGroups.RefusalText, "%s is available in %d seconds"),
+            pressed.Name, CooldownGroups.SecondsShown(_skillReady[blocker.Id] - now));
 
     private bool SkillReady(SkillData.Skill s, double now) =>
         !HasPendingCast(s.Id)

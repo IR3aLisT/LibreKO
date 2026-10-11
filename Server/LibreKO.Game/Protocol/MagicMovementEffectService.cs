@@ -17,6 +17,7 @@ public class MagicMovementEffectService(
     SessionManager sessionManager,
     IGameDataService gameDataService,
     IWorldMovementService worldMovementService,
+    ISoccerService soccerService,
     ILogger<MagicMovementEffectService> logger) : IMagicMovementEffectService
 {
     public async Task ExecuteAsync(UserSession caster, MagicData magic, int skillId, int targetId, int[] data)
@@ -34,6 +35,9 @@ public class MagicMovementEffectService(
             MagicWarpType.SummonInZone => await SummonToCasterAsync(caster, targetId),
             MagicWarpType.MoveToTarget => await MoveToTargetAsync(caster, magic, type8Data, targetId),
             MagicWarpType.Blink => await BlinkAsync(caster, type8Data, data),
+            MagicWarpType.Rush => await RushAsync(caster, magic, targetId, data),
+            MagicWarpType.Pull => await PullAsync(caster, magic, targetId, data),
+            MagicWarpType.BallControl => await soccerService.KickAsync(caster, targetId, data),
             _ => Unhandled(warpType, skillId, caster),
         };
 
@@ -170,6 +174,73 @@ public class MagicMovementEffectService(
         await worldMovementService.WarpAsync(caster, tenthsX, tenthsZ);
         return true;
     }
+
+    private async Task<bool> RushAsync(UserSession caster, MagicData magic, int targetId, int[] data)
+    {
+        if (DashTarget(caster, targetId) is not { } target
+            || DashPoint(data) is not { } point
+            || !DashPointValid(caster, point, origin: caster, landing: target, magic.Range))
+            return false;
+
+        data[DashResultSlot] = DashSucceeded;
+        await worldMovementService.DisplaceAsync(caster, point.X, point.Z);
+        return true;
+    }
+
+    private async Task<bool> PullAsync(UserSession caster, MagicData magic, int targetId, int[] data)
+    {
+        if (DashTarget(caster, targetId) is not { } target
+            || DashPoint(data) is not { } point
+            || !DashPointValid(caster, point, origin: target, landing: caster, magic.Range))
+            return false;
+
+        if (Random.Shared.Next(PercentRoll) >= PullSuccessPercent)
+        {
+            data[DashResultSlot] = DashFailed;
+            return true;
+        }
+
+        data[DashResultSlot] = DashSucceeded;
+        await worldMovementService.DisplaceAsync(target, point.X, point.Z);
+        return true;
+    }
+
+    private UserSession? DashTarget(UserSession caster, int targetId) =>
+        sessionManager.GetByCharacterId(targetId) is { } target
+        && target.CharacterId != caster.CharacterId
+        && target.Hp > 0
+        && target.ZoneId == caster.ZoneId
+        && PvpRules.CanAttackPlayer(caster, target)
+            ? target
+            : null;
+
+    private static (float X, float Z)? DashPoint(int[] data) =>
+        data.Length > BlinkZSlot
+            ? (unchecked((ushort)data[BlinkXSlot]) / TenthsPerMetre, unchecked((ushort)data[BlinkZSlot]) / TenthsPerMetre)
+            : null;
+
+    private bool DashPointValid(UserSession caster, (float X, float Z) point, UserSession origin, UserSession landing, int range)
+    {
+        float travel = Distance(origin.X, origin.Z, point.X, point.Z);
+        float beside = Distance(landing.X, landing.Z, point.X, point.Z);
+        return travel <= range + DashReachSlack
+            && beside <= DashLandingSlack
+            && sessionManager.Maps?.IsValidPosition(caster.ZoneId, point.X, point.Z) != false;
+    }
+
+    private static float Distance(float ax, float az, float bx, float bz)
+    {
+        float dx = bx - ax, dz = bz - az;
+        return MathF.Sqrt(dx * dx + dz * dz);
+    }
+
+    private const int DashResultSlot = 1;
+    private const int DashSucceeded = 1;
+    private const int DashFailed = 0;
+    private const int PercentRoll = 100;
+    private const int PullSuccessPercent = 50;
+    private const float DashReachSlack = 4f;
+    private const float DashLandingSlack = 4f;
 
     private const int BlinkXSlot = 0;
     private const int BlinkZSlot = 2;

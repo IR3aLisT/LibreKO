@@ -7,6 +7,10 @@ public partial class World
     private Vector3 _moveTarget;
     private bool _hasMoveTarget;
     private bool _terrainMoveHeld;
+    private bool _skySteering;
+    private Vector3? _lastGroundTarget;
+    private const float ClickMoveMinDistance = 1.5f;
+    private const float SkySteerDistance = 20f;
     private bool _autoMoveForward;
     private Vector2 _terrainMovePointer;
     private double _terrainMoveRetargetAccum;
@@ -17,7 +21,7 @@ public partial class World
     private const float RightClickSlop = 5f;
     private const float TargetDragSlop = 5f;
     private HeldSteer _steerFromTarget;
-    private const float TurnSpeed = 2.2f;
+    private static readonly float TurnSpeed = Mathf.DegToRad(Turning.KeyboardDegreesPerSecond);
     private const float PadTurnSpeed = 7.0f;
     private const double TerrainMoveRetargetInterval = 1.0 / 30.0;
     private const double MoveIndicatorLife = 2.0;
@@ -80,7 +84,7 @@ public partial class World
             })
         {
             bool wasTerrainMove = _terrainMoveHeld;
-            _terrainMoveHeld = false;
+            EndHeldMove();
             _steerFromTarget.Disarm();
             return wasTerrainMove;
         }
@@ -132,6 +136,8 @@ public partial class World
             } mouseButton && !overUi)
         {
             _terrainMoveHeld = false;
+            _skySteering = false;
+            _lastGroundTarget = null;
             _steerFromTarget.Disarm();
             if (TryClickLootBox(mouseButton.Position))
                 return true;
@@ -140,12 +146,17 @@ public partial class World
                 if (!TouchControls.Available)
                     _steerFromTarget.ArmAt(mouseButton.Position.X, mouseButton.Position.Y);
             }
-            else if (!TouchControls.Available && TrySetTerrainMoveTarget(mouseButton.Position))
+            else if (!TouchControls.Available)
             {
-                _clickMovePressedEdge = true;
-                _terrainMoveHeld = true;
-                _terrainMovePointer = mouseButton.Position;
-                _terrainMoveRetargetAccum = 0.0;
+                bool ground = TrySetTerrainMoveTarget(mouseButton.Position);
+                if (ground || !TryPickTerrainPoint(mouseButton.Position, _selfLift, out _))
+                {
+                    _clickMovePressedEdge = true;
+                    _terrainMoveHeld = true;
+                    _terrainMovePointer = mouseButton.Position;
+                    _terrainMoveRetargetAccum = 0.0;
+                    if (!ground) SteerHeldMove(mouseButton.Position);
+                }
             }
             return true;
         }
@@ -182,14 +193,14 @@ public partial class World
             {
                 if (!Input.IsMouseButtonPressed(MouseButton.Left))
                 {
-                    _terrainMoveHeld = false;
+                    EndHeldMove();
                 }
                 else
                 {
                     if (!overUi)
                     {
                         _terrainMovePointer = motion.Position;
-                        TrySetTerrainMoveTarget(motion.Position);
+                        SteerHeldMove(motion.Position);
                         _terrainMoveRetargetAccum = 0.0;
                     }
                     handled = true;
@@ -218,7 +229,7 @@ public partial class World
             return;
         if (!Input.IsMouseButtonPressed(MouseButton.Left))
         {
-            _terrainMoveHeld = false;
+            EndHeldMove();
             return;
         }
 
@@ -231,7 +242,32 @@ public partial class World
             return;
 
         _terrainMovePointer = GetViewport().GetMousePosition();
-        TrySetTerrainMoveTarget(_terrainMovePointer);
+        SteerHeldMove(_terrainMovePointer);
+    }
+
+    private void SteerHeldMove(Vector2 pointer)
+    {
+        if (TrySetTerrainMoveTarget(pointer))
+        {
+            _skySteering = false;
+            return;
+        }
+        if (_camera == null || _self == null || MerchantBlocksMove()) return;
+        if (_camera.IsPositionBehind(_self.GlobalPosition)) return;
+        var toCursor = pointer - _camera.UnprojectPosition(_self.GlobalPosition);
+        if (toCursor.LengthSquared() <= 0f) return;
+        _moveTarget = _self.Position + SkySteer.Heading(_camYaw, toCursor) * SkySteerDistance;
+        _hasMoveTarget = true;
+        _skySteering = true;
+    }
+
+    private void EndHeldMove()
+    {
+        _terrainMoveHeld = false;
+        if (!_skySteering) return;
+        _skySteering = false;
+        if (_lastGroundTarget is { } ground) _moveTarget = ground;
+        else _hasMoveTarget = false;
     }
 
     private void OrbitCamera(Vector2 relative)
@@ -357,8 +393,11 @@ public partial class World
         if (MerchantBlocksMove()) return false;
         if (!TryPickTerrainPoint(screenPosition, _selfLift, out Vector3 destination))
             return false;
+        if (_self != null && _self.Position.DistanceTo(destination) <= ClickMoveMinDistance)
+            return false;
 
         _moveTarget = destination;
+        _lastGroundTarget = destination;
         _hasMoveTarget = true;
         InterruptSelfCast();
         StopAutoAttack();

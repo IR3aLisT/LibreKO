@@ -65,6 +65,7 @@ public class UserSession
     public int AccumulatedPlayMinutes() =>
         PlayMinutes + (int)Math.Max(0, (DateTime.UtcNow - SessionStartedAt).TotalMinutes);
     public int DailyLoyalty { get; set; }
+    public int DailyPremiumLoyalty { get; set; }
     public bool IsGM { get; set; }
     public bool GmModeEnabled { get; set; } = true;
     public virtual bool IsBot => false;
@@ -131,8 +132,10 @@ public class UserSession
 
     // Visual
     public bool IsHidingHelmet { get; set; }
+    public bool IsHidingCospre { get; set; }
     public NationRanks NationRanks { get; set; } = NationRanks.None;
     public InvisibilityType Invisibility { get; set; }
+    public byte SoccerTeam { get; set; }
     public bool IsInvisible => Invisibility != InvisibilityType.None;
     public bool IsInfiltrating => Invisibility == InvisibilityType.Infiltration;
 
@@ -143,9 +146,16 @@ public class UserSession
     public short TransformId { get; set; } // 0=none, NPC model ID when transformed
     public NpcInstance? SummonedGuard { get; set; }
     public bool IsTransformed => TransformId > 0;
+    public int TransformSkillId { get; set; }
 
     // Clan/Knights
     public short KnightsId { get; set; }
+    public SiegeSide SiegeSide { get; set; }
+    public int TowerHostId { get; set; }
+    public byte PartyBoardType { get; set; }
+    public byte MatchTeam { get; set; }
+    public DateTime LastFullMoonShout { get; set; }
+    public int GuardTowerNpcId { get; set; }
     public int KnightsPoints { get; set; }
     public byte KnightsFame { get; set; }
     public int ClanInviteFrom { get; set; }
@@ -211,6 +221,8 @@ public class UserSession
     public int[] DailyOps { get; } = new int[UserDailyOp.Count];
 
     public int AttendanceDays { get; set; }
+    public long SealedExperience { get; set; }
+    public bool ExpSealOn { get; set; }
     public int AttendanceClaimedDays { get; set; }
     public byte AttendanceClaimedBonus { get; set; }
     public DateTime? AttendanceCheckedOn { get; set; }
@@ -226,7 +238,22 @@ public class UserSession
     // Party
     public int PartyIndex { get; set; } = -1;
     public bool IsInParty => PartyIndex >= 0;
-    public bool IsPartyLeader { get; set; }
+    private bool _isPartyLeader;
+
+    public bool IsPartyLeader
+    {
+        get => _isPartyLeader;
+        set
+        {
+            if (_isPartyLeader == value) return;
+            _isPartyLeader = value;
+            PartyLeaderChanged?.Invoke(this);
+        }
+    }
+
+    public event Action<UserSession>? PartyLeaderChanged;
+
+    public short ClanBattleEnemy { get; set; }
 
     // 850ms cooldown shared by PARTY_TARGET_NUMBER (0x1F) and PARTY_ALERT (0x20).
     public DateTime LastPartySignalTime { get; set; } = DateTime.MinValue;
@@ -269,6 +296,11 @@ public class UserSession
     public bool ReflectCurses { get; set; }
     public bool InstantCast { get; set; }
     public bool CanUseSkills { get; set; } = true;
+    public long BlinkUntilTicks { get; set; }
+    public bool IsBlinking => BlinkUntilTicks != 0;
+    public bool BlinkOnArrival { get; set; }
+    public ResurrectionOffer? PendingResurrection { get; set; }
+    public int ControlSignature { get; set; }
     public bool CanUsePotions { get; set; } = true;
     public bool CanTeleport { get; set; } = true;
     public bool StealthProhibited { get; set; }
@@ -298,6 +330,11 @@ public class UserSession
     public bool IsSitting { get; set; }           // True when player is sitting (affects HP/MP regen rate)
     public bool InCombatStance { get; set; }
 
+    public bool RankAuraHidden { get; set; }
+    public bool DevilForm { get; set; }
+
+    public Protocol.Writers.PlayerAppearanceState SizeState { get; set; } = Protocol.Writers.PlayerAppearanceState.Normal;
+
     // Skill point allocation: [0]=free, [1-4]=unused, [5]=cat1, [6]=cat2, [7]=cat3, [8]=master
     public byte[] SkillPoints { get; } = new byte[9];
 
@@ -317,9 +354,19 @@ public class UserSession
     public ItemSlot[] VipWarehouse { get; } = new ItemSlot[VipWarehouseMax];
     public DateTime VipVaultExpiry { get; set; }
 
+    public bool VipVaultExpiryAnnounced { get; set; }
+
     public string VipPassword { get; set; } = string.Empty;
 
     public byte VipPasswordRequest { get; set; }
+
+    public byte VipPasswordFailures { get; set; }
+
+    public short KurianSp { get; set; }
+
+    public GroundEffect Ground { get; set; }
+
+    public short KurianMaxSp { get; set; }
 
     public string SealCode { get; set; } = string.Empty;
 
@@ -359,6 +406,8 @@ public class UserSession
             UserSessionMagicState.WeaponDamageBonus(this));
         UserSessionMagicState.ApplyBuffBonuses(this);
         ApplyFamiliarScrolls(coefficient, gameData);
+        if (ZoneId == ChaosRules.Zone)
+            Stats.MaxHp = ChaosRules.MaxHp;
         MaxHp = Stats.MaxHp;
         MaxMp = Stats.MaxMp;
     }

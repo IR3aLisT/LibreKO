@@ -13,7 +13,7 @@ public sealed class BifrostPacketWriter
         return packet;
     }
 
-    public static Packet NestTimer(ushort secondsRemaining)
+    public static Packet InstanceTimer(ushort secondsRemaining)
     {
         var packet = new Packet(GameOpcodes.GS_BIFROST);
         packet.WriteByte((byte)TempleSubOpcode.MonsterSquad);

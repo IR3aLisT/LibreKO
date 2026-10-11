@@ -35,7 +35,9 @@ public class PreGameService(
     TimeWeatherBroadcastService timeWeather,
     IKnightsRuntimeService knightsRuntime,
     IPetService petService,
+    ICharacterSealService characterSeal,
     INationRankService nationRanks,
+    ISocialPacketCoordinator social,
     ILogger<PreGameService> logger) : IPreGameService
 {
     private const byte NewCharacterStartZone = (byte)ZoneId.Moradon;
@@ -128,7 +130,7 @@ public class PreGameService(
         if (strength < 50 || stamina < 50 || dexterity < 50 || intelligence < 50 || magic < 50)
             return CreateCharacterPacket(CreateCharacterResult.StatTooLow);
 
-        if (string.IsNullOrWhiteSpace(name) || name.Length > 20)
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 20 || !NameRules.IsPlain(name))
             return CreateCharacterPacket(CreateCharacterResult.InvalidName);
 
         if (await characterRepository.IsNameTaken(name))
@@ -260,6 +262,12 @@ public class PreGameService(
 
             if (session != null)
             {
+                if (KurianStamina.Applies(session))
+                {
+                    KurianStamina.Refill(session);
+                    packets.Add(VitalsPacketWriter.StaminaChange(session.KurianMaxSp, session.KurianSp));
+                }
+
                 packets.Add(BuildQuestClockPacket());
                 packets.Add(BuildQuestStatePacket(session));
 
@@ -267,8 +275,11 @@ public class PreGameService(
                 if (clan != null)
                     packets.Add(KnightsPacketWriter.ClanUpdate(
                         clan.Id, clan.Flag, clan.Cape, clan.CapeR, clan.CapeG, clan.CapeB, clan.ClanPointFund));
+                var notices = RateEvents.Active(timeWeather, gameData);
                 if (clan != null && clan.Notice.Length > 0)
-                    packets.Add(NoticePacketWriter.Login([(ClanNoticeTitle, clan.Notice)]));
+                    notices.Add((ClanNoticeTitle, clan.Notice));
+                if (notices.Count > 0)
+                    packets.Add(NoticePacketWriter.Login(notices));
             }
 
             packets.Add(PreGamePacketWriter.GameStart());
@@ -284,7 +295,10 @@ public class PreGameService(
             }
 
             if (session != null)
+            {
                 await knightsRuntime.NotifyMemberOnlineAsync(session);
+                await social.NotifyFriendLoggedInAsync(session);
+            }
         }
 
         return packets;
@@ -340,16 +354,22 @@ public class PreGameService(
 
         var pets = await petService.DescribeAsync(inventory);
         var petsBySlot = new Dictionary<int, PetItemInfo>();
+        var rings = await characterSeal.DescribeAsync(inventory);
         for (var slot = 0; slot < inventory.Length; slot++)
-            if (inventory[slot].IsLinked && pets.TryGetValue(inventory[slot].UniqueId, out var pet))
+        {
+            if (inventory[slot].IsPetLink && pets.TryGetValue(inventory[slot].UniqueId, out var pet))
                 petsBySlot[slot] = pet;
+            else if (inventory[slot].IsSealedCharacter && rings.TryGetValue(inventory[slot].UniqueId, out var ring))
+                petsBySlot[slot] = new PetItemInfo(inventory[slot].UniqueId, ring.Name, ring.Class, ring.Level, ring.ExpHundredths, ring.Race, ring.Rebirth);
+        }
 
         var ranks = nationRanks.Of(character.Id);
         if (session != null) session.NationRanks = ranks;
 
         return CharacterPacketMapper.BuildMyInfo(new MyInfoPacketContext(
             character, account, RebirthBonus.RequiredExperience(gameData.GetMaxExpForLevel(character.Level), character.RebirthLevel),
-            stats, clan, allianceId, clanFame, zoneId, posX, posZ, posY, premiumHours, petsBySlot, ranks));
+            stats, clan, allianceId, clanFame, zoneId, posX, posZ, posY, premiumHours, petsBySlot, ranks,
+            KingSystemRuntimeService.IsKingOf(gameData, account.Nation, character.Name)));
     }
 
     private async Task RepairReconnectZoneIfNeededAsync(Character character, AccountNation nation)

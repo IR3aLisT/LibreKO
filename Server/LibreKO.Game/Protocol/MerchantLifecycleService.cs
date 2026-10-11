@@ -210,20 +210,27 @@ public class MerchantLifecycleService(
             session.Trade.IsBuyingMerchant,
             session.Trade.IsBuyingMerchant ? (byte)0 : StallFlags(session));
 
-    private static byte StallFlags(UserSession session) =>
+    public static byte StallFlags(UserSession session) =>
         session.Trade.PremiumMerchant ? MerchantPacketConstants.PremiumStallFlag : (byte)0;
 
-    private static List<int> DisplayItemIds(UserSession session)
+    public static List<int> DisplayItemIds(UserSession session)
     {
-        var source = session.Trade.IsBuyingMerchant
-            ? session.Trade.BuyMerchantItems
-            : session.Trade.MerchantItems;
+        if (!session.Trade.IsBuyingMerchant)
+            return session.Trade.MerchantItems
+                .Take(ShowcaseSlots(session))
+                .Select(item => item == null || item.IsEmpty ? 0 : item.ItemId)
+                .ToList();
 
-        return source
+        return session.Trade.BuyMerchantItems
             .Where(item => item != null && !item.IsEmpty)
             .Select(item => item.ItemId)
             .ToList();
     }
+
+    public static int ShowcaseSlots(UserSession session) =>
+        session.Trade.PremiumMerchant
+            ? MerchantPacketConstants.StallDisplaySlotsPremium
+            : MerchantPacketConstants.StallDisplaySlots;
 
     private static bool HasMerchantItems(UserSession session)
     {

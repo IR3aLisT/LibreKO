@@ -5,7 +5,7 @@ namespace LibreKO.Network;
 
 public partial class Net
 {
-    public const byte ChangeHairSubDefault = 1;
+    public const byte ChangeHairInGame = 1;
     public const byte ChangeHairResultOk = 0;
     public const byte ChangeHairResultFail = 1;
     public const byte ChangeHairOpenShop = 2;
@@ -31,13 +31,13 @@ public partial class Net
         ChangeHairResultEvent?.Invoke(result == ChangeHairResultOk, _changeHairRequest.Face, _changeHairRequest.Hair);
     }
 
-    public bool SendChangeHair(int hair, int face)
+    public bool SendChangeHair(byte couponPosition, int face, int hair)
     {
         if (string.IsNullOrEmpty(LastEnter.Name) || !_changeHairRequest.TryBegin(face, hair)) return false;
 
         var p = new Packet(GameOpcodes.GS_CHANGE_HAIR);
-        p.WriteByte(ChangeHairSubDefault);
-        p.WriteSByteString(LastEnter.Name ?? "");
+        p.WriteByte(ChangeHairInGame);
+        p.WriteByte(couponPosition);
         p.WriteByte((byte)face);
         p.WriteInt(hair);
         _conn.Send(p);

@@ -14,7 +14,7 @@ public static partial class CharacterPreview
     private static readonly (int Gear, int Part)[] ArmorSlotToPart =
         { (0, 0), (1, 1), (3, 2), (4, 3), (2, 5) };
 
-    private sealed class WeaponPlug { public string Stem = ""; public Vector3 Pos; public Quaternion Quat = Quaternion.Identity; public Vector3 Scale = Vector3.One; }
+    private sealed class WeaponPlug { public string Stem = ""; public string Anim = ""; public Vector3 Pos; public Quaternion Quat = Quaternion.Identity; public Vector3 Scale = Vector3.One; }
 
     public static Node3D? Build(int race, int face, int[]? gear, int hair = 0, Color? hairColour = null,
                                 bool enableShine = false)
@@ -156,8 +156,10 @@ public static partial class CharacterPreview
     private static string? FacePartStem(int race, int face)
     {
         if (_faceRaces == null || !_faceRaces.TryGetValue(race, out var rr) || rr.Face.Length == 0) return null;
-        return $"{rr.Face}{face:D2}";
+        return FaceStem(rr.Face, face);
     }
+
+    internal static string FaceStem(string racePrefix, int face) => HairStem(racePrefix, face);
 
     private static string? HairPartStem(int race, int hair)
     {
@@ -243,11 +245,9 @@ public static partial class CharacterPreview
             var mesh = scene.Instantiate<Node3D>();
             mesh.Transform = new Transform3D(new Basis(w.Quat).Scaled(w.Scale), w.Pos);
             attach.AddChild(mesh);
-            if (enableShine)
-            {
-                WeaponGlow.Attach(mesh, gear[slot]);
-                ItemShine.Apply(mesh, gear[slot], slot);
-            }
+            WeaponIdle.Start(mesh, w.Anim);
+            WeaponGlow.Attach(mesh, gear[slot]);
+            if (enableShine) ItemShine.Apply(mesh, gear[slot], slot);
         }
     }
 
@@ -265,6 +265,7 @@ public static partial class CharacterPreview
                 map[id] = new WeaponPlug
                 {
                     Stem = e["stem"].AsString(),
+                    Anim = e.TryGetValue("anim", out var clip) ? clip.AsString() : "",
                     Pos = new Vector3((float)pos[0], (float)pos[1], (float)pos[2]),
                     Quat = new Quaternion((float)q[0], (float)q[1], (float)q[2], (float)q[3]),
                     Scale = new Vector3((float)sc[0], (float)sc[1], (float)sc[2]),

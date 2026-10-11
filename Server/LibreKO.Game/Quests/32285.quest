@@ -1,0 +1,22 @@
+
+Bind Npc 32285
+
+On greeting
+    If player level > 69
+        Say "Would you like to enter into the Krowaz's Land? If the party leader applies for the entrance, all the party members can enter into the same area at one scoop. Otherwise, everybody enters individually."
+        Topic "I'll just go." goto event_102
+        Topic "No, I'll just go." goto close
+    Else
+        Say "Sorry, but only Level 70 players or higher can enter Krowaz's Land."
+        Topic "Confirm" goto close
+    Goto close
+
+On event_102
+    If krowaz is open
+        If player leads a party
+            Teleport party to 75 at 55 1974
+        Else
+            Teleport 75 at 55 1974
+    Else
+        Say "Currently you may not enter the Krowaz. Krowaz entry times are from 14:00 to 15:00."
+        Topic "Confirm" goto close

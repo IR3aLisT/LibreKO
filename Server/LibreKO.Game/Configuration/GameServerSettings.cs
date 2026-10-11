@@ -11,6 +11,8 @@ public class GameServerSettings
 
     public string BindHost { get; set; } = "*";
 
+    public string MinimumClientVersion { get; set; } = string.Empty;
+
     [Range(1, 65535)]
     public int BindPort { get; set; } = default!;
 
@@ -69,6 +71,9 @@ public class PlayerSettings
     [Range(1, 83)]
     public int MaxLevel { get; set; } = 83;
 
+    [Range(0, int.MaxValue)]
+    public int MaxOnline { get; set; }
+
     [Range(1, int.MaxValue)]
     public int AutoSaveDelaySeconds { get; set; } = 900;
 
@@ -120,6 +125,10 @@ public class EventSettings
     public int BattleWinLoyalty { get; set; } = 500;        // NP reward for winning side
 
     public int[] ChaosStartHours { get; set; } = [];
+
+    public int[] KrowazStartHours { get; set; } = [14];
+
+    public bool ChaosNeedsMap { get; set; }
 
     public bool UseLocalTimeForSchedules { get; set; } = false;
 }

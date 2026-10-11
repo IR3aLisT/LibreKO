@@ -32,6 +32,7 @@ public class CharacterDevelopmentPacketCoordinator(
     private const int SkillPresetBodyLength = 5;
 
     private const byte PremiumFreeResetType = 12;
+    private const byte PremiumSwitching = 13;
     private const int ReturnTokenItemId = 810_512_000;
 
     public async Task HandlePointChangeAsync(IClient client, Packet packet)
@@ -424,7 +425,7 @@ public class CharacterDevelopmentPacketCoordinator(
             return;
         }
 
-        var freeReset = IsResetFree(session);
+        var freeReset = IsRebirthResetFree(session);
         if (!freeReset)
         {
             const int rebirthResetCost = 100_000_000;
@@ -477,6 +478,7 @@ public class CharacterDevelopmentPacketCoordinator(
         var isHiding = packet.ReadByte();
         var isHidingCospre = packet.RemainingBytes >= 1 ? packet.ReadByte() : isHiding;
         session.IsHidingHelmet = isHiding != 0;
+        session.IsHidingCospre = isHidingCospre != 0;
 
         var result = HelmetPacketWriter
             .Visibility(session.CharacterId, isHiding != 0, isHidingCospre != 0)
@@ -513,7 +515,14 @@ public class CharacterDevelopmentPacketCoordinator(
     }
 
     internal static bool IsResetFree(UserSession session)
-        => session.PremiumType == PremiumFreeResetType || HasItem(session, ReturnTokenItemId);
+        => PremiumResetsFree(session.PremiumType) || HasItem(session, ReturnTokenItemId);
+
+    internal static bool IsRebirthResetFree(UserSession session)
+        => PremiumRebirthResetsFree(session.PremiumType);
+
+    internal static bool PremiumResetsFree(byte premiumType) => premiumType == PremiumFreeResetType;
+
+    internal static bool PremiumRebirthResetsFree(byte premiumType) => premiumType is PremiumFreeResetType or PremiumSwitching;
 
     private static bool HasItem(UserSession session, int itemId)
     {

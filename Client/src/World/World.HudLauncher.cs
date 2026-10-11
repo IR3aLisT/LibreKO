@@ -5,7 +5,7 @@ namespace LibreKO;
 
 public partial class World
 {
-    private static float LauncherButtonSize => HudPlacement.LauncherButtonSize;
+    private static float LauncherButtonSize => HudPlacement.HudLauncherButtonSize;
     private const float LauncherGap = 4f;
 
     private CanvasLayer _hudLauncherLayer = null!;
@@ -36,8 +36,13 @@ public partial class World
             "system/bag", "Inventory", () => ToggleMainWindow("Inventory")));
         _hudLauncher.AddChild(LauncherButton(
             "system/users-three", "Party", ToggleParty));
-        _hudLauncher.AddChild(LauncherButton(
-            "system/sparkle", "Genie", ToggleGenie));
+        if (Platform.TouchUi)
+            _hudLauncher.AddChild(LauncherButton(
+                "system/sparkle", "Genie", ToggleGenie));
+
+        if (!Platform.TouchUi)
+            _hudLauncher.AddChild(LauncherButton(
+                "system/help", "Quest Journal", () => ToggleMainWindow("Quests")));
 
         if (Platform.TouchUi)
         {
@@ -50,12 +55,18 @@ public partial class World
         _hudLauncher.CustomMinimumSize = new Vector2(
             LauncherButtonSize * slots + LauncherGap * (slots - 1), LauncherButtonSize);
 
+        PlaceHudLauncher();
+        return _hudLauncherRoot;
+    }
+
+    private void PlaceHudLauncher()
+    {
+        if (_hudLauncherRoot == null || !IsInstanceValid(_hudLauncherRoot)) return;
+        float vpDrop = VpBarShown && !Platform.TouchUi ? VpBarSize.Y + VpBarGap : 0f;
         HudPlacement.Launcher(new Vector2(
             StatusHudPos.X + MpBarPos.X,
-            StatusHudPos.Y + MpBarPos.Y + MpBarSize.Y + StatusHudGap))
+            StatusHudPos.Y + MpBarPos.Y + MpBarSize.Y + StatusHudGap + vpDrop))
             .ApplyTo(_hudLauncherRoot);
-
-        return _hudLauncherRoot;
     }
 
     private void BuildTownButton()

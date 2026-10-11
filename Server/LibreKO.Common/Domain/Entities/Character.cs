@@ -83,6 +83,10 @@ public class Character : Entity
     public byte AttendanceClaimedBonus { get; set; }
     public DateTime? AttendanceCheckedOn { get; set; }
 
+    public long SealedExperience { get; set; }
+    public bool ExpSealOn { get; set; }
+    public bool Sealed { get; set; }
+
     public short GetPosX => (short)(X * 10);
     public short GetPosY => (short)(Y * 10);
     public short GetPosZ => (short)(Z * 10);
@@ -142,6 +146,9 @@ public class Character : Entity
             builder.Property(p => p.AttendanceClaimedDays);
             builder.Property(p => p.AttendanceClaimedBonus);
             builder.Property(p => p.AttendanceCheckedOn);
+            builder.Property(p => p.SealedExperience);
+            builder.Property(p => p.ExpSealOn);
+            builder.Property(p => p.Sealed);
             builder.Property(p => p.QuestData);
             builder.Property(p => p.SavedMagic);
             builder.Property(p => p.MapId).IsRequired();

@@ -40,6 +40,29 @@ public static class AchievementData
         _ => $"Tab {(int)tab}",
     };
 
+    public const int AllGroups = -1;
+    public const int GroupsPerTab = 10;
+    private const int CategoryTextBase = 37000;
+    private const int CategoryTextCount = 50;
+    private const int CategoryTextFallback = 37050;
+
+    public static AchievementTab TabOfGroup(int group) => (AchievementTab)(group / GroupsPerTab);
+
+    public static List<int> CategoriesOf(AchievementTab tab)
+    {
+        EnsureLoaded();
+        var groups = new SortedSet<int>();
+        foreach (var info in Table.Values)
+            if (info.Group >= 0 && TabOfGroup(info.Group) == tab) groups.Add(info.Group);
+        return new List<int>(groups);
+    }
+
+    public static string CategoryName(int group)
+    {
+        int textId = group is >= 0 and < CategoryTextCount ? CategoryTextBase + group : CategoryTextFallback;
+        return ItemData.Text(textId, $"Group {group}");
+    }
+
     public static Info? Get(int achievementId)
     {
         EnsureLoaded();

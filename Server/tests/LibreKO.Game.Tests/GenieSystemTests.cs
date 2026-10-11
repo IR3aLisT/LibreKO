@@ -53,13 +53,13 @@ public class GenieSystemTests
         packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_GENIE_SYSTEM);
         packet.ReadByte().Should().Be(GenieSystemPacketWriter.InfoRequest);
         packet.ReadByte().Should().Be(GenieSystemPacketWriter.Activated);
-        packet.ReadUShort().Should().Be(4242);
+        packet.ReadInt().Should().Be(4242);
         packet.ReadByte().Should().Be(GenieSystemPacketWriter.Active);
         packet.RemainingBytes.Should().Be(0);
     }
 
     [Fact]
-    public void OptionsAreAlwaysAHundredBytesWhateverTheClientSaved()
+    public void OptionsAreAlwaysTheFullBlobWhateverTheClientSaved()
     {
         var packet = GenieSystemPacketWriter.Options([1, 2, 3]);
         packet.ResetOffset();

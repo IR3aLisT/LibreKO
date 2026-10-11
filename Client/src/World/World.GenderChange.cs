@@ -67,7 +67,7 @@ public partial class World
         actions.AddChild(LookActionButton("Cancel", CloseGenderChange));
     }
 
-    private static Control LookPreviewColumn(LookPreview preview)
+    private static Control LookPreviewColumn(LookPreview preview, bool zoom = false)
     {
         var column = new VBoxContainer();
         column.AddThemeConstantOverride("separation", 6);
@@ -76,6 +76,7 @@ public partial class World
         turnRow.AddThemeConstantOverride("separation", 8);
         turnRow.AddChild(LookEditor.StepButton("◀", () => preview.Turn(-LookTurnDegrees)));
         turnRow.AddChild(LookEditor.StepButton("▶", () => preview.Turn(LookTurnDegrees)));
+        if (zoom) turnRow.AddChild(LookActionButton("Zoom", preview.ToggleZoom));
         column.AddChild(turnRow);
         return column;
     }
@@ -103,6 +104,8 @@ public partial class World
         ShowGenderLook();
         _genderPanel.Visible = true;
         _genderShown = true;
+        _genderPreview.AlwaysRender = _genderPanel.PluginReplaced;
+        PluginHost.Game.RaiseGenderChange();
     }
 
     private void CloseGenderChange()
@@ -110,8 +113,10 @@ public partial class World
         if (!_genderShown) return;
         _genderShown = false;
         _genderPanel.Visible = false;
+        _genderPreview.AlwaysRender = false;
         _genderEditor.CloseColourPicker();
         _genderPreview.Clear();
+        PluginHost.Game.RaiseGenderChange();
     }
 
     private void OnGenderLookChanged()
@@ -126,13 +131,14 @@ public partial class World
         _genderEditor.Refresh();
         _genderPreview.Show(_genderEditor.Race, _genderEditor.Face, _genderEditor.HairStyle, _genderEditor.HairColour);
         _genderConfirm.Disabled = _genderInFlight;
+        PluginHost.Game.RaiseGenderChange();
     }
 
     private void DisarmGenderChange()
     {
         _genderArmed = false;
         _genderConfirm.Text = "Change";
-        SetGenderStatus("", false);
+        _genderStatus.Text = "";
     }
 
     private void OnGenderConfirmPressed()
@@ -142,14 +148,21 @@ public partial class World
         {
             _genderArmed = true;
             _genderConfirm.Text = "Confirm";
-            SetGenderStatus($"Your {ItemData.DisplayName(GenderChange.Item).Trim()} will be used. Press Confirm to change.", false);
+            _genderStatus.Text = $"Your {ItemData.DisplayName(GenderChange.Item).Trim()} will be used. Press Confirm to change.";
             return;
         }
+        SubmitGenderChange();
+    }
+
+    private void SubmitGenderChange()
+    {
+        if (_genderInFlight || _selfDead) return;
         _genderInFlight = true;
         _genderEditor.SetLocked(true);
         _genderConfirm.Disabled = true;
-        SetGenderStatus("Changing…", false);
+        _genderStatus.Text = "Changing…";
         Net.I.SendGenderChange(_genderEditor.Race, _genderEditor.Face, _genderEditor.Hair);
+        PluginHost.Game.RaiseGenderChange();
     }
 
     private void OnGenderChangeRefused(int result)
@@ -159,11 +172,10 @@ public partial class World
         _genderEditor.SetLocked(false);
         DisarmGenderChange();
         _genderConfirm.Disabled = false;
-        string text = result == Net.GenderChangeNoItem
+        CloseGenderChange();
+        Notice.Show(this, result == Net.GenderChangeNoItem
             ? ItemData.Text(GenderChange.NoItemText, "It does not have items.")
-            : ItemData.Text(GenderChange.FailedText, "Gender change failed.");
-        if (_genderShown) SetGenderStatus(text, true);
-        else CombatNotice(text);
+            : ItemData.Text(GenderChange.FailedText, "Gender change failed."));
     }
 
     private void OnGenderChanged()
@@ -172,11 +184,6 @@ public partial class World
         _genderInFlight = false;
         _genderEditor.SetLocked(false);
         CloseGenderChange();
-    }
-
-    private void SetGenderStatus(string text, bool warn)
-    {
-        _genderStatus.Text = text;
-        _genderStatus.AddThemeColorOverride("font_color", warn ? UiTheme.Bad : Colors.White);
+        Notice.Show(GetTree().Root, ItemData.Text(GenderChange.ChangedText, "Change current character"));
     }
 }

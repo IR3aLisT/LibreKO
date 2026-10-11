@@ -7,9 +7,25 @@ namespace LibreKO;
 public partial class World
 {
     private const int SealFee = 1_000_000;
-    private const int SealCodeLength = 8;
-    private const int SealBagCells = 28;
-    private const string SealCodePrompt = "Enter your secret answer";
+    private const int SealCodeLength = 4;
+    private const int SealStoneItem = 810_890_000;
+    private const int SealConfirmText = 15110;
+    private const int UnsealConfirmText = 15111;
+    private const int UnbindStonesText = 4613;
+    private const int SealShortFeeText = 15114;
+    private const int SealWrongCodeText = 15107;
+    private const int SealPremiumOnlyText = 15105;
+    private const int SealFailedText = 15115;
+    private const int UnsealFailedText = 15116;
+    private const int SealTooSoonText = 19008;
+    private const int SealNoVaultPasswordText = 32150;
+    private const int SealWrongVaultPasswordText = 15113;
+    private const int SealVaultLockedText = 1669;
+    private const int BindFailedText = 19006;
+    private const int UnbindNotSealableText = 19000;
+    private const int UnbindMissingStonesText = 19005;
+    private const int UnbindFailedText = 19002;
+    private const string SealCodePrompt = "Enter your VIP vault password";
     private const string SealItemChangedText = "The item in the socket changed. Check it and confirm again.";
     private const string SealCodeChangedText = SealCodePrompt + " and confirm again.";
 
@@ -21,7 +37,7 @@ public partial class World
     private CanvasLayer _sealLayer = null!;
     private HudWindow _sealPanel = null!;
     private WarehouseCell _sealSocket = null!;
-    private readonly WarehouseCell[] _sealBagCells = new WarehouseCell[SealBagCells];
+    private BagCompanion? _sealCompanion;
     private Label _sealHeadline = null!;
     private Label _sealPrompt = null!;
     private VBoxContainer _sealCodeRow = null!;
@@ -71,8 +87,20 @@ public partial class World
         _sealPanel.Title = SealWindowTitle(mode);
         _sealPanel.Visible = true;
         _sealShown = true;
+        _sealCompanion ??= new BagCompanion(SealTakeFromBag, SealBagFit, _ => "", CloseSealWindow);
+        AttachBagCompanion(_sealCompanion);
         RefreshSealWindow();
     }
+
+    private bool SealTakeFromBag(int abs)
+    {
+        if (!InMainBag(abs)) return false;
+        TakeSealSocket(abs - GridStart);
+        return true;
+    }
+
+    private BagFit SealBagFit(int abs) =>
+        abs == _sealSlot ? BagFit.Staged : SealSocketRefusal(Inv[abs]) == null ? BagFit.Normal : BagFit.Unfit;
 
     private void CloseSealWindow()
     {
@@ -84,6 +112,7 @@ public partial class World
         _sealPad.Visible = false;
         DismissSealNotice();
         HideItemTooltip();
+        if (_sealCompanion != null) DetachBagCompanion(_sealCompanion);
     }
 
     private void RefreshSealWindow()
@@ -94,17 +123,12 @@ public partial class World
         var held = _sealSlot >= 0 ? Inv[_sealSlot] : default;
         _sealSocket.Set(held);
 
-        for (int i = 0; i < SealBagCells; i++)
-        {
-            int abs = GridStart + i;
-            _sealBagCells[i].Set(abs < Inv.Length ? Inv[abs] : default);
-        }
-
         _sealGold.Text = $"{Sheet.Gold:n0}";
-        _sealCodeRow.Visible = _sealMode == SealMode.Secret;
+        var action = SealActionFor(_sealMode, held.State);
+        bool needsCode = !held.IsEmpty && SealNeedsCode(action);
+        _sealCodeRow.Visible = needsCode;
         _sealCodeField.Text = new string('*', _sealCode.Length);
 
-        var action = SealActionFor(_sealMode, held.State);
         _sealHeadline.Text = held.IsEmpty
             ? "Place an item in the socket."
             : action switch
@@ -115,23 +139,66 @@ public partial class World
                 _ => "The binding on this item will be released.",
             };
 
-        _sealPrompt.Text = held.IsEmpty || action != ItemSealType.Seal
-            ? ""
-            : $"{SealFee:n0} gold";
+        _sealPrompt.Text = held.IsEmpty ? "" : action switch
+        {
+            ItemSealType.Seal => $"{SealFee:n0} gold",
+            ItemSealType.Unbind => UnbindCostLine(held),
+            _ => "",
+        };
 
-        _sealConfirm.Disabled = held.IsEmpty
-            || _sealWaiting
-            || (_sealMode == SealMode.Secret && _sealCode.Length != SealCodeLength);
+        _sealConfirm.Disabled = held.IsEmpty || _sealWaiting || (needsCode && _sealCode.Length != SealCodeLength);
+        RefreshBagFit();
     }
+
+    private static bool SealNeedsCode(ItemSealType action) => action != ItemSealType.Bind;
+
+    private string UnbindCostLine(ItemSlot held)
+    {
+        int stones = UnbindStonesFor(held.ItemId);
+        if (stones <= 0) return "Free of charge";
+        string cost = TextTemplate.Fill(
+            ItemData.Text(UnbindStonesText, "Number of seal item needed to unbound: %d"), stones);
+        return $"{cost} (you have {CarriedSealStones():n0})";
+    }
+
+    private static int UnbindStonesFor(int itemId) =>
+        ItemData.Get(itemId) is { } def ? ItemData.UnbindStones(def, ItemData.ExtFor(itemId)) : 0;
+
+    private int CarriedSealStones()
+    {
+        int total = 0;
+        for (int abs = GridStart; abs < Inv.Length; abs++)
+            if (Inv[abs].ItemId == SealStoneItem) total += Mathf.Max(1, (int)Inv[abs].Count);
+        return total;
+    }
+
+    private const int TextCannotSeal = 15101;
+    private const int TextDuplicateSerial = 10760;
+    private const int TextSealBindStatus = 19017;
 
     private void TakeSealSocket(int bagIndex)
     {
         if (_sealWaiting || _sealNotice != null) return;
         int abs = GridStart + bagIndex;
         if (abs >= Inv.Length || Inv[abs].IsEmpty) return;
+        if (SealSocketRefusal(Inv[abs]) is { } refusal)
+        {
+            CombatNotice(refusal);
+            return;
+        }
         _sealSlot = abs;
         RefreshSealWindow();
     }
+
+    private static string? SealSocketRefusal(ItemSlot slot) => ItemData.ShownFlag(slot) switch
+    {
+        ItemFlag.CharacterSeal or ItemFlag.Duplicate =>
+            ItemData.Text(TextDuplicateSerial, "Items with duplicated serial number cannot be upgraded."),
+        ItemFlag.NotBound => ItemData.Text(TextSealBindStatus, "You cannot register an item on seal/bind status."),
+        _ when (ItemData.Get(slot.ItemId)?.Countable ?? 0) != 0 || slot.ExpiresAt != 0 =>
+            ItemData.Text(TextCannotSeal, "Item cannot be sealed."),
+        _ => null,
+    };
 
     private void ClearSealSocket()
     {
@@ -148,10 +215,10 @@ public partial class World
         var action = SealActionFor(_sealMode, Inv[_sealSlot].State);
         string question = action switch
         {
-            ItemSealType.Seal =>
-                $"It costs {SealFee:n0} gold and the item cannot be traded, upgraded or destroyed "
-                + "until unsealed. Seal it now?",
-            ItemSealType.Unseal => "Lift the seal?",
+            ItemSealType.Seal => ItemData.Text(SealConfirmText,
+                $"It costs {SealFee:n0} gold and the item can't be traded, upgraded or destroyed until unsealed. "
+                + "Would you like to seal your item now?"),
+            ItemSealType.Unseal => ItemData.Text(UnsealConfirmText, "Would you like to lift the seal?"),
             ItemSealType.Bind => "Bind this item to you?",
             _ => "Release the binding?",
         };
@@ -202,11 +269,14 @@ public partial class World
     private void OnItemSeal(ItemSealType sealType, ItemSealResult result, int itemId, int srcPos)
     {
         _sealWaiting = false;
+        if (sealType == ItemSealType.Bind && FinishBindBeforeEquip(result, srcPos)) return;
         int abs = srcPos >= 0 ? GridStart + srcPos : _sealSlot;
 
         if (result != ItemSealResult.Succeeded)
         {
-            CombatNotice(SealRefusal(sealType, result));
+            CombatLogAdd(SealRefusal(sealType, result), CombatLogKind.Status, WhRefusalTint);
+            if (result == ItemSealResult.CodeLockedOut)
+                CombatNotice("The VIP vault password stays locked until you log in again.");
             _sealCode = "";
             RefreshSealWindow();
             return;
@@ -242,22 +312,35 @@ public partial class World
         if (CharTabOpen()) RefreshInventoryUI();
     }
 
-    private static string SealRefusal(ItemSealType sealType, ItemSealResult result) => result switch
+    private static string SealRefusal(ItemSealType sealType, ItemSealResult result)
     {
-        ItemSealResult.NeedCoins => "You are short on the seal fee.",
-        ItemSealResult.WrongCode => "Wrong secret answer.",
-        ItemSealResult.MissingMaterial => "Insufficient items to perform the seal.",
-        ItemSealResult.TooSoon => "Please try again in a moment.",
-        ItemSealResult.NoCodeSet => "No secret answer is set for this account yet.",
-        ItemSealResult.CodeLockedOut => "Too many wrong answers. Contact support to reset it.",
-        _ => sealType switch
+        bool secret = sealType is ItemSealType.Seal or ItemSealType.Unseal;
+        return (sealType, result) switch
         {
-            ItemSealType.Seal => "Seal failed.",
-            ItemSealType.Unseal => "Seal lift failed.",
-            ItemSealType.Bind => "This item cannot be bound.",
-            _ => "Item restoration failed.",
-        },
-    };
+            (_, ItemSealResult.TooSoon) =>
+                ItemData.Text(SealTooSoonText, "Please try again. You may not repeat this function instantly."),
+            (ItemSealType.Bind, _) => ItemData.Text(BindFailedText, "Item restoration failed."),
+            (_, ItemSealResult.NoCodeSet) => ItemData.Text(SealNoVaultPasswordText,
+                "There is no password set for the VIP Vault. Visit the Inn Hostess to set the VIP Vault password."),
+            (_, ItemSealResult.CodeLockedOut) => ItemData.Text(SealVaultLockedText,
+                "You have inserted wrong Password more than 3 times."),
+            (_, ItemSealResult.WrongVaultPassword) => ItemData.Text(SealWrongVaultPasswordText, "Wrong VIP Key Password"),
+            (ItemSealType.Unbind, ItemSealResult.WrongCode) =>
+                ItemData.Text(SealWrongVaultPasswordText, "Wrong VIP Key Password"),
+            (_, ItemSealResult.WrongCode) => ItemData.Text(SealWrongCodeText, "Wrong Security Code"),
+            (_, ItemSealResult.MissingMaterial) when secret => ItemData.Text(SealPremiumOnlyText,
+                "Item Sealing/Unsealing functions are available to Gold and Platinum Premium users ONLY."),
+            (ItemSealType.Unbind, ItemSealResult.MissingMaterial) =>
+                ItemData.Text(UnbindMissingStonesText, "Insufficient items to perform the seal."),
+            (ItemSealType.Seal, ItemSealResult.NeedCoins) =>
+                ItemData.Text(SealShortFeeText, "You are short on the seal lifting fee."),
+            (ItemSealType.Unbind, ItemSealResult.Failed or ItemSealResult.NotSealable) =>
+                ItemData.Text(UnbindNotSealableText, "This item cannot be sealed."),
+            (ItemSealType.Seal, _) => ItemData.Text(SealFailedText, "Seal failed."),
+            (ItemSealType.Unseal, _) => ItemData.Text(UnsealFailedText, "Seal lift failed."),
+            _ => ItemData.Text(UnbindFailedText, "Sealing the item failed."),
+        };
+    }
 
     private void BuildSealWindow()
     {
@@ -340,21 +423,6 @@ public partial class World
         var bagBox = new VBoxContainer();
         bagBox.AddThemeConstantOverride("separation", 6);
         bagSection.AddChild(bagBox);
-
-        var grid = new GridContainer { Columns = 7 };
-        grid.AddThemeConstantOverride("h_separation", 3);
-        grid.AddThemeConstantOverride("v_separation", 3);
-        bagBox.AddChild(grid);
-        for (int i = 0; i < SealBagCells; i++)
-        {
-            int index = i;
-            var cell = new WarehouseCell(GridStart + i, bag: true);
-            cell.OnActivate += _ => TakeSealSocket(index);
-            cell.OnHover += HoverWarehouseCell;
-            cell.OnHoverEnd += HideItemTooltip;
-            _sealBagCells[i] = cell;
-            grid.AddChild(cell);
-        }
 
         var footer = new HBoxContainer();
         bagBox.AddChild(footer);

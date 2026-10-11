@@ -184,6 +184,7 @@ public partial class World
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             Texture = itemId != 0 ? ItemData.Icon(itemId) : null,
         };
+        if (itemId != 0) UpgradeBadge.Show(icon, itemId);
         hb.AddChild(icon);
 
         var slotLabel = UiTheme.Text(label, 10, UiTheme.TextDim);

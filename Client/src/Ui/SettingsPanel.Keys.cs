@@ -12,6 +12,11 @@ public partial class SettingsPanel : CanvasLayer
     private readonly List<(BindGroup Group, string Label, Control Row)> _bindRows = new();
     private readonly Dictionary<BindGroup, Control> _bindHeaders = new();
     private KeyAction? _capturing;
+    private Key _heldModifier = Key.None;
+    private bool _comboAfterModifier;
+    private readonly HashSet<KeyAction> _taken = new();
+    private Label _bindNotice = null!;
+    private static readonly Color TakenKeyColour = new("e0574a");
 
     private void BuildKeysTab(VBoxContainer vb)
     {
@@ -25,6 +30,10 @@ public partial class SettingsPanel : CanvasLayer
         hint.AddThemeFontSizeOverride("font_size", 12);
         hint.AddThemeColorOverride("font_color", new Color(0.72f, 0.74f, 0.78f));
         vb.AddChild(hint);
+        _bindNotice = new Label { Visible = false, AutowrapMode = TextServer.AutowrapMode.WordSmart };
+        _bindNotice.AddThemeFontSizeOverride("font_size", 12);
+        _bindNotice.AddThemeColorOverride("font_color", TakenKeyColour);
+        vb.AddChild(_bindNotice);
 
         var filter = new LineEdit { PlaceholderText = "Search actions…", Name = "bind_filter" };
         Ui.StyleField(filter);
@@ -52,6 +61,8 @@ public partial class SettingsPanel : CanvasLayer
         {
             CancelCapture();
             KeyBinds.Reset();
+            _taken.Clear();
+            _bindNotice.Visible = false;
             RefreshBindButtons();
         };
         vb.AddChild(reset);
@@ -114,7 +125,32 @@ public partial class SettingsPanel : CanvasLayer
     {
         CancelCapture();
         _capturing = action;
-        if (_bindButtons.TryGetValue(action, out var button)) button.Text = "Press a key…";
+        _heldModifier = Key.None;
+        _comboAfterModifier = false;
+        if (_bindButtons.TryGetValue(action, out var button))
+            button.Text = KeyBinds.IsHold(action) ? "Press a key or a modifier…" : "Press a key…";
+    }
+
+    private bool CaptureModifierRelease(InputEventKey key)
+    {
+        if (_capturing is not { } action || key.Pressed || key.Keycode != _heldModifier) return false;
+        bool bare = !_comboAfterModifier && KeyBinds.IsHold(action);
+        _heldModifier = Key.None;
+        if (!bare) return true;
+        _capturing = null;
+        Bind(action, new KeyChord(key.Keycode, false, false, false));
+        return true;
+    }
+
+    private void Bind(KeyAction action, KeyChord chord)
+    {
+        var taken = KeyBinds.Set(action, chord);
+        _taken.Remove(action);
+        foreach (var other in taken) _taken.Add(other);
+        _bindNotice.Visible = taken.Count > 0;
+        if (taken.Count > 0)
+            _bindNotice.Text = $"{chord.Text} was taken from {string.Join(", ", taken.ConvertAll(KeyBinds.LabelOf))}, which is unbound now.";
+        RefreshBindButtons();
     }
 
     private void CancelCapture()
@@ -127,17 +163,22 @@ public partial class SettingsPanel : CanvasLayer
     private bool CaptureBindKey(InputEventKey key)
     {
         if (_capturing is not { } action) return false;
-        if (key.Keycode is Key.Ctrl or Key.Shift or Key.Alt or Key.Meta) return true;
+        if (key.Keycode is Key.Ctrl or Key.Shift or Key.Alt or Key.Meta)
+        {
+            _heldModifier = key.Keycode;
+            _comboAfterModifier = false;
+            return true;
+        }
 
         _capturing = null;
+        _comboAfterModifier = true;
         if (key.Keycode == Key.Escape)
         {
             ShowBinding(action);
             return true;
         }
 
-        KeyBinds.Set(action, KeyChord.From(key));
-        RefreshBindButtons();
+        Bind(action, KeyChord.From(key));
         return true;
     }
 
@@ -152,7 +193,7 @@ public partial class SettingsPanel : CanvasLayer
         var chord = KeyBinds.Get(action);
         button.Text = chord.Text;
         button.AddThemeColorOverride("font_color",
-            chord.Assigned ? UiTheme.TextHi : new Color(0.55f, 0.55f, 0.58f));
+            _taken.Contains(action) ? TakenKeyColour : chord.Assigned ? UiTheme.TextHi : new Color(0.55f, 0.55f, 0.58f));
     }
 
     private sealed partial class BindButton : Button

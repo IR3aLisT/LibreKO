@@ -30,14 +30,11 @@ public partial class World
     private const string ClanMsgNoticeAuthority = "You don't have the authorization.";
     private const string ClanMsgNoticeName = "Please confirm the exact character ID.";
     private const string ClanMsgCommandUnavailable = "This command cannot be used.";
-    private const string ClanMsgHandoverAuthority = "You don't have the authority to change leadership.";
-    private const string ClanMsgHandoverNoVice = "There is no Co-leader authorized to change leadership.";
-    private const string ClanMsgHandoverFailed = "You failed to pass on the leadership.";
     private const string ClanMsgAllianceFailed = "Failed to make an alliance.";
     private const string ClanMsgPointsOnlyAccredited = "Accredited Knights Grade 5 or above can save-up Contribution.";
     private const string ClanMsgLeaveConfirm = "Do you really want to withdraw from the clan?";
 
-    internal enum ClanTab { Members, Points, Union }
+    internal enum ClanTab { Members, Points, Union, Top }
 
     private VBoxContainer _clanContent = null!;
     private VBoxContainer _clanMineBox = null!, _clanJoinBox = null!;
@@ -46,7 +43,7 @@ public partial class World
     private HBoxContainer _clanNoticeRow = null!;
     private LineEdit _clanNoticeEdit = null!;
     private VBoxContainer _clanList = null!;
-    private Button _clanLeaveBtn = null!, _clanSaveBtn = null!, _clanAllianceBtn = null!;
+    private Button _clanLeaveBtn = null!, _clanSaveBtn = null!, _clanAllianceBtn = null!, _clanHandoverBtn = null!;
     private readonly Dictionary<ClanTab, Button> _clanTabButtons = new();
     private ClanTab _clanTab = ClanTab.Members;
     private bool _clanLoaded;
@@ -82,6 +79,7 @@ public partial class World
         Net.I.ClanHandoverListEvent += OnClanHandoverList;
         Net.I.ClanHandoverEvent += OnClanHandover;
         Net.I.ClanFameEvent += OnClanFame;
+        Net.I.AuthorityFameEvent += OnAuthorityFame;
         Net.I.RemovedFromClanEvent += OnRemovedFromClan;
         Net.I.ClanMemberPresenceEvent += OnClanMemberPresence;
         Net.I.ClanStandingEvent += OnClanStanding;
@@ -108,6 +106,7 @@ public partial class World
         Net.I.ClanHandoverListEvent -= OnClanHandoverList;
         Net.I.ClanHandoverEvent -= OnClanHandover;
         Net.I.ClanFameEvent -= OnClanFame;
+        Net.I.AuthorityFameEvent -= OnAuthorityFame;
         Net.I.RemovedFromClanEvent -= OnRemovedFromClan;
         Net.I.ClanMemberPresenceEvent -= OnClanMemberPresence;
         Net.I.ClanStandingEvent -= OnClanStanding;
@@ -204,9 +203,13 @@ public partial class World
         var cardMargin = new MarginContainer();
         UiTheme.Margins(cardMargin, 10, 8, 10, 8);
         card.AddChild(cardMargin);
-        var cardCol = new VBoxContainer();
+        var cardRow = new HBoxContainer();
+        cardRow.AddThemeConstantOverride("separation", 10);
+        cardMargin.AddChild(cardRow);
+        cardRow.AddChild(BuildClanCardMark());
+        var cardCol = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         cardCol.AddThemeConstantOverride("separation", 2);
-        cardMargin.AddChild(cardCol);
+        cardRow.AddChild(cardCol);
 
         _clanNameLbl = UiTheme.Text("", 17, UiTheme.GoldBright);
         cardCol.AddChild(_clanNameLbl);
@@ -216,6 +219,7 @@ public partial class World
         cardCol.AddChild(_clanDutyLbl);
         _clanFundLbl = UiTheme.Text("", 12, UiTheme.Gold);
         cardCol.AddChild(_clanFundLbl);
+        cardRow.AddChild(BuildClanSymbolButton());
 
         _clanMineBox.AddChild(UiTheme.SectionTitle("Notice"));
 
@@ -242,7 +246,7 @@ public partial class World
         var tabs = new HBoxContainer();
         tabs.AddThemeConstantOverride("separation", 2);
         _clanMineBox.AddChild(tabs);
-        foreach (var tab in new[] { ClanTab.Members, ClanTab.Points, ClanTab.Union })
+        foreach (var tab in new[] { ClanTab.Members, ClanTab.Points, ClanTab.Union, ClanTab.Top })
         {
             var which = tab;
             var button = UiTheme.TopTabButton(ClanTabName(tab), 12);
@@ -275,7 +279,16 @@ public partial class World
         _clanAllianceBtn.Pressed += OnAllianceButton;
         actions.AddChild(_clanAllianceBtn);
 
+        var board = new Button { Text = "Recruitment Board", FocusMode = Control.FocusModeEnum.None };
+        board.Pressed += OpenClanBoard;
+        actions.AddChild(board);
+
         actions.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+
+        _clanHandoverBtn = new Button { Text = "Hand over", FocusMode = Control.FocusModeEnum.None,
+            TooltipText = "Pass the leadership to a vice-chief" };
+        _clanHandoverBtn.Pressed += () => RequestClanHandover("");
+        actions.AddChild(_clanHandoverBtn);
 
         _clanLeaveBtn = new Button { FocusMode = Control.FocusModeEnum.None };
         _clanLeaveBtn.Pressed += OnLeaveClan;
@@ -297,6 +310,9 @@ public partial class World
         how.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         how.CustomMinimumSize = new Vector2(1, 0);
         _clanJoinBox.AddChild(how);
+        var board = new Button { Text = "Clan Recruitment Board", FocusMode = Control.FocusModeEnum.None };
+        board.Pressed += OpenClanBoard;
+        _clanJoinBox.AddChild(board);
     }
 
     private static VBoxContainer ClanScroll(VBoxContainer parent, int height)
@@ -311,7 +327,28 @@ public partial class World
         var list = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         list.AddThemeConstantOverride("separation", 3);
         scroll.AddChild(list);
+        void Fit()
+        {
+            if (!GodotObject.IsInstanceValid(scroll) || !scroll.IsVisibleInTree() || FindHudWindow(scroll) is not { } window) return;
+            float overflow = window.GetGlobalRect().End.Y - (scroll.GetViewportRect().Size.Y - ClanListScreenMargin);
+            float target = Mathf.Clamp(scroll.CustomMinimumSize.Y - overflow, ClanListMinHeight, height);
+            if (!Mathf.IsEqualApprox(target, scroll.CustomMinimumSize.Y)) scroll.CustomMinimumSize = new Vector2(1, target);
+        }
+        void QueueFit() => Callable.From(Fit).CallDeferred();
+        scroll.VisibilityChanged += QueueFit;
+        scroll.TreeEntered += () => scroll.GetViewport().SizeChanged += QueueFit;
+        scroll.TreeExiting += () => scroll.GetViewport().SizeChanged -= QueueFit;
         return list;
+    }
+
+    private const float ClanListScreenMargin = 8f;
+    private const float ClanListMinHeight = 96f;
+
+    private static HudWindow? FindHudWindow(Node node)
+    {
+        for (var at = node.GetParent(); at != null; at = at.GetParent())
+            if (at is HudWindow window) return window;
+        return null;
     }
 
     private void EnsureClanLoaded()
@@ -329,6 +366,7 @@ public partial class World
         {
             case ClanTab.Members: Net.I.SendClanMembersRequest(); break;
             case ClanTab.Points: Net.I.SendClanMembersRequest(); Net.I.SendClanDonationList(); break;
+            case ClanTab.Top: Net.I.SendClanTop10(); break;
             default: Net.I.SendAllianceList(); break;
         }
     }
@@ -336,7 +374,8 @@ public partial class World
     private void OnMyClanChanged(MyClanInfo info)
     {
         ApplyMyClan();
-        ApplySelfClan(info.InClan ? info.Name : "");
+        RefreshSelfClanLine();
+        RefreshSelfClanMark();
         if (_self != null)
             DressClanGauntlet(_self, Net.I.LastEnter.Race, info.InClan ? info.Grade : 0, info.InClan ? info.Ranking : 0);
     }
@@ -369,6 +408,7 @@ public partial class World
         _clanNoticeLbl.AddThemeColorOverride("font_color", hasNotice ? UiTheme.Gold : UiTheme.TextDim);
         _clanNoticeRow.Visible = info.IsChief;
         _clanLeaveBtn.Text = info.IsChief ? "Disband clan" : "Leave clan";
+        _clanHandoverBtn.Visible = info.IsChief;
         _clanSaveBtn.Visible = ClanTypes.AcceptsDonations(info.Flag);
         _clanAllianceBtn.Visible = info.IsChief && info.Flag >= ClanTypes.Promoted && _clanTab == ClanTab.Union;
         _clanAllianceBtn.Text = info.AllianceId > 0 ? "Leave alliance" : "Ally with target";
@@ -403,6 +443,11 @@ public partial class World
                 SetClanListHint("National points each member has saved for the clan.");
                 _clanList.AddChild(UiTheme.Text("Loading…", 12, UiTheme.TextDim));
                 Net.I.SendClanDonationList();
+                break;
+            case ClanTab.Top:
+                SetClanListHint("The leading clans of each nation.");
+                _clanList.AddChild(UiTheme.Text("Loading…", 12, UiTheme.TextDim));
+                Net.I.SendClanTop10();
                 break;
             default:
                 _clanList.AddChild(UiTheme.Text("Loading…", 12, UiTheme.TextDim));
@@ -498,9 +543,7 @@ public partial class World
             _clanMemberMenu.AddItem("Expel from clan", 6);
         }
         if (_clanMemberMenu.ItemCount <= 1) return;
-        _clanMemberMenu.ResetSize();
-        _clanMemberMenu.Position = (Vector2I)GetViewport().GetMousePosition();
-        _clanMemberMenu.Popup();
+        PopupAtCursor(_clanMemberMenu, GetViewport().GetMousePosition());
     }
 
     private void OnMemberMenuAction(long id)
@@ -513,13 +556,8 @@ public partial class World
             case 3: RequestUserInformation(_ctxMember); break;
             case 4: Net.I.SendClanPromoteVice(_ctxMember); break;
             case 5:
-            {
-                string heir = _ctxMember;
-                AskClanConfirm("Hand over leadership", "Hand over",
-                    $"Hand the clan over to {heir}? You will no longer be its chief.",
-                    () => Net.I.SendClanHandover(heir));
+                RequestClanHandover(_ctxMember);
                 break;
-            }
             case 6:
                 _clanRemoveAsk.DialogText = $"Do you really want to expel {_ctxMember}?";
                 _clanRemoveAsk.PopupCentered();
@@ -531,6 +569,7 @@ public partial class World
     {
         ClanTab.Members => "Members",
         ClanTab.Points => "Contribution",
+        ClanTab.Top => "Top 10",
         _ => "Union",
     };
 
@@ -582,10 +621,9 @@ public partial class World
 
     private void OnClanTop10(List<(int Nation, int Rank, string Name)> top)
     {
-        if (!MyClan.InClan) return;
+        if (!MyClan.InClan || _clanTab != ClanTab.Top) return;
         var target = _clanList;
         foreach (var c in target.GetChildren()) c.QueueFree();
-        target.AddChild(UiTheme.Text("Top clans", 13, UiTheme.Gold));
         if (top.Count == 0)
         {
             target.AddChild(UiTheme.Text("No ranked clans yet.", 13, UiTheme.TextDim));
@@ -713,22 +751,29 @@ public partial class World
         _ => ClanMsgCommandUnavailable,
     });
 
-    private void OnClanHandoverList(bool leader, List<string> names)
-    {
-        if (!leader) { CombatNotice(ClanMsgHandoverAuthority); return; }
-        if (names.Count == 0) CombatNotice(ClanMsgHandoverNoVice);
-    }
+    private void OnClanHandoverList(byte state, List<string> names) => ShowHandoverWindow(state, names);
 
     private void OnClanHandover(bool ok, string oldChief, string newChief)
     {
-        if (!ok) { CombatNotice(ClanMsgHandoverFailed); return; }
-        CombatNotice(string.Equals(oldChief, Net.I.LastEnter.Name, StringComparison.OrdinalIgnoreCase)
-            ? $"You have handed over leadership to {newChief}."
-            : $"{oldChief}, the leader of {MyClan.Name}, passes leadership to {newChief}.");
+        if (!ok) { CombatNotice(HandoverFailedText); return; }
+        CombatNotice(HandoverDoneText(oldChief, newChief));
         Net.I.SendClanMembersRequest();
     }
 
     private void OnRemovedFromClan() => CombatNotice(ClanMsgBanned);
+
+    private void OnAuthorityFame(int charId, byte fame)
+    {
+        if (charId == _myId)
+        {
+            RefreshSelfClanLine();
+            return;
+        }
+        if (!_ents.TryGetValue(charId, out var famed)) return;
+        famed.ClanFame = fame;
+        RefreshClanLine(famed, charId);
+        RefreshRankAuraFor(charId, _stealthIds.Contains(charId));
+    }
 
     private void OnClanFame(int charId, int clanId, byte fame)
     {
@@ -741,6 +786,11 @@ public partial class World
         }
 
         if (clanId == 0) { OnEntityClanCleared(charId); return; }
+        if (_ents.TryGetValue(charId, out var famed))
+        {
+            famed.ClanFame = fame;
+            RefreshRankAuraFor(charId, _stealthIds.Contains(charId));
+        }
         for (int i = 0; i < _clanMembers.Count; i++)
         {
             if (!_ents.TryGetValue(charId, out var ent) || !string.Equals(_clanMembers[i].Name, ent.Name, StringComparison.OrdinalIgnoreCase))
@@ -787,7 +837,9 @@ public partial class World
         ent.KnightsId = clanId;
         ent.ClanGrade = grade;
         ent.ClanRanking = ranking;
-        ent.Plate?.SetClan(name);
+        ent.ClanName = name;
+        ent.ClanFame = fame;
+        RefreshClanLine(charId);
         if (capeId >= 0)
         {
             ent.CapeId = capeId; ent.CapeR = colour & 0xFF; ent.CapeG = (colour >> 8) & 0xFF; ent.CapeB = (colour >> 16) & 0xFF;
@@ -804,8 +856,12 @@ public partial class World
         ent.KnightsId = 0;
         ent.ClanGrade = 0;
         ent.ClanRanking = 0;
+        ent.ClanName = "";
+        ent.ClanFlag = 0;
+        ent.Plate?.SetMark(null);
         ent.CapeId = 0;
-        ent.Plate?.SetClan("");
+        ent.ClanFame = ClanRanks.None;
+        RefreshClanLine(charId);
         DressCape(ent.Body, 0, 0, 0, 0, ent.IsGm, ent.Race);
         DressClanGauntlet(ent.Body, ent.Race, 0, 0);
         if (wasMine && ClanPageVisible) Net.I.SendClanMembersRequest();

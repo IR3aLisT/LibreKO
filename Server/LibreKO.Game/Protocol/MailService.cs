@@ -78,7 +78,7 @@ public class MailService(
             return;
         }
 
-        var firstRead = mail.ReadAt == null;
+        bool firstRead = mail.ReadAt == null;
         if (firstRead)
         {
             mail.ReadAt = DateTime.UtcNow;

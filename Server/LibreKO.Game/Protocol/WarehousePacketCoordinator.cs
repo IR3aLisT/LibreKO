@@ -1,5 +1,6 @@
 ﻿using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
+using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.World;
 using Microsoft.Extensions.Logging;
@@ -113,11 +114,17 @@ public class WarehousePacketCoordinator(
             return;
         }
 
+        var duplicate = false;
         var success = session.WithLock(s =>
         {
             var source = s.Inventory[absSrc];
             if (source.ItemId != itemId || source.Count < count || source.IsLinked)
                 return false;
+            if (source.State == ItemFlag.Duplicate)
+            {
+                duplicate = true;
+                return false;
+            }
 
             var destination = s.Warehouse[realDst];
             if (!CanMergeOrPlace(itemData, destination, itemId, count))
@@ -140,7 +147,10 @@ public class WarehousePacketCoordinator(
             return true;
         });
 
-        await session.Client.SendPacket(WarehousePacketWriter.Result(WarehouseSubOpcode.Input, success ? WarehousePacketWriter.Succeeded : WarehousePacketWriter.Failed));
+        await session.Client.SendPacket(WarehousePacketWriter.Result(WarehouseSubOpcode.Input,
+            success ? WarehousePacketWriter.Succeeded
+            : duplicate ? WarehousePacketWriter.DuplicateItem
+            : WarehousePacketWriter.Failed));
         if (success)
             await userNotificationService.SendWeightChangeAsync(session);
     }
@@ -300,7 +310,7 @@ public class WarehousePacketCoordinator(
         await session.Client.SendPacket(WarehousePacketWriter.Result(WarehouseSubOpcode.InventoryMove, moved ? WarehousePacketWriter.Succeeded : WarehousePacketWriter.Failed));
     }
 
-    private static bool Storable(ItemData itemData) =>
+    internal static bool Storable(ItemData itemData) =>
         itemData.Race != NonStorableRace
         && itemData.Race is < VaultTicketRaceFirst or > VaultTicketRaceLast
         && itemData.Num is < NonStorableIdFirst or > NonStorableIdLast;

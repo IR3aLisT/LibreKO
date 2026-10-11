@@ -1,31 +1,33 @@
 ﻿using System.Collections.Generic;
 using Godot;
+using LibreKO.Domain;
 using LibreKO.Network;
 
 namespace LibreKO;
 
 public partial class World
 {
-    private readonly HashSet<int> _stealthedIds = new();
     private readonly HashSet<int> _sittingIds = new();
     private readonly HashSet<int> _stanceIds = new();
     private readonly Dictionary<int, Node3D> _sleepFx = new();
+    private readonly Dictionary<int, Node3D> _warPointFx = new();
     private bool _selfSitting;
     private bool _selfSitVisual;
     private bool _sitRequestPending;
 
     private void StateVisualForgetEntity(int id)
     {
-        _stealthedIds.Remove(id);
         _sittingIds.Remove(id);
         _stanceIds.Remove(id);
         ApplySleepState(id, false);
+        ApplyWarPoint(id, false);
+        _devilForms.Remove(id);
     }
 
-    private const float StealthAlpha = 0.18f;
     private const float SitDrop = 0.42f;
     private const float SitTiltDeg = -14f;
     private const int SleepFxId = 13042;
+    private const int WarPointFxId = 34001;
     private const float SleepFxLift = 0.4f;
 
     private void StateVisualInit()
@@ -48,11 +50,54 @@ public partial class World
                 else
                     ApplySitState(charId, value == UserPose.Sitting);
                 break;
-            case StateChange.Abnormal: ApplyTransformState(charId, value); break;
             case StateChange.Transformation: ApplyTransformState(charId, value); break;
-            case StateChange.Stealth: ApplyStealthState(charId, value); break;
+            case StateChange.NeedParty: ApplySeekingParty(charId, (byte)value); break;
+            case StateChange.PartyLeader: ApplyPartyLeader(charId, value != 0); break;
             case StateChange.CombatStance: ApplyCombatStanceState(charId, value != StateChange.StanceRelaxed); break;
+            case StateChange.Action: ApplyGesture(charId, value); break;
+            case StateChange.WarPoint: ApplyWarPoint(charId, value != 0); break;
+            case StateChange.DevilForm: ApplyDevilForm(charId, value != 0); break;
+            case StateChange.ExpeditionSide: ApplyExpeditionName(); break;
         }
+    }
+
+    private void ApplyWarPoint(int charId, bool on)
+    {
+        if (_warPointFx.Remove(charId, out var running) && IsInstanceValid(running))
+            running.QueueFree();
+        Node3D? body = charId == _myId ? _self : _ents.TryGetValue(charId, out var e) ? e.Body : null;
+        if (!on || body == null || !IsInstanceValid(body) || Fx.NameForId(WarPointFxId) is not { } fxName) return;
+        if (Fx.Spawn(fxName, body, Vector3.Zero) is { } fx) _warPointFx[charId] = fx;
+    }
+
+    private void ApplyExpeditionName()
+    {
+        if (Net.I.LastEnter.Zone != StatePlates.ExpeditionZone || Net.I.SelfExpeditionSide == Net.NoExpeditionSide) return;
+        int text = StatePlates.ExpeditionNameText(Net.I.SelfExpeditionSide);
+        SelfPlate()?.SetNameText(text > 0 ? ItemData.Text(text, "") : "");
+    }
+
+    private void ApplySelfPlateState()
+    {
+        SelfPlate()?.SetTitle(TitleTextOf(Net.I.DisplayTitleId));
+        ApplyExpeditionName();
+        ApplySelfZoneName();
+    }
+
+    private static readonly Color SeekingPartyColour = new(0f, 1f, 0f);
+
+    private void ApplyPartyLeader(int charId, bool leader)
+    {
+        var plate = charId == _myId ? SelfPlate() : _ents.TryGetValue(charId, out var e) ? e.Plate : null;
+        plate?.SetLeader(leader);
+    }
+
+    private void ApplySeekingParty(int charId, byte state)
+    {
+        bool self = charId == _myId;
+        var plate = self ? SelfPlate() : _ents.TryGetValue(charId, out var e) ? e.Plate : null;
+        int level = self ? Sheet.Level : _ents.TryGetValue(charId, out var who) ? who.Level : 0;
+        plate?.SetSeeking(SeekingParty.Line(state, level, ItemData.Text) ?? "", SeekingPartyColour);
     }
 
     private void ApplySleepState(int charId, bool asleep)
@@ -86,11 +131,19 @@ public partial class World
         e.Clip = null;
     }
 
+    private const double SitToggleInterval = 3.0;
+    private double _sitToggledAt = double.NegativeInfinity;
+
     private void ToggleSitting()
     {
         if (_selfDead || _sitRequestPending) return;
+        bool sitDown = !_selfSitting;
+        double now = Now();
+        if (now - _sitToggledAt < SitToggleInterval) return;
+        if (sitDown && (_selfMoving || SelfCasting(now))) return;
+        _sitToggledAt = now;
         _sitRequestPending = true;
-        Net.I.SendSitting(!_selfSitting);
+        Net.I.SendSitting(sitDown);
     }
 
     private void ApplySitState(int charId, bool sitting)
@@ -133,13 +186,14 @@ public partial class World
         e.Clip = null;
         if (sitting) e.Hover = ResolveHoverClips(e.Body, e.Anim);
 
-        if (e.NameTag != null && GodotObject.IsInstanceValid(e.NameTag))
+        if (e.NameTag != null && GodotObject.IsInstanceValid(e.NameTag) && !e.Head.Follows)
         {
             var tagPos = e.NameTag.Position;
             tagPos.Y = sitting && e.Hover == null
                 ? SittingNameTagHeight
                 : (e.OriginalTagY > 0 ? e.OriginalTagY : StandingNameTagHeight);
-            e.NameTag.Position = tagPos;
+            if (e.Plate != null) e.Plate.MoveTo(tagPos);
+            else e.NameTag.Position = tagPos;
         }
 
         var posture = sitting ? e.Hover?.Start ?? SitDownClips : e.Hover?.End ?? StandUpClips;
@@ -164,11 +218,12 @@ public partial class World
 
         if (sitting && _selfSitVisual != sitting) _selfHover = ResolveHoverClips(_self, _selfAnim);
 
-        if (_selfNameTag != null && GodotObject.IsInstanceValid(_selfNameTag))
+        if (_selfNameTag != null && GodotObject.IsInstanceValid(_selfNameTag) && !_selfHead.Follows)
         {
             var tagPos = _selfNameTag.Position;
             tagPos.Y = sitting && _selfHover == null ? SittingNameTagHeight : StandingSelfNameTagHeight;
-            _selfNameTag.Position = tagPos;
+            if (SelfPlate() is { } plate) plate.MoveTo(tagPos);
+            else _selfNameTag.Position = tagPos;
         }
 
         if (!GodotObject.IsInstanceValid(_selfVisual)) return;
@@ -218,10 +273,15 @@ public partial class World
     private void ApplyTransformState(int charId, int skillId)
     {
         bool ending = skillId <= 0;
+        if (ZoneLookHolds(charId))
+        {
+            if (charId == _myId) HoldSelfTransform(ending ? 0 : skillId);
+            return;
+        }
 
         if (ending)
         {
-            RestoreOwnLook(charId);
+            RestoreLookOrZoneLook(charId);
             return;
         }
 
@@ -234,10 +294,13 @@ public partial class World
     private Node3D? TransformHost(int charId) =>
         charId == _myId ? _selfBody : _ents.TryGetValue(charId, out var e) ? e.Body : null;
 
+    private bool IsWearingTransformLook(int charId) =>
+        TransformHost(charId)?.GetNodeOrNull<Node3D>(TransformNodeName) != null;
+
     private void RearmWornLook(Node3D host, int[]? gear)
     {
         if (host.GetNodeOrNull<Node3D>(TransformNodeName) is { } worn)
-            AttachWeapons(worn, gear);
+            AttachWeapons(worn, WornGear(worn, gear));
     }
 
     private static Node3D? WornLookOf(Node3D body)
@@ -301,39 +364,45 @@ public partial class World
 
     private void DressSelfLook()
     {
-        RerenderSelfEquipment();
+        RerenderSelfEquipment(force: true);
         DressSelfCape();
         DressClanGauntlet(_self, _selfRace, MyClan.InClan ? MyClan.Grade : 0, MyClan.InClan ? MyClan.Ranking : 0);
     }
 
     private void DressEntityLook(Ent e)
     {
-        RedressEntity(e);
+        RedressEntity(e, force: true);
         DressCape(e.Body, e.CapeId, e.CapeR, e.CapeG, e.CapeB, e.IsGm, e.Race);
         DressClanGauntlet(e.Body, e.Race, e.ClanGrade, e.ClanRanking);
     }
 
-    private void WearMonsterLook(int charId, int skillId)
+    private void WearMonsterLook(int charId, int skillId, float? scale = null, int fixedWeapon = 0)
     {
-        var host = TransformHost(charId);
-        if (host == null) return;
-
         var skill = SkillData.Get(skillId);
         if (skill == null || skill.TransformModelId <= 0) return;
+        WearLook(charId, skill.TransformModelId, scale ?? skill.TransformScale, skillId, fixedWeapon, skill);
+    }
 
-        var scene = ResolveMobScene(skill.TransformModelId);
+    private Node3D? WearLook(int charId, int modelId, float scale, int skillId, int fixedWeapon, SkillData.Skill? skill)
+    {
+        var host = TransformHost(charId);
+        if (host == null) return null;
+
+        var scene = ResolveMobScene(modelId);
         if (scene == null)
         {
-            GD.Print($"[transform] no baked model for {skill.TransformModelId} (skill {skillId})");
-            return;
+            GD.Print($"[transform] no baked model for {modelId} (skill {skillId})");
+            return null;
         }
 
-        RestoreOwnLook(charId);
+        RestoreOwnLook(charId, endingTransform: false);
 
         int race = charId == _myId ? _selfRace : _ents.TryGetValue(charId, out var wearer) ? wearer.Race : 0;
-        var (monster, anim) = MakeAnimatedEntity(scene, "", skill.TransformScale);
+        var (monster, anim) = MakeAnimatedEntity(scene, "", scale);
         monster.Name = TransformNodeName;
-        monster.SetMeta(WornAccessoriesMeta, WearsAccessories(skill, host, race, monster));
+        AdoptWornPlate(monster);
+        monster.SetMeta(WornAccessoriesMeta, skill != null && WearsAccessories(skill, host, race, monster));
+        if (fixedWeapon > 0) monster.SetMeta(FixedWeaponMeta, fixedWeapon);
         host.AddChild(monster);
 
         if (charId == _myId)
@@ -346,6 +415,7 @@ public partial class World
         }
         else if (_ents.TryGetValue(charId, out var e))
         {
+            e.TransformSkill = skillId;
             e.RigAnim ??= e.Anim;
             e.Anim = anim;
             e.Clip = null;
@@ -353,9 +423,12 @@ public partial class World
         }
 
         SetOwnLookVisible(host, false);
+        ReapplySizeState(charId);
+        FitPlateToLook(charId);
+        return monster;
     }
 
-    private void RestoreOwnLook(int charId)
+    private void RestoreOwnLook(int charId, bool endingTransform = true)
     {
         var host = TransformHost(charId);
         if (host == null) return;
@@ -366,17 +439,20 @@ public partial class World
         host.RemoveChild(worn);
         worn.QueueFree();
         SetOwnLookVisible(host, true);
+        ReapplySizeState(charId);
+        FitPlateToLook(charId);
 
         if (charId == _myId)
         {
             if (_selfRigAnim != null) { _selfAnim = _selfRigAnim; _selfRigAnim = null; }
             _selfClip = null;
-            DropBuffChip(_selfTransformSkill);
+            if (endingTransform) DropBuffChip(_selfTransformSkill);
             _selfTransformSkill = 0;
             DressSelfLook();
         }
         else if (_ents.TryGetValue(charId, out var e))
         {
+            e.TransformSkill = 0;
             if (e.RigAnim != null) { e.Anim = e.RigAnim; e.RigAnim = null; }
             e.Clip = null;
             DressEntityLook(e);
@@ -395,42 +471,6 @@ public partial class World
                 model.Visible = visible;
             else if (node.Name == ModelNodeName)
                 node.Visible = visible;
-        }
-    }
-
-
-
-    private void ApplyStealthState(int charId, int value)
-    {
-        bool stealth = value != 0;
-        if (stealth ? !_stealthedIds.Add(charId) : !_stealthedIds.Remove(charId))
-            return;
-        if (value == Net.InvisibilityInfiltration)
-            return;
-
-        if (charId == _myId)
-            CombatNotice(stealth ? "You vanish into stealth." : "You return to sight.");
-
-        if (_ents.TryGetValue(charId, out var ent) && GodotObject.IsInstanceValid(ent.Body))
-            SetBodyAlpha(ent.Body, stealth ? StealthAlpha : 1f);
-    }
-
-    private static void SetBodyAlpha(Node3D body, float alpha)
-    {
-        foreach (var node in Descendants(body))
-        {
-            if (node is not GeometryInstance3D gi) continue;
-            Fx.SetTransparency(gi, Mathf.Clamp(1f - alpha, 0f, 1f));
-        }
-    }
-
-    private static IEnumerable<Node> Descendants(Node root)
-    {
-        foreach (var child in root.GetChildren())
-        {
-            yield return child;
-            foreach (var d in Descendants(child))
-                yield return d;
         }
     }
 }

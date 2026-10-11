@@ -1403,7 +1403,12 @@ public class CharacterTests : GameTestBase
         var viewerClient = Substitute.For<IClient>();
         viewerClient.Id.Returns(Guid.NewGuid());
         Packet? viewerPacket = null;
-        viewerClient.SendPacket(Arg.Do<Packet>(packet => viewerPacket = packet), Arg.Any<CancellationToken>())
+        viewerClient.SendPacket(
+                Arg.Do<Packet>(packet =>
+                {
+                    if (packet.GetOpcode() == (byte)GameOpcodes.GS_USER_INOUT) viewerPacket = packet;
+                }),
+                Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
         var viewer = sessionManager.CreateSession(viewerClient, characterId: 9001, accountId: 9002);

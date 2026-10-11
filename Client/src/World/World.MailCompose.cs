@@ -300,6 +300,7 @@ public partial class World
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
+            UpgradeBadge.Show(icon, slot.ItemId);
             row.AddChild(icon);
             row.MoveChild(icon, 0);
             if (slot.Count > 1)

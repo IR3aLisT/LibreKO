@@ -21,7 +21,7 @@ internal static class FxParticleMaterial
             shader = new Shader { Code = "shader_type spatial;\n"
                 + $"render_mode {FxShading.RenderModes(key.Item2, noDepthTest)};\n"
                 + (layers ? "uniform sampler2DArray texture_albedo" : "uniform sampler2D texture_albedo")
-                + " : filter_linear, repeat_enable;\nuniform float fx_blend;\n" + FxShading.Header() + VertexCode
+                + " : filter_linear_mipmap, repeat_enable;\nuniform float fx_blend;\n" + FxShading.Header() + VertexCode
                 + "\nvoid fragment() {\n    vec4 fx_out = fx_shade("
                 + (layers ? "texture(texture_albedo, vec3(UV, texture_layer))" : "texture(texture_albedo, UV)")
                 + $", COLOR, fx_blend, fx_clip, CAMERA_VISIBLE_LAYERS, {FxShading.DepthTested(noDepthTest)});\n"
@@ -34,7 +34,7 @@ internal static class FxParticleMaterial
         mat.SetShaderParameter("particle_lifetime", lifetime);
         mat.SetShaderParameter("fade_in", hasColorRamp ? 0f : Fx.ReadF(p, "fadeIn"));
         mat.SetShaderParameter("fade_out", hasColorRamp ? 0f : Fx.ReadF(p, "fadeOut"));
-        mat.SetShaderParameter("roll_rate", Fx.ReadF(p, "rollRate"));
+        mat.SetShaderParameter("roll_rate", Fx.ReadRollRate(p));
         var growth = p["sizeVel"].AsGodotArray();
         mat.SetShaderParameter("size_velocity", new Vector2((float)growth[0].AsDouble(), (float)growth[1].AsDouble()));
         bool fixedY = p.ContainsKey("velAlign") && p["velAlign"].AsBool();
@@ -142,6 +142,7 @@ void process() {
             image.Convert(Image.Format.Rgba8);
             if (image.GetWidth() != first.GetWidth() || image.GetHeight() != first.GetHeight())
                 image.Resize(first.GetWidth(), first.GetHeight());
+            image.GenerateMipmaps();
             images.Add(image);
         }
         var sequence = new Texture2DArray();

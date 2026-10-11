@@ -4,7 +4,6 @@ using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.World;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using LibreKO.Game.Protocol.Writers;
 
@@ -19,13 +18,16 @@ public interface INationSystemsPacketCoordinator
 }
 
 public class NationSystemsPacketCoordinator(
-    IServiceProvider serviceProvider,
     SessionManager sessionManager,
     IGameDataService gameDataService,
     IKingElectionPacketService kingElectionPacketService,
     IKingGovernancePacketService kingGovernancePacketService,
     IBifrostEventService bifrostEventService,
+    IBorderDefenseWarService borderDefenseWarService,
+    IChaosDungeonService chaosDungeonService,
     EventSchedulerService eventSchedulerService,
+    INationRankService nationRanks,
+    ICastleSiegeService castleSiegeService,
     ILogger<NationSystemsPacketCoordinator> logger) : INationSystemsPacketCoordinator
 {
     public async Task HandleBifrostAsync(IClient client, Packet packet)
@@ -71,46 +73,50 @@ public class NationSystemsPacketCoordinator(
 
         var response = rankType switch
         {
-            RankTypePkZone => await BuildPkZoneRankAsync(session, rankType),
-            RankTypeBorderDefenseWar => RankPacketWriter.BorderDefenseWar(rankType),
-            RankTypeChaosDungeon => RankPacketWriter.ChaosDungeon(rankType),
+            RankTypePkZone => BuildPkZoneRank(session, rankType),
+            RankTypeBorderDefenseWar => borderDefenseWarService.BuildRanking(session, rankType),
+            RankTypeChaosDungeon => chaosDungeonService.BuildRanking(session, rankType),
             _ => RankPacketWriter.Unsupported(rankType),
         };
         await session.Client.SendPacket(response);
     }
 
-    private async Task<Packet> BuildPkZoneRankAsync(UserSession session, byte rankType)
+    private Packet BuildPkZoneRank(UserSession session, byte rankType)
     {
-        using var scope = serviceProvider.CreateScope();
-        var characterRepo = scope.ServiceProvider.GetRequiredService<ICharacterRepository>();
-
-        var karusTop = await characterRepo.GetTopByLoyalty(AccountNation.Karus, PkZoneTopCount);
-        var elmoradTop = await characterRepo.GetTopByLoyalty(AccountNation.ElMorad, PkZoneTopCount);
-        var myRank = await characterRepo.GetLoyaltyRank(session.Nation, session.DailyLoyalty);
+        var karus = ZoneLadder(session, AccountNation.Karus);
+        var elmorad = ZoneLadder(session, AccountNation.ElMorad);
+        var own = session.Nation == AccountNation.Karus ? karus : elmorad;
+        var myRank = own.FindIndex(entry => entry.CharacterId == session.CharacterId) + 1;
 
         return RankPacketWriter.PkZone(
             rankType,
-            ToRankEntries(karusTop),
-            ToRankEntries(elmoradTop),
+            karus.Take(PkZoneTopCount).Select(ToRankEntry).ToList(),
+            elmorad.Take(PkZoneTopCount).Select(ToRankEntry).ToList(),
             (ushort)Math.Min(myRank, ushort.MaxValue),
-            session.DailyLoyalty);
+            session.DailyLoyalty,
+            RankPacketWriter.PremiumShare(session.DailyPremiumLoyalty));
     }
 
-    private List<RankPacketWriter.RankEntry> ToRankEntries(IReadOnlyList<CharacterRankRow> entries)
+    private List<UserSession> ZoneLadder(UserSession viewer, AccountNation nation) =>
+        sessionManager.GetAll()
+            .Where(s => s.Nation == nation && s.ZoneId == viewer.ZoneId && s.Room == viewer.Room)
+            .OrderByDescending(s => s.DailyLoyalty)
+            .ThenBy(s => s.CharacterId)
+            .ToList();
+
+    private RankPacketWriter.RankEntry ToRankEntry(UserSession session)
     {
-        var result = new List<RankPacketWriter.RankEntry>(entries.Count);
-        foreach (var entry in entries)
-        {
-            var clan = entry.KnightsId > 0 ? sessionManager.Knights.GetClan(entry.KnightsId) : null;
-            result.Add(new RankPacketWriter.RankEntry(
-                entry.Name,
-                (byte)entry.Nation,
-                (ushort)entry.KnightsId,
-                clan?.MarkVersion < 0 ? (ushort)0 : (ushort)(clan?.MarkVersion ?? 0),
-                clan?.Name ?? string.Empty,
-                entry.LoyaltyDaily));
-        }
-        return result;
+        var clan = session.KnightsId > 0 ? sessionManager.Knights.GetClan(session.KnightsId) : null;
+        var ranks = nationRanks.Of(session.CharacterId);
+        return new RankPacketWriter.RankEntry(
+            session.Name,
+            (byte)session.Nation,
+            clan == null ? (ushort)0 : (ushort)session.KnightsId,
+            clan == null || clan.MarkVersion < 0 ? (ushort)0 : (ushort)clan.MarkVersion,
+            clan?.Name ?? string.Empty,
+            session.DailyLoyalty,
+            RankPacketWriter.PremiumShare(session.DailyPremiumLoyalty),
+            Math.Min(ranks.Knights, ranks.Personal));
     }
 
     public async Task HandleSiegeAsync(IClient client, Packet packet)
@@ -123,7 +129,7 @@ public class NationSystemsPacketCoordinator(
         switch (opcode)
         {
             case SiegePacketConstants.BaseCreate: await HandleSiegeBaseCreateAsync(session, ReadSubType(packet)); break;
-            case SiegePacketConstants.CastleFlag: await HandleSiegeCastleFlagAsync(session); break;
+            case SiegePacketConstants.CastleFlag: await session.Client.SendPacket(castleSiegeService.StatusPacket()); break;
             case SiegePacketConstants.WarfareNpc: await HandleWarfareNpcAsync(session, packet); break;
             case SiegePacketConstants.CastleManager: await HandleCastleManagerAsync(session, packet); break;
             case SiegePacketConstants.Rank: await HandleSiegeRankAsync(session, ReadSubType(packet)); break;
@@ -136,23 +142,6 @@ public class NationSystemsPacketCoordinator(
     {
         var resp = SiegePacketWriter.Result(SiegePacketConstants.BaseCreate, subType);
         await session.Client.SendPacket(resp);
-    }
-
-    private async Task HandleSiegeCastleFlagAsync(UserSession session)
-    {
-        var siege = gameDataService.SiegeWarfare;
-        var masterId = siege?.MasterKnights ?? 0;
-        SiegePacketWriter.ClanBanner? banner = null;
-        if (masterId > 0 && sessionManager.Knights.GetClan(masterId) is { } clan)
-        {
-            banner = new SiegePacketWriter.ClanBanner(
-                (ushort)clan.Id,
-                clan.MarkVersion < 0 ? (ushort)0 : (ushort)clan.MarkVersion,
-                clan.Flag,
-                clan.Grade);
-        }
-
-        await session.Client.SendPacket(SiegePacketWriter.CastleFlag(SiegePacketConstants.CastleFlag, banner));
     }
 
     private async Task HandleWarfareNpcAsync(UserSession session, Packet packet)

@@ -20,13 +20,13 @@ public partial class World
     private const string PetTransformFailed = "The familiar could not be transformed.";
     private const string PetHatchNotSent = "Not connected. Please try again after reconnecting.";
 
-    private static readonly Dictionary<int, string> PetHatchFailures = new()
+    private static readonly Dictionary<int, int> PetHatchFailures = new()
     {
-        [1] = "Familiar hatching failed.",
-        [2] = "Invalid name.",
-        [3] = "This Familiar cannot be incubated.",
-        [4] = "Limit exceeded.",
-        [Net.PetHatchNameTakenCode] = "There has been a database creation error or the name is already in use. Please incubate again.",
+        [1] = PetLogText.HatchFailed,
+        [2] = PetLogText.InvalidName,
+        [3] = PetLogText.CannotIncubate,
+        [4] = PetLogText.LimitExceeded,
+        [Net.PetHatchNameTakenCode] = PetLogText.NameTaken,
     };
 
     private CanvasLayer _petHatchLayer = null!;
@@ -232,7 +232,7 @@ public partial class World
         {
             if (!matches(Inv[abs])) continue;
             any = true;
-            var cell = new ItemSlotView(PetPickSlotSize) { Index = abs };
+            var cell = new ItemSlotView(PetPickSlotSize) { Index = abs, Veiled = true };
             cell.Set(Inv[abs]);
             cell.Clicked += c =>
             {
@@ -327,7 +327,7 @@ public partial class World
     private void OnPetHatchFailed(int code)
     {
         _petHatchInFlight = false;
-        SetPetHatchStatus(PetHatchFailures.TryGetValue(code, out var text) ? text : PetHatchFailures[1], true);
+        SetPetHatchStatus(SystemText(PetHatchFailures.TryGetValue(code, out int text) ? text : PetLogText.HatchFailed, "Familiar hatching failed."), true);
         RefreshPetHatchUI();
     }
 

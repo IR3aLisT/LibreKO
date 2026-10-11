@@ -250,6 +250,9 @@ namespace LibreKO.Common.Migrations
                     b.Property<byte>("DrakiSubStage")
                         .HasColumnType("tinyint unsigned");
 
+                    b.Property<bool>("ExpSealOn")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<long>("Experience")
                         .HasColumnType("bigint");
 
@@ -361,6 +364,12 @@ namespace LibreKO.Common.Migrations
                         .IsRequired()
                         .HasColumnType("longblob");
 
+                    b.Property<bool>("Sealed")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<long>("SealedExperience")
+                        .HasColumnType("bigint");
+
                     b.Property<byte[]>("SkillData")
                         .IsRequired()
                         .HasColumnType("longblob");
@@ -401,6 +410,44 @@ namespace LibreKO.Common.Migrations
                         .IsUnique();
 
                     b.ToTable("Characters", (string)null);
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.DailyRankCounter", b =>
+                {
+                    b.Property<int>("CharacterId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("BlessedUpgrades")
+                        .HasColumnType("int");
+
+                    b.Property<long>("MerchantGold")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("CharacterId");
+
+                    b.ToTable("DailyRankCounters");
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.DailyRankPlace", b =>
+                {
+                    b.Property<byte>("Board")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<int>("SubjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Place")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PreviousPlace")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("RankedOn")
+                        .HasColumnType("date");
+
+                    b.HasKey("Board", "SubjectId");
+
+                    b.ToTable("DailyRankPlaces");
                 });
 
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.Friendship", b =>
@@ -1419,6 +1466,25 @@ namespace LibreKO.Common.Migrations
                     b.ToTable("ItemExchanges", (string)null);
                 });
 
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.GameData.ItemGradeBonusData", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Bonus")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ExtFile")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ExtensionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ItemGradeBonuses", (string)null);
+                });
+
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.GameData.ItemOpData", b =>
                 {
                     b.Property<int>("ItemId")
@@ -1436,6 +1502,44 @@ namespace LibreKO.Common.Migrations
                     b.HasKey("ItemId", "TriggerType", "SkillId");
 
                     b.ToTable("ItemOps", (string)null);
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.GameData.ItemSmashClassData", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Band")
+                        .HasColumnType("int");
+
+                    b.Property<int>("GradeClass")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Rolls")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ItemSmashClasses", (string)null);
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.GameData.ItemSmashRewardData", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Rate")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ItemSmashRewards", (string)null);
                 });
 
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.GameData.ItemUpgradeData", b =>
@@ -2288,6 +2392,46 @@ namespace LibreKO.Common.Migrations
                     b.HasKey("GroupNum");
 
                     b.ToTable("MakeItemGroups", (string)null);
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.GameData.MapObjectData", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Belong")
+                        .HasColumnType("int");
+
+                    b.Property<short>("ControlNpcId")
+                        .HasColumnType("smallint");
+
+                    b.Property<short>("Index")
+                        .HasColumnType("smallint");
+
+                    b.Property<byte>("Life")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<short>("Status")
+                        .HasColumnType("smallint");
+
+                    b.Property<short>("Type")
+                        .HasColumnType("smallint");
+
+                    b.Property<float>("X")
+                        .HasColumnType("float");
+
+                    b.Property<float>("Y")
+                        .HasColumnType("float");
+
+                    b.Property<float>("Z")
+                        .HasColumnType("float");
+
+                    b.Property<short>("ZoneId")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("MapObjects", (string)null);
                 });
 
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.GameData.MonsterSummonData", b =>
@@ -3714,6 +3858,24 @@ namespace LibreKO.Common.Migrations
                         .IsUnique();
 
                     b.ToTable("Pets", (string)null);
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.RankerStatueNote", b =>
+                {
+                    b.Property<int>("CharacterId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LookChangedAt")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.HasKey("CharacterId");
+
+                    b.ToTable("RankerStatueNotes");
                 });
 
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.Server", b =>

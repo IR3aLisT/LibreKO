@@ -9,6 +9,7 @@ public partial class World
     {
         public readonly int Index;
         public System.Action<int>? OnActivate;
+        public System.Action<int>? OnSecondary;
         public System.Action<MerchantCell>? OnHover;
         public System.Action? OnHoverEnd;
         public System.Action<int, int>? OnDropFrom;
@@ -93,15 +94,7 @@ public partial class World
         {
             if (DragKey.Length == 0 || Item.IsEmpty) return default;
 
-            var preview = new TextureRect
-            {
-                Texture = ItemData.Icon(Item.ItemId),
-                CustomMinimumSize = new Vector2(40, 40),
-                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            };
-            UpgradeBadge.Show(preview, Item.ItemId);
-            DragLayer.Show(this, GmItemId.Wrap(preview, Item.ItemId));
+            DragLayer.ShowItem(this, Item.ItemId, atPosition);
 
             return new Godot.Collections.Dictionary
             {
@@ -121,12 +114,16 @@ public partial class World
 
         public override void _GuiInput(InputEvent ev)
         {
-            if (OnActivate != null
-                && ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
+            if (ev is not InputEventMouseButton { Pressed: true } click) return;
+            var handler = click.ButtonIndex switch
             {
-                OnActivate(Index);
-                AcceptEvent();
-            }
+                MouseButton.Left => OnActivate,
+                MouseButton.Right => OnSecondary,
+                _ => null,
+            };
+            if (handler == null) return;
+            handler(Index);
+            AcceptEvent();
         }
     }
 

@@ -1,5 +1,6 @@
 ﻿using LibreKO.Common.Enums;
 using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.World;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,7 @@ public class WorldVisibilityService(
     SessionManager sessionManager,
     IPlayerInspectService playerInspectService,
     IMerchantLifecycleService merchantLifecycleService,
+    IGameDataService gameDataService,
     ILogger<WorldVisibilityService> logger) : IWorldVisibilityService
 {
     public async Task HandleReqUserInAsync(IClient client, Packet packet)
@@ -330,10 +332,10 @@ public class WorldVisibilityService(
 
     public async Task BroadcastDisplayTitleAsync(UserSession session)
     {
-        var packet = AchievementPacketWriter.TitleChanged(
-            session.CharacterId, session.DisplayTitleId);
-        await session.Client.SendPacket(packet);
-        await sessionManager.Regions.SendToRegion(session, packet);
+        await session.Client.SendPacket(AchievementPacketWriter.TitleChanged(
+            session.CharacterId, session.DisplayTitleId));
+        await sessionManager.Regions.SendToRegion(session, MovementPacketWriter.StateChange(
+            session.CharacterId, (byte)StateChangeType.Title, session.DisplayTitleId));
     }
 
     public async Task BroadcastUserInOutAsync(UserSession session, InOutType type)
@@ -355,6 +357,10 @@ public class WorldVisibilityService(
                 AdminPanelPacketWriter.GmFx(session.CharacterId, session.GmModeEnabled));
         if (type != InOutType.Out && session.InCombatStance)
             await sessionManager.Regions.SendToRegion(session, BuildCombatStancePacket(session));
+        if (type != InOutType.Out && session.RankAuraHidden)
+            await sessionManager.Regions.SendToRegion(session, UserOptionPacketWriter.RankAura(session.CharacterId, shown: false));
+        if (type != InOutType.Out && session.DevilForm)
+            await sessionManager.Regions.SendToRegion(session, DevilForms.Announcement(session));
     }
 
     public Task ResendUserRecordAsync(UserSession session) =>
@@ -390,6 +396,16 @@ public class WorldVisibilityService(
             {
                 var stance = BuildCombatStancePacket(session);
                 await Task.WhenAll(gainedSight.Select(u => u.Client.SendPacket(stance)));
+            }
+            if (session.RankAuraHidden)
+            {
+                var aura = UserOptionPacketWriter.RankAura(session.CharacterId, shown: false);
+                await Task.WhenAll(gainedSight.Select(u => u.Client.SendPacket(aura)));
+            }
+            if (session.DevilForm)
+            {
+                var devil = DevilForms.Announcement(session);
+                await Task.WhenAll(gainedSight.Select(u => u.Client.SendPacket(devil)));
             }
         }
 
@@ -430,6 +446,10 @@ public class WorldVisibilityService(
                 await session.Client.SendPacket(BuildCombatStancePacket(user));
             if (user.IsGM)
                 await session.Client.SendPacket(AdminPanelPacketWriter.GmFx(user.CharacterId, user.GmModeEnabled));
+            if (user.RankAuraHidden)
+                await session.Client.SendPacket(UserOptionPacketWriter.RankAura(user.CharacterId, shown: false));
+            if (user.DevilForm)
+                await session.Client.SendPacket(DevilForms.Announcement(user));
         }
 
         await SendStallsInViewAsync(session, users);
@@ -462,6 +482,7 @@ public class WorldVisibilityService(
     private UserInfoPacketWriter.UserState UserStateOf(UserSession session)
     {
         UserInfoPacketWriter.ClanState? clanState = null;
+        bool king = KingSystemRuntimeService.IsKingOf(gameDataService, session.Nation, session.Name);
         if (session.KnightsId > 0)
         {
             var clan = sessionManager.Knights.GetClan(session.KnightsId);
@@ -472,10 +493,10 @@ public class WorldVisibilityService(
                 clan?.Grade ?? 0,
                 clan?.Ranking ?? 0,
                 clan?.MarkVersion ?? 0,
-                clan?.Cape ?? 0,
-                clan?.CapeR ?? 0,
-                clan?.CapeG ?? 0,
-                clan?.CapeB ?? 0,
+                king ? (short)KingSystemRuntimeService.KingCapeOf(session.Nation) : clan?.Cape ?? 0,
+                king ? (byte)0 : clan?.CapeR ?? 0,
+                king ? (byte)0 : clan?.CapeG ?? 0,
+                king ? (byte)0 : clan?.CapeB ?? 0,
                 clan?.Flag ?? 0);
         }
 
@@ -492,7 +513,7 @@ public class WorldVisibilityService(
             session.KnightsId,
             session.KnightsFame,
             clanState,
-            GetNoClanNationCode(session),
+            king ? KingSystemRuntimeService.KingCapeOf(session.Nation) : GetNoClanNationCode(session),
             session.Level,
             session.Race,
             session.Class,
@@ -502,7 +523,7 @@ public class WorldVisibilityService(
             session.Face,
             session.Hair,
             PoseOf(session),
-            NeedParty: false,
+            NeedParty: session.SeekingParty,
             session.IsGM && session.GmModeEnabled,
             session.IsPartyLeader,
             (byte)session.Invisibility,
@@ -511,7 +532,13 @@ public class WorldVisibilityService(
             session.IsHidingHelmet,
             session.DisplayTitleId,
             visuals,
-            session.NationRanks);
+            session.NationRanks,
+            session.GenieActive,
+            session.IsHidingCospre,
+            session.TransformSkillId,
+            session.IsBlinking,
+            session.SoccerTeam,
+            session.SizeState);
     }
 
     private static byte PoseOf(UserSession session) => (byte)(
@@ -534,5 +561,5 @@ public class WorldVisibilityService(
     }
 
     private static bool ShouldIncludeNpc(NpcInstance npc) =>
-        npc.IsAlive || npc.NpcId == JuraidMountainService.BridgeNpcId || npc.GateOpen != 0 || npc.ObjectType != 0;
+        (npc.IsAlive && npc.TowerUserId == 0) || npc.NpcId == JuraidMountainService.BridgeNpcId || npc.GateOpen != 0 || npc.ObjectType != 0;
 }

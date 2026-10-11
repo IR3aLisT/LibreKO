@@ -221,25 +221,32 @@ public partial class World
             DressCape(_selfVisual, capeId >= 0 ? capeId : me.CapeId, rr, gg, bb, false, me.Race);
             _capePreviewing = _capeShown;
             _capeCurrent = capeId >= 0 ? capeId : _capeCurrent;
-            string what = capeId >= 0 ? $"cape #{capeId}" : "cape dye";
-            SetCapeStatus($"Applied {what}.", false);
-            CombatNotice($"[Clan] Cape updated ({what}).");
+            string done = ItemData.Text(TextCapeChanged, "Cape has been changed");
+            SetCapeStatus(done, false);
+            CombatNotice(done);
         }
         else
         {
-            SetCapeStatus(a switch
-            {
-                -2 => "You're not in a clan.",
-                -5 => "That cape design isn't available.",
-                -6 => "Your clan's rank is too low.",
-                -7 => "Not enough gold.",
-                -8 => "You need a castellan ticket for that.",
-                -9 => "Not enough clan points in the fund.",
-                -10 => "A castellan can't use that.",
-                _ => "The cape change was refused (chief-only, promoted clan, and not while busy).",
-            }, true);
+            string refusal = CapeRefusal(a);
+            SetCapeStatus(refusal, true);
+            CombatNotice(refusal);
         }
     }
+
+    private const int TextCapeChanged = 10320;
+
+    private static string CapeRefusal(int result) => result switch
+    {
+        -1 => ItemData.Text(10305, "You don't have the authorization to purchase a cape."),
+        -2 => ItemData.Text(10306, "Cannot find this Knights."),
+        -5 => ItemData.Text(10307, "You cannot buy this from the store."),
+        -6 => ItemData.Text(10308, "Your Knights ranking is too low to purchase a cape."),
+        -7 => ItemData.Text(10309, "You don't have enough Coins to purchase a cape."),
+        -8 => ItemData.Text(10310, "You don't have the necessary item for purchasing a cape."),
+        -9 => ItemData.Text(15714, "CONT is insufficient."),
+        -10 => ItemData.Text(10323, "Castellan can't use it"),
+        _ => ItemData.Text(10304, "You cannot purchase a cape."),
+    };
 
     private void OnCapeReset()
     {

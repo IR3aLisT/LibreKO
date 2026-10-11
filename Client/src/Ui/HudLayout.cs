@@ -11,12 +11,16 @@ public sealed partial class HudLayout : Node
     public static bool EditMode { get; set; }
 
     public event Action? Placed;
+    public event Action? Clicked;
     public static bool PersistLayouts { get; set; } = true;
+
+    private static readonly System.Collections.Generic.HashSet<HudLayout> Live = new();
 
     private readonly Control _target;
     private readonly Control? _dragHandle;
     private readonly string _id;
     private readonly Func<Vector2>? _defaultPosition;
+    private bool _userPlaced;
     private readonly HudAnchor.Spot? _anchor;
     private Vector2 _anchorMargin;
     private readonly Vector2 _anchorSize;
@@ -138,8 +142,10 @@ public sealed partial class HudLayout : Node
         }
 
         GetViewport().SizeChanged += KeepOnScreen;
+        Config.UiScaleApplied += KeepOnScreen;
         _target.VisibilityChanged += KeepOnScreen;
         _target.Resized += ClampAfterResize;
+        Live.Add(this);
 
         Callable.From(InstallOverlays).CallDeferred();
         Callable.From(ApplySavedLayout).CallDeferred();
@@ -151,9 +157,30 @@ public sealed partial class HudLayout : Node
         Callable.From(FollowDefaultOnScreen).CallDeferred();
     }
 
-    private void ClampAfterResize() => Callable.From(ClampOnScreen).CallDeferred();
+    private void ClampAfterResize() => Callable.From(ClampAndKeep).CallDeferred();
+
+    private void ClampAndKeep()
+    {
+        if (!GodotObject.IsInstanceValid(_target)) return;
+        var before = _target.Position;
+        ClampOnScreen();
+        if (_persist && _anchor == null && !_dragging && Config.HasWindowPos(_id) && !before.IsEqualApprox(_target.Position))
+            Config.SaveWindowPos(_id, _target.Position);
+    }
 
     internal void ReapplyDefault() => FollowDefaultOnScreen();
+
+    public static void ResetAll()
+    {
+        Config.ForgetAllWindowLayouts();
+        foreach (var layout in new System.Collections.Generic.List<HudLayout>(Live))
+        {
+            if (!GodotObject.IsInstanceValid(layout)) continue;
+            layout._userPlaced = false;
+            layout.ApplySavedLayout();
+            layout.Placed?.Invoke();
+        }
+    }
 
     internal Vector2 MinimumSize
     {
@@ -165,6 +192,7 @@ public sealed partial class HudLayout : Node
     {
         _target.Size = size;
         _target.Position = position;
+        _userPlaced = true;
         ClampOnScreen();
         if (_persist)
         {
@@ -177,7 +205,8 @@ public sealed partial class HudLayout : Node
     private void FollowDefaultOnScreen()
     {
         if (!GodotObject.IsInstanceValid(_target)) return;
-        if (_anchor == null && _persist && _defaultPosition != null && !_dragging && !Config.HasWindowPos(_id))
+        if (_anchor == null && _defaultPosition != null && !_dragging && !_userPlaced
+            && !(_persist && Config.HasWindowPos(_id)))
             _target.Position = _defaultPosition();
         ClampOnScreen();
     }
@@ -231,12 +260,22 @@ public sealed partial class HudLayout : Node
         return _persist ? Config.GetWindowSize(_id, fallback) : fallback;
     }
 
-    private void OnDragHandleInput(InputEvent ev)
+    private void OnDragHandleInput(InputEvent ev) => DragFrom(_dragHandle, ev);
+
+    private void DragFrom(Control? handle, InputEvent ev)
     {
         if (ev is not InputEventMouseButton { ButtonIndex: MouseButton.Left } mb) return;
         if (mb.Pressed) BeginDrag(mb.GlobalPosition);
         else EndDrag();
-        _dragHandle?.AcceptEvent();
+        handle?.AcceptEvent();
+    }
+
+    public void AddDragHandle(Control handle)
+    {
+        if (_anchor != null) return;
+        handle.MouseFilter = Control.MouseFilterEnum.Stop;
+        handle.MouseDefaultCursorShape = Control.CursorShape.Move;
+        handle.GuiInput += ev => DragFrom(handle, ev);
     }
 
     public override void _Input(InputEvent ev)
@@ -293,7 +332,7 @@ public sealed partial class HudLayout : Node
         bool frozen = Frozen;
         bool gripShown = shown && !frozen && (_moveGripAlwaysVisible || EditMode);
         bool cornerShown = shown && !frozen;
-        var rect = new Rect2(_target.GlobalPosition, _target.Size);
+        var rect = new Rect2(_target.GlobalPosition, ScaledTargetSize());
         Vector2 gripSize = _moveGrip?.Size ?? Vector2.Zero, cornerSize = _corner?.Size ?? Vector2.Zero;
         if (cornerShown == _cornerShown && gripShown == _gripShown && rect == _overlayRect
             && gripSize == _gripSize && cornerSize == _cornerSize)
@@ -315,21 +354,26 @@ public sealed partial class HudLayout : Node
         }
     }
 
+    private Vector2 ScaledTargetSize() => _target.Size * _target.Scale;
+
     private Vector2 OverlayPosition(Vector2 overlaySize, Corner corner)
     {
         Vector2 inset = new(3f, 3f);
+        Vector2 size = ScaledTargetSize();
         return _target.GlobalPosition + corner switch
         {
             Corner.TopLeft => inset,
-            Corner.TopRight => new Vector2(_target.Size.X - overlaySize.X - inset.X, inset.Y),
-            Corner.BottomLeft => new Vector2(inset.X, _target.Size.Y - overlaySize.Y - inset.Y),
-            _ => _target.Size - overlaySize - inset,
+            Corner.TopRight => new Vector2(size.X - overlaySize.X - inset.X, inset.Y),
+            Corner.BottomLeft => new Vector2(inset.X, size.Y - overlaySize.Y - inset.Y),
+            _ => size - overlaySize - inset,
         };
     }
 
     public override void _ExitTree()
     {
+        Live.Remove(this);
         GetViewport().SizeChanged -= KeepOnScreen;
+        Config.UiScaleApplied -= KeepOnScreen;
         if (GodotObject.IsInstanceValid(_target))
         {
             _target.VisibilityChanged -= KeepOnScreen;
@@ -359,8 +403,10 @@ public sealed partial class HudLayout : Node
         {
             _target.Position = _dragOriginPosition;
             CycleBackgroundOpacity();
+            Clicked?.Invoke();
             return;
         }
+        _userPlaced = true;
         ClampOnScreen();
         if (_persist) Config.SaveWindowPos(_id, _target.Position);
         Placed?.Invoke();
@@ -386,6 +432,7 @@ public sealed partial class HudLayout : Node
     {
         if (!_resizing) return;
         _resizing = false;
+        _userPlaced = true;
         if (!_persist) return;
         if (_anchor == null) Config.SaveWindowPos(_id, _target.Position);
         Config.SaveWindowSize(_id, _target.Size);

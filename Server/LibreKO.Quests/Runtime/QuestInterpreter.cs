@@ -508,6 +508,22 @@ public sealed class QuestInterpreter
                 _host.JoinTempleEvent();
                 break;
 
+            case QuestActionKind.JoinBlueSoccerTeam:
+                _host.JoinSoccerTeam(blue: true);
+                break;
+
+            case QuestActionKind.JoinRedSoccerTeam:
+                _host.JoinSoccerTeam(blue: false);
+                break;
+
+            case QuestActionKind.StartSoccerGame:
+                _host.StartSoccerGame();
+                break;
+
+            case QuestActionKind.ShowRankBoard:
+                _host.ShowRankBoard();
+                break;
+
             case QuestActionKind.SetLevel:
                 _host.SetPlayerLevel(args.GetInt("level"));
                 break;
@@ -590,6 +606,10 @@ public sealed class QuestInterpreter
                 _host.TeleportClanToZone(args.GetInt("zone"), args.GetInt("x"), args.GetInt("z"));
                 break;
 
+            case QuestActionKind.WarpParty:
+                _host.TeleportPartyToZone(args.GetInt("zone"), args.GetInt("x"), args.GetInt("z"));
+                break;
+
             case QuestActionKind.EnterInstance:
                 _host.EnterInstance(args.GetInt("zone"), args.GetInt("set"), args.GetInt("x"), args.GetInt("z"));
                 break;
@@ -658,6 +678,10 @@ public sealed class QuestInterpreter
                 _host.OpenRebirthPanel();
                 break;
 
+            case QuestActionKind.OpenRebirthResetPanel:
+                _host.OpenRebirthResetPanel();
+                break;
+
             case QuestActionKind.OpenFamiliarPanel:
                 _host.OpenFamiliarPanel();
                 break;
@@ -681,6 +705,9 @@ public sealed class QuestInterpreter
                 break;
             case QuestActionKind.OpenCombineRecipeBook:
                 _host.OpenCombineRecipeBook();
+                break;
+            case QuestActionKind.OpenDisassembleWindow:
+                _host.OpenDisassembleWindow();
                 break;
 
             case QuestActionKind.OpenNationTransferPanel:
@@ -750,6 +777,7 @@ public sealed class QuestInterpreter
             QuestConditionKind.InParty => _host.IsInParty,
             QuestConditionKind.LeadsParty => _host.IsPartyLeader,
             QuestConditionKind.IsKing => _host.IsKing,
+            QuestConditionKind.KrowazOpen => _host.KrowazOpen,
             QuestConditionKind.DailyAvailable => _host.DailyRewardAvailable(args.GetInt("slot")),
             QuestConditionKind.Weekday => _host.Weekday == args.GetInt("day"),
             QuestConditionKind.HasEffect => _host.HasEffect(args.GetInt("skill")),

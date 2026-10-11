@@ -22,6 +22,22 @@ public sealed class KingPacketWriter
         return packet;
     }
 
+    public static Packet EventResult(byte eventType, short result)
+    {
+        var packet = Sub(KingPacketConstants.Event, eventType);
+        packet.WriteShort(result);
+        return packet;
+    }
+
+    public static Packet RoyalOrder(short result, string message = "")
+    {
+        var packet = Sub(KingPacketConstants.Event, KingPacketConstants.EventNotice);
+        packet.WriteByte(KingPacketConstants.RoyalOrderFromKing);
+        packet.WriteShort(result);
+        if (result == KingPacketConstants.EventOk) packet.WriteSByteString(message);
+        return packet;
+    }
+
     public static Packet FlagWithValue(byte sub, byte subType, byte result, byte value)
     {
         var packet = Sub(sub, subType);

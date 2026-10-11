@@ -21,7 +21,11 @@ public class ItemSlot
 
     public bool IsLinked => UniqueId != 0;
 
-    public bool IsTradable => !IsLinked && State
+    public bool IsSealedCharacter => ItemId == InventoryConstants.CypherRing && UniqueId != 0;
+
+    public bool IsPetLink => IsLinked && !IsSealedCharacter;
+
+    public bool IsTradable => (!IsLinked || IsSealedCharacter) && State
         is not (ItemFlag.Rented or ItemFlag.CharacterSeal or ItemFlag.Duplicate
             or ItemFlag.Sealed or ItemFlag.Bound);
 

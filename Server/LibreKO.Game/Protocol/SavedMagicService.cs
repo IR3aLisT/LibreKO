@@ -20,6 +20,8 @@ public class SavedMagicService(
     {
         if (session.DropVolatileMagic(gameDataService) > 0)
             await userNotificationService.SendStatUpdateAsync(session);
+        if (DevilForms.Sync(session) is { } devil)
+            await sessionManager.Regions.SendToRegion(session, devil, excludeSender: false);
 
         await RecastAsync(session);
     }

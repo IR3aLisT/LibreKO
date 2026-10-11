@@ -115,7 +115,7 @@ public class NpcAiBehaviorService(
         {
             if (npc.MoveType != NpcMoveType.None
                 && npc.MoveType != NpcMoveType.Stationary
-                && nowTicks - npc.StateChangeTicks > TimeSpan.TicksPerSecond * Random.Shared.Next(3, 6)
+                && (npc.RollsToPathEnd || nowTicks - npc.StateChangeTicks > TimeSpan.TicksPerSecond * Random.Shared.Next(3, 6))
                 && sessionManager.Regions.HasNearbyUsers(npc))
             {
                 sessionManager.Regions.MarkNpcEngaged(npc);

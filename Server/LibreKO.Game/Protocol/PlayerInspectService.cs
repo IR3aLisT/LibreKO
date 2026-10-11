@@ -97,7 +97,7 @@ public class PlayerInspectService(SessionManager sessionManager) : IPlayerInspec
     private static PlayerInspectPacketWriter.WornItem WornOf(ItemSlot item) =>
         item.IsEmpty
             ? default
-            : new PlayerInspectPacketWriter.WornItem(item.ItemId, item.Durability, item.Flag, 0);
+            : new PlayerInspectPacketWriter.WornItem(item.ItemId, item.Durability, item.Flag, ItemRecordWriter.ExpiryOnWire(item.ExpiresAt));
 
     private PlayerInspectPacketWriter.Clan ClanOf(UserSession target)
     {

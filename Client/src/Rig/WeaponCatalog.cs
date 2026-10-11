@@ -25,6 +25,7 @@ internal static class WeaponCatalog
         public int TraceSteps;
         public uint TraceColor = DefaultTraceColor;
         public float Trace0, Trace1;
+        public string Anim = "";
     }
 
     private static Dictionary<int, Info>? _index;
@@ -184,6 +185,8 @@ internal static class WeaponCatalog
                 }
                 if (e.ContainsKey("fxg"))
                     wi.FxGuide = e["fxg"].AsString();
+                if (e.ContainsKey("anim"))
+                    wi.Anim = e["anim"].AsString();
                 if (e.ContainsKey("trstep"))
                 {
                     wi.TraceSteps = e["trstep"].AsInt32();

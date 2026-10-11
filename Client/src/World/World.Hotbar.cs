@@ -11,11 +11,11 @@ public partial class World
     private const int HotTotal = HotbarLayout.Total;
     private const int HotToolSize = 21;
     private const int HotBarGap = 4;
-    private const int HotVerticalGap = 3;
     private const int HotGripThickness = 10;
     private const int HotPageArrowWidth = 11;
     private const int HotPageArrowGap = 1;
     private const string HotbarLayoutId = "hotbar";
+    private const string HotbarGenieText = "The skill bar cannot be changed while the Genie is hunting.";
     private const string HotbarVerticalLayoutId = "hotbar_vertical";
     private const int HotSlotSize = 46;
     private const int HotPageBtnGap = 2;
@@ -46,17 +46,33 @@ public partial class World
         BuildHotbar();
         Net.I.SkillDataEvent += OnSkillData;
         Net.I.SkillBarClearEvent += OnSkillBarClear;
+        Config.HotbarLookChanged += OnHotbarLookChanged;
 
         LoadLocalHotbar();
         RefreshHotbar();
+        ApplyChaosHotbar();
 
-        Net.I.SendSkillDataLoad();
+        if (Net.I.SkillBar is not { } bar)
+        {
+            Net.I.RequestSkillBarOnce();
+            return;
+        }
+        _hotLoadedFromServer = true;
+        if (bar.Length == 0) OnSkillBarClear();
+        else OnSkillData(bar);
     }
 
     private void HotbarDispose()
     {
         Net.I.SkillDataEvent -= OnSkillData;
         Net.I.SkillBarClearEvent -= OnSkillBarClear;
+        Config.HotbarLookChanged -= OnHotbarLookChanged;
+    }
+
+    private void OnHotbarLookChanged()
+    {
+        LayoutHotbars();
+        RefreshHotbar();
     }
 
     private void BuildHotbar() => BuildHotbar(Config.HotbarVertical, Config.HotbarExtraBars);
@@ -82,34 +98,40 @@ public partial class World
         _hotCells.Clear();
         _extraBars.Clear();
 
-        var stack = new BoxContainer { Vertical = !vertical, Visible = !hidden };
+        var stack = new BoxContainer { Vertical = !vertical, Visible = !hidden, Scale = Vector2.One * Config.HotbarScale };
         stack.AddThemeConstantOverride("separation", HotBarGap);
         _hotbarLayer.AddChild(stack);
         _hotbarBox = stack;
 
         var extras = new List<Control>();
+        var extraGrips = new List<Control>();
         for (int extra = 0; extra < extraBars; extra++)
         {
             var strip = new HotStrip { Extra = extra, Page = Config.HotbarExtraPage(extra) };
             _extraBars.Add(strip);
-            extras.Add(BuildHotStrip(strip, vertical, extraBars));
+            var extraGrip = NewHotGrip(vertical);
+            extraGrips.Add(extraGrip);
+            extras.Add(BuildHotStrip(strip, vertical, extraBars, extraGrip));
         }
         if (!vertical) foreach (var strip in extras) stack.AddChild(strip);
-        var grip = new HotGrip
-        {
-            Vertical = vertical,
-            TooltipText = "Drag to move the skill bar",
-            CustomMinimumSize = HotGripSize(vertical),
-            SizeFlagsVertical = Control.SizeFlags.ShrinkEnd,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
-        };
+        var grip = NewHotGrip(vertical);
         var main = BuildHotStrip(null, vertical, extraBars, grip);
         stack.AddChild(main);
         if (vertical) foreach (var strip in extras) stack.AddChild(strip);
 
-        HudLayout.Attach(stack, HotbarLayoutIdFor(vertical), grip,
+        var layout = HudLayout.Attach(stack, HotbarLayoutIdFor(vertical), grip,
             () => HotbarDefaultPosition(stack, main));
+        foreach (var extraGrip in extraGrips) layout.AddDragHandle(extraGrip);
     }
+
+    private static HotGrip NewHotGrip(bool vertical) => new()
+    {
+        Vertical = vertical,
+        TooltipText = "Drag to move the skill bar",
+        CustomMinimumSize = HotGripSize(vertical),
+        SizeFlagsVertical = Control.SizeFlags.ShrinkEnd,
+        SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+    };
 
     private static Vector2 HotGripSize(bool vertical) =>
         vertical ? new Vector2(HotSlotSize, HotGripThickness) : new Vector2(HotGripThickness, HotSlotSize);
@@ -119,8 +141,8 @@ public partial class World
     private Vector2 HotbarDefaultPosition(Control stack, Control main)
     {
         var viewport = GetViewport().GetVisibleRect().Size;
-        return new Vector2((viewport.X - main.GetCombinedMinimumSize().X) * 0.5f,
-            viewport.Y - stack.GetCombinedMinimumSize().Y);
+        return new Vector2((viewport.X - main.GetCombinedMinimumSize().X * stack.Scale.X) * 0.5f,
+            viewport.Y - stack.GetCombinedMinimumSize().Y * stack.Scale.Y);
     }
 
     private void KeepMainBarInPlace(Vector2 sizeBefore)
@@ -128,9 +150,9 @@ public partial class World
         string id = HotbarLayoutIdFor(Config.HotbarVertical);
         if (Config.HotbarVertical || !GodotObject.IsInstanceValid(_hotbarBox) || !Config.HasWindowPos(id)) return;
 
-        var grown = _hotbarBox.GetCombinedMinimumSize() - sizeBefore;
+        var grown = (_hotbarBox.GetCombinedMinimumSize() - sizeBefore) * _hotbarBox.Scale;
         var pos = Config.GetWindowPos(id, _hotbarBox.Position) - new Vector2(0f, grown.Y);
-        var room = GetViewport().GetVisibleRect().Size - _hotbarBox.GetCombinedMinimumSize();
+        var room = GetViewport().GetVisibleRect().Size - _hotbarBox.GetCombinedMinimumSize() * _hotbarBox.Scale;
         pos = new Vector2(Mathf.Clamp(pos.X, 0f, Mathf.Max(0f, room.X)), Mathf.Clamp(pos.Y, 0f, Mathf.Max(0f, room.Y)));
         _hotbarBox.Position = pos;
         Config.SaveWindowPos(id, pos);
@@ -144,7 +166,7 @@ public partial class World
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
-        row.AddThemeConstantOverride("separation", vertical ? HotVerticalGap : 6);
+        row.AddThemeConstantOverride("separation", HotbarLayout.SlotGap(Config.HotbarGap, vertical));
 
         var pageLbl = HudStyle.Label(11, HorizontalAlignment.Center);
         pageLbl.CustomMinimumSize = new Vector2(22, HotPageLblHeight);
@@ -304,8 +326,16 @@ public partial class World
         if (abs < 0 || abs >= HotTotal || _selfDead) return false;
         int id = _hotbar[abs];
         if (id == 0) return false;
-        if (SkillData.IsSkill(id)) CastSkill(id);
-        else UseHotItem(id);
+        if (SkillData.IsSkill(id))
+        {
+            if (!ChaosBattle.SkillAllowed(_zone, (short)SkillData.Get(id)!.Tree)) return false;
+            CastSkill(id);
+        }
+        else
+        {
+            if (!ChaosBattle.ItemUsable(_zone, ItemData.Get(id)?.Kind ?? 0)) return false;
+            UseHotItem(id);
+        }
         return true;
     }
 
@@ -353,7 +383,7 @@ public partial class World
                 return RequestMerchantSearch(itemId);
             if (SkillData.Get(def.Effect1) is { } skill && OpensNestDungeon(skill))
             {
-                OpenNestDungeon(itemId, skill);
+                OpenNestDungeon(itemId);
                 return true;
             }
             CastSkill(def.Effect1);
@@ -400,7 +430,7 @@ public partial class World
         }
         if (!MaestroPotions.CanUse(itemId, Sheet.Gold))
         {
-            problem = $"{name} needs at least {MaestroPotions.MinimumCoins:n0} Noah.";
+            problem = $"{name} needs at least {MaestroPotions.MinimumCoins:n0} gold.";
             return false;
         }
         return true;
@@ -413,14 +443,24 @@ public partial class World
         return false;
     }
 
+    private static bool HotbarHeldByGenie => Net.I.GenieRunning;
+
+    private bool RefuseHotbarEdit()
+    {
+        if (!HotbarHeldByGenie) return false;
+        CombatNotice(HotbarGenieText);
+        return true;
+    }
+
     private void ClearHotAbs(int abs)
     {
-        if (!Config.HotbarLocked) SetHotSlot(abs, 0);
+        if (Config.HotbarLocked || RefuseHotbarEdit()) return;
+        SetHotSlot(abs, 0);
     }
 
     private void DropOntoHotAbs(int dest, int id, int fromAbs)
     {
-        if (dest < 0 || dest >= HotTotal) return;
+        if (dest < 0 || dest >= HotTotal || RefuseHotbarEdit()) return;
         if (fromAbs >= 0 && fromAbs < HotTotal)
         {
             if (Config.HotbarLocked) return;
@@ -438,7 +478,7 @@ public partial class World
     private void DropOntoHotSlot(int slotInPage, int id, int fromSlotInPage)
     {
         int dest = _hotPage * HotSlotsPerPage + slotInPage;
-        if (dest < 0 || dest >= HotTotal) return;
+        if (dest < 0 || dest >= HotTotal || RefuseHotbarEdit()) return;
         if (fromSlotInPage >= 0)
         {
             int src = _hotPage * HotSlotsPerPage + fromSlotInPage;
@@ -455,7 +495,7 @@ public partial class World
 
     private void AddToHotbar(int id)
     {
-        if (!SkillAssignable(id)) return;
+        if (!SkillAssignable(id) || RefuseHotbarEdit()) return;
         for (int p = 0; p < HotPages; p++)
         {
             int page = (_hotPage + p) % HotPages;
@@ -539,9 +579,11 @@ public partial class World
             id => SkillData.Get(id)?.RecastSeconds ?? 0f, _readyCued);
         if (_readyCued.Count == 0) return;
 
-        Audio.PlayUiFile(Sfx.SkillReadyFile);
+        if (CooldownCue.Sounds(_readyCued, id => SkillData.Get(id)?.RecastSeconds ?? 0f))
+            Audio.PlayUiFile(Sfx.SkillReadyFile);
         FlashReady(_hotCells, _hotPage);
         foreach (var strip in _extraBars) FlashReady(strip.Cells, strip.Page);
+        if (_pluginBridge != null) PluginHost.Game.RaiseHotbarReady(_readyCued.ToArray());
     }
 
     private void FlashReady(List<HotSlotCell> cells, int page)
@@ -580,7 +622,7 @@ public partial class World
             float cd = s == null ? 0f : SkillCooldown(s, now);
             cell.SetCooldown(cd);
             if (touch && i < TouchControls.ActionSlots) _touchActions?.SetCooldown(i, cd);
-            cell.SetDim(s != null && cd <= 0f && (!SkillReady(s, now) || !SkillRequirementMet(s)));
+            cell.SetDim(s != null && cd <= 0f && !HotbarUsable(s, now));
 
             if (!counts) continue;
             int needId = SkillData.IsSkill(id) ? s?.ConsumedItem ?? 0 : id;
@@ -594,8 +636,27 @@ public partial class World
         }
     }
 
+    private bool HotbarUsable(SkillData.Skill s, double now)
+    {
+        if (!SkillReady(s, now) || !SkillRequirementMet(s)) return false;
+        var gear = SelfGear();
+        if (!SkillUsable.GearAllows(s.NeedWeapon, HeldItemClass(gear, InventoryConstants.VisRightHand),
+                HeldItemClass(gear, InventoryConstants.VisLeftHand))) return false;
+        if (!Vitals.HasStamina(s.Sp) || !SkillUsable.AngerAllows(s.Id, Net.I.AngerFull)) return false;
+        if (!SkillUsable.BuffAllows(s.NeedBuffSkill, id => Net.I.BuffEnds.TryGetValue(id, out double end) && end > now)) return false;
+        if (s.Id is CoinSkillA or CoinSkillB && Sheet.Gold < CoinSkillFloor) return false;
+        if (!SoccerSkillAllowed(s)) return false;
+        if (s.UseItem == 0 || s.IsResurrect || ItemData.Get(s.UseItem) == null) return true;
+        return CountInBackpack(s.ConsumedItem) >= (s.IsRanged ? Mathf.Max(1, s.NeedArrow) : 1);
+    }
+
     private void SaveHotbar()
     {
+        if (InChaosZone)
+        {
+            Net.I.ChaosHotbar = (int[])_hotbar.Clone();
+            return;
+        }
         Net.I.SendSkillDataSave(_hotbar);
         WriteLocalHotbar();
     }
@@ -603,6 +664,12 @@ public partial class World
     private void OnSkillData(int[] ids)
     {
         if (!IsInsideTree() || _hotbarBox == null || !GodotObject.IsInstanceValid(_hotbarBox)) return;
+        if (InChaosZone)
+        {
+            _hotLoadedFromServer = true;
+            ApplyChaosHotbar();
+            return;
+        }
 
         bool any = false;
         foreach (int id in ids) if (id != 0) { any = true; break; }
@@ -628,6 +695,7 @@ public partial class World
         RefreshHotbar();
         if (dropped) SaveHotbar();
         else WriteLocalHotbar();
+        if (_worldReady && _loadingLayer == null) WarmHotbarFxResources();
     }
 
     private string LocalHotbarPath()
@@ -640,6 +708,7 @@ public partial class World
 
     private void WriteLocalHotbar()
     {
+        if (InChaosZone) return;
         var arr = new Godot.Collections.Array();
         foreach (int id in _hotbar) arr.Add(id);
         using var f = Godot.FileAccess.Open(LocalHotbarPath(), Godot.FileAccess.ModeFlags.Write);
@@ -681,6 +750,9 @@ public partial class World
         private readonly StyleBoxFlat _bg;
         private readonly ColorRect _cool;
         private readonly ShaderMaterial _coolMat;
+        private readonly TextureRect _ready;
+        private int _readyFrame = -1;
+        private static readonly Texture2D?[] ReadyFrames = new Texture2D?[ReadyFlash.FrameCount];
         private readonly Label _count;
         private readonly UpgradeBadge _plus;
         private float _coolShown = -1f;
@@ -737,6 +809,18 @@ public partial class World
             _cool = new ColorRect { Material = _coolMat, MouseFilter = MouseFilterEnum.Ignore, Visible = false };
             _cool.SetAnchorsPreset(LayoutPreset.FullRect);
             _slot.AddChild(_cool);
+
+            _ready = new TextureRect
+            {
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+                Modulate = new Color(1f, 1f, 1f, ReadyFlash.Alpha),
+                Visible = false,
+            };
+            _ready.SetAnchorsPreset(LayoutPreset.FullRect);
+            _slot.AddChild(_ready);
+            SetProcess(false);
 
             _count = HudStyle.Label(11, HorizontalAlignment.Right);
             _count.VerticalAlignment = VerticalAlignment.Bottom;
@@ -807,19 +891,31 @@ public partial class World
             }
         }
 
-        private static readonly Color FlashColor = new(1.9f, 1.9f, 1.6f);
-        private const double FlashStep = 0.12;
-        private Tween? _flash;
-
         public void Flash()
         {
-            if (!GodotObject.IsInstanceValid(_slot)) return;
-            _flash?.Kill();
-            _slot.Modulate = FlashColor;
-            _flash = CreateTween();
-            _flash.TweenProperty(_slot, "modulate", Colors.White, FlashStep);
-            _flash.TweenProperty(_slot, "modulate", FlashColor, FlashStep);
-            _flash.TweenProperty(_slot, "modulate", Colors.White, FlashStep);
+            if (!GodotObject.IsInstanceValid(_ready)) return;
+            _readyFrame = 0;
+            ShowReadyFrame();
+            SetProcess(true);
+        }
+
+        public override void _Process(double delta)
+        {
+            if (++_readyFrame < ReadyFlash.FrameCount)
+            {
+                ShowReadyFrame();
+                return;
+            }
+            _readyFrame = -1;
+            _ready.Visible = false;
+            SetProcess(false);
+        }
+
+        private void ShowReadyFrame()
+        {
+            ReadyFrames[_readyFrame] ??= ResourceLoader.Load<Texture2D>(ReadyFlash.FramePath(_readyFrame));
+            _ready.Texture = ReadyFrames[_readyFrame];
+            _ready.Visible = _ready.Texture != null;
         }
 
         public void SetCount(int have, bool enough)
@@ -869,7 +965,7 @@ public partial class World
 
         public override Variant _GetDragData(Vector2 atPosition)
         {
-            if (_id == 0 || Config.HotbarLocked) return default;
+            if (_id == 0 || Config.HotbarLocked || HotbarHeldByGenie) return default;
             _pressed = false;
             _dragging = true;
             var preview = new PanelContainer { CustomMinimumSize = new Vector2(48, 40) };

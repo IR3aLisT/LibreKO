@@ -25,9 +25,9 @@ public enum ChatType : byte
     ClanNotice = 24,
     KrowazNotice = 25,
     DeathNotice = 26,
-    ChaosStoneEnemyNotice = 27,
-    ChaosStoneNotice = 28,
+    ChaosStoneNotice = 27,
+    BoxItemNotice = 28,
     AnnouncementWhite = 29,
     ChatRoom = 33,
-    ClanRecruit = 34,
+    NoahKnights = 34,
 }

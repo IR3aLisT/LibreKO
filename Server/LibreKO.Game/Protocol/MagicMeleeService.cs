@@ -129,6 +129,8 @@ public class MagicMeleeService(
             finalDamage = CombatUtils.ApplyWeaponTypeResistance(finalDamage, caster, target, gameDataService);
         if (!target.BlockPhysical)
             finalDamage += PlayerBonusDamage(type1Data.AddDamage, caster.ZoneId);
+        if (caster.ZoneId == ChaosRules.Zone && !target.BlockPhysical)
+            finalDamage = ChaosRules.SkillDamageOf(type1Data.Id);
 
         finalDamage = GmMode.Taken(target, GmMode.Dealt(caster, target.Hp,
             Math.Min(finalDamage, CombatUtils.MaxDamage)));

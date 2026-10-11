@@ -7,6 +7,7 @@ namespace LibreKO.Network;
 public partial class Net
 {
     private const byte MonsterStoneSub = 6;
+    private const byte MonsterStoneExpSub = 11;
     private const byte MonsterSquadSub = 5;
     private const byte TempleEventFinishSub = 10;
     private const ushort NestFinishEvent = 17;
@@ -40,6 +41,14 @@ public partial class Net
         _conn.Send(p);
     }
 
+    public void SendMonsterStoneExp(int itemId)
+    {
+        var p = new Packet(GameOpcodes.GS_EVENT);
+        p.WriteByte(MonsterStoneExpSub);
+        p.WriteInt(itemId);
+        _conn.Send(p);
+    }
+
     private void HandleMonsterStone(Packet p)
     {
         if (p.RemainingBytes < 1) return;
@@ -60,6 +69,7 @@ public partial class Net
         if (seconds < 0) return;
         NestCompleted = false;
         StartNestCountdown((uint)seconds);
+        BorderWar.RoomClock(seconds, DateTime.UtcNow);
     }
 
     private void HandleTempleEventFinish(Packet p)
@@ -68,6 +78,7 @@ public partial class Net
         ushort eventId = p.ReadUShort();
         byte winner = p.ReadByte();
         uint seconds = p.ReadUInt();
+        if (TryHandleChaosFinish(eventId, seconds)) return;
         if (eventId != NestFinishEvent)
         {
             BorderWar.Finish(winner, seconds, DateTime.UtcNow);

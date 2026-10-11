@@ -1,4 +1,4 @@
-using LibreKO.Game.World;
+﻿using LibreKO.Game.World;
 
 namespace LibreKO.Game.Protocol;
 
@@ -22,6 +22,7 @@ internal static class ExchangePacketConstants
     public const byte ExchangeOtherDecide = 6;
     public const byte ExchangeDone = 7;
     public const byte ExchangeCancel = 8;
+    public const byte ExchangeDuplicate = 9;
 
     public const int ItemNoTrade = 900000001;
     public const int ItemNoTradeMax = 1_000_000_000;

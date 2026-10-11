@@ -21,6 +21,8 @@ public partial class Net
     public event Action<string>? KingIntroEvent;
     public event Action<bool>? KingIntroSavedEvent;
     public event Action<KingTreasuryNotice>? KingTreasuryNoticeEvent;
+    public event Action<byte, short>? KingEventResultEvent;
+    public event Action<byte, string>? RoyalOrderEvent;
 
     private void HandleKing(Packet p)
     {
@@ -45,7 +47,55 @@ public partial class Net
             case KingElection.TreasuryNotice:
                 KingTreasuryNoticeEvent?.Invoke(KingWire.ReadTreasuryNotice(p));
                 break;
+            case KingElection.KingEvent:
+                HandleKingEvent(p);
+                break;
         }
+    }
+
+    private void HandleKingEvent(Packet p)
+    {
+        byte kingEvent = KingWire.U8(p);
+        if (kingEvent != KingCommands.EventRoyalOrder)
+        {
+            KingEventResultEvent?.Invoke(kingEvent, KingWire.I16(p));
+            return;
+        }
+        byte kind = KingWire.U8(p);
+        short result = KingWire.I16(p);
+        if (result < 0) KingEventResultEvent?.Invoke(kingEvent, result);
+        else RoyalOrderEvent?.Invoke(kind, KingWire.Str8(p));
+    }
+
+    public void SendKingCommand(KingCommand command)
+    {
+        var p = KingWire.Request(KingElection.KingEvent);
+        switch (command.Kind)
+        {
+            case KingCommandKind.RoyalOrder:
+                p.WriteByte(KingCommands.EventRoyalOrder);
+                p.WriteString(command.Text);
+                break;
+            case KingCommandKind.Prize:
+                p.WriteByte(KingCommands.EventPrize);
+                p.WriteSByteString(command.Target);
+                p.WriteInt(command.Amount);
+                break;
+            case KingCommandKind.ExperiencePoint:
+                p.WriteByte(KingCommands.EventExperience);
+                p.WriteByte((byte)Math.Clamp(command.Amount, 0, byte.MaxValue));
+                break;
+            case KingCommandKind.DropRate:
+                p.WriteByte(KingCommands.EventDropRate);
+                p.WriteByte((byte)Math.Clamp(command.Amount, 0, byte.MaxValue));
+                break;
+            case KingCommandKind.Weather:
+                p.WriteByte(KingCommands.EventWeather);
+                p.WriteByte(command.Weather);
+                p.WriteByte((byte)Math.Clamp(command.Amount, 0, byte.MaxValue));
+                break;
+        }
+        _conn.Send(p);
     }
 
     private void HandleKingElection(Packet p)

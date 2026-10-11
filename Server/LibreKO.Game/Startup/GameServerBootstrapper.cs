@@ -32,6 +32,8 @@ public class GameServerBootstrapper(
     private const short ObjectGate = 1;
     private const short ObjectGateLever = 3;
     private const short ObjectRemoveBind = 7;
+    private const short ObjectKeyGate = KrowazTrapService.KeyGateObject;
+    private const short ObjectPoisonGas = KrowazTrapService.PoisonGasObject;
 
     private readonly SemaphoreSlim _initializeLock = new(1, 1);
     private bool _initialized;
@@ -203,7 +205,7 @@ public class GameServerBootstrapper(
     }
 
     internal static bool ShouldSpawnObjectEventNpc(ObjectEvent objectEvent)
-        => objectEvent.Type is ObjectBind or ObjectGate or ObjectGateLever or ObjectRemoveBind;
+        => objectEvent.Type is ObjectBind or ObjectGate or ObjectGateLever or ObjectRemoveBind or ObjectKeyGate or ObjectPoisonGas;
 
     internal static int ResolveObjectEventNpcId(ObjectEvent objectEvent)
         => ShouldSpawnObjectEventNpc(objectEvent) ? objectEvent.Index : 0;

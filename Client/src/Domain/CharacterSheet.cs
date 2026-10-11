@@ -28,6 +28,8 @@ public sealed class CharacterSheet
     public int Ac { get; private set; }
     public int Np { get; private set; }
     public int Level { get; private set; }
+    public const int CoinMax = 2_100_000_000;
+
     public int Gold { get; private set; }
     public int KnightCash { get; private set; }
     public int MaxWeight { get; private set; }
@@ -75,6 +77,15 @@ public sealed class CharacterSheet
         _rebirthBonus[3] = intel; _rebirthBonus[4] = mag;
     }
 
+    public void ApplyRebirthReset(byte[] picks)
+    {
+        for (int i = 0; i < StatCount && i < picks.Length; i++)
+        {
+            _statBonus[i] += picks[i] - _rebirthBonus[i];
+            _rebirthBonus[i] = picks[i];
+        }
+    }
+
     public void ApplyRebirth(byte[] picks)
     {
         RebirthLevel++;
@@ -97,7 +108,7 @@ public sealed class CharacterSheet
 
     public void SeedCombat(int ap, int ac) { Ap = ap; Ac = ac; }
 
-    public void SeedWealth(int gold, int np) { Gold = Math.Max(0, gold); Np = np; }
+    public void SeedWealth(int gold, int np) { Gold = Math.Max(0, gold); Np = np; MonthlyNp = null; }
 
     public void SetKnightCash(int total) => KnightCash = Math.Max(0, total);
 
@@ -165,7 +176,17 @@ public sealed class CharacterSheet
 
     public void ApplyExp(long exp) => Exp = exp;
 
-    public void ApplyLoyalty(int np) => Np = np;
+    public int? MonthlyNp { get; private set; }
+
+    public void ApplyLoyalty(int np, int monthly)
+    {
+        Np = np;
+        MonthlyNp = monthly;
+    }
+
+    public int Manner { get; private set; }
+
+    public void SetManner(int manner) => Manner = Math.Max(0, manner);
 
     public void SetGold(int total) => Gold = Math.Max(0, total);
 

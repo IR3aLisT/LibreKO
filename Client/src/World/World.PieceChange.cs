@@ -21,7 +21,7 @@ public partial class World
 
     private CanvasLayer _pieceLayer = null!;
     private HudWindow _piecePanel = null!;
-    private VBoxContainer _pieceBackpackGrid = null!;
+    private BagCompanion? _pieceCompanion;
     private Label _pieceMessage = null!;
     private Label _pieceSubMessage = null!;
     private Button _pieceStartBtn = null!;
@@ -30,7 +30,6 @@ public partial class World
     private UpgradeSocket _pieceSocket = null!;
 
     private readonly UpgradeSocket[] _pieceResultSockets = new UpgradeSocket[PieceResultSlotCount];
-    private readonly List<UpgradeBackpackCell> _pieceBackpackCells = new();
 
     private bool _pieceShown;
     private bool _pieceSpinning;
@@ -105,19 +104,7 @@ public partial class World
         _pieceTalkBtn = PieceButton("Talk", TalkToGenerator);
         buttons.AddChild(_pieceTalkBtn);
 
-        var bagPanel = UiTheme.Section();
-        bagPanel.CustomMinimumSize = new Vector2(260, 0);
-        cols.AddChild(bagPanel);
-        var bag = new VBoxContainer();
-        bag.AddThemeConstantOverride("separation", 7);
-        bagPanel.AddChild(bag);
-        bag.AddChild(UiTheme.SectionTitle("Inventory"));
-        _pieceBackpackGrid = new VBoxContainer();
-        _pieceBackpackGrid.AddThemeConstantOverride("separation", 4);
-        bag.AddChild(_pieceBackpackGrid);
-
         ClearPieceBench();
-        RefreshPieceBackpack();
     }
 
     private static Button PieceButton(string text, System.Action pressed)
@@ -170,6 +157,8 @@ public partial class World
         _pieceShown = true;
         CloseNpcDialog();
         CloseVendor();
+        _pieceCompanion ??= new BagCompanion(PieceTakeFromBag, PieceBagFit, _ => "", ClosePieceChange);
+        AttachBagCompanion(_pieceCompanion);
     }
 
     private void ClosePieceChange()
@@ -180,6 +169,7 @@ public partial class World
         _pieceBusy = false;
         _piecePanel.Visible = false;
         HideItemTooltip();
+        if (_pieceCompanion != null) DetachBagCompanion(_pieceCompanion);
     }
 
     private void TalkToGenerator()
@@ -319,39 +309,19 @@ public partial class World
         _ => ItemData.Text(TextBetterDays, "There will be better days."),
     };
 
-    private void RefreshPieceBackpack()
+    private void RefreshPieceBackpack() => RefreshBagFit();
+
+    private bool PieceTakeFromBag(int abs)
     {
-        if (_pieceBackpackGrid == null) return;
-        HideItemTooltip();
-        _pieceBackpackCells.Clear();
-        foreach (var child in _pieceBackpackGrid.GetChildren()) child.QueueFree();
-
-        var grid = new GridContainer { Columns = 5 };
-        grid.AddThemeConstantOverride("h_separation", 4);
-        grid.AddThemeConstantOverride("v_separation", 4);
-        _pieceBackpackGrid.AddChild(grid);
-
-        var usable = UsableBackpackSlots(ItemData.IsExchangePiece);
-        foreach (int abs in usable)
-        {
-            int slot = abs;
-            var cell = new UpgradeBackpackCell(slot, Inv[slot], _piecePosition == slot - GridStart);
-            _pieceBackpackCells.Add(cell);
-            cell.Pressed += () => PlacePiece(slot);
-            cell.Hovered += (slot, item) => ShowItemTooltip(slot, item);
-            cell.Unhovered += HideItemTooltip;
-            grid.AddChild(cell);
-        }
-        for (int i = usable.Count; i < FilteredBackpackMinCells; i++)
-            grid.AddChild(new UpgradeBackpackCell(-1, default, false));
-
-        var footer = new HBoxContainer();
-        footer.AddThemeConstantOverride("separation", 6);
-        footer.AddChild(UiTheme.Pill($"{usable.Count} usable", UiTheme.Gold));
-        footer.AddChild(UiTheme.Pill($"{BackpackUsedCount()}/{GridCount}", UiTheme.Edge));
-        footer.AddChild(UiTheme.Text($"{Sheet.Gold:n0} gold", 12, UiTheme.Gold, HorizontalAlignment.Right));
-        _pieceBackpackGrid.AddChild(footer);
+        if (!InMainBag(abs)) return false;
+        PlacePiece(abs);
+        return true;
     }
+
+    private BagFit PieceBagFit(int abs) =>
+        abs - GridStart == _piecePosition ? BagFit.Staged
+        : ItemData.IsExchangePiece(Inv[abs].ItemId) ? BagFit.Normal
+        : BagFit.Unfit;
 
     private void SetPieceMessage(string text, bool warn)
     {

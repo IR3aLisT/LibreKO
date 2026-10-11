@@ -1,4 +1,6 @@
-﻿using LibreKO.Common.Infrastructure.Network;
+﻿using LibreKO.Common.Enums;
+using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Game.World;
 
 namespace LibreKO.Game.Protocol.Writers;
 
@@ -6,12 +8,11 @@ public sealed class EventPacketWriter
 {
     private const ushort RivalPanelUnknown = 1;
 
-    public static Packet MapEventScores(byte eventType, short karusScore, short elmoradScore)
+    public static Packet FullMoonEntry(byte code)
     {
-        var packet = new Packet(GameOpcodes.GS_MAP_EVENT);
-        packet.WriteByte(eventType);
-        packet.WriteShort(karusScore);
-        packet.WriteShort(elmoradScore);
+        var packet = new Packet(GameOpcodes.GS_EVENT);
+        packet.WriteByte(World.FullMoonRules.EntrySub);
+        packet.WriteByte(code);
         return packet;
     }
 
@@ -29,11 +30,6 @@ public sealed class EventPacketWriter
         packet.WriteByte(declareType);
         packet.WriteByte(nation);
         return packet;
-    }
-
-    public static Packet MapEventEmpty()
-    {
-        return new Packet(GameOpcodes.GS_MAP_EVENT);
     }
 
     public static Packet BattleZoneClosed(byte sub, byte closeType)
@@ -74,6 +70,16 @@ public sealed class EventPacketWriter
         var packet = Pvp(sub);
         packet.WriteByte(gauge);
         packet.WriteByte(isFull);
+        return packet;
+    }
+
+    public static Packet TempleSignUps(TempleEvent contest, ushort karus, ushort elMorad)
+    {
+        var packet = new Packet(GameOpcodes.GS_EVENT);
+        packet.WriteByte((byte)TempleSubOpcode.TempleEventCounter);
+        packet.WriteUShort(TempleEventRules.SignUpEventId(contest));
+        packet.WriteUShort(karus);
+        packet.WriteUShort(elMorad);
         return packet;
     }
 
@@ -140,12 +146,11 @@ public sealed class EventPacketWriter
         return packet;
     }
 
-    public static Packet TempleEventFinish(byte winnerNation, uint countdownSeconds)
+    public static Packet TempleEventFinish(ushort eventId, byte winnerNation, uint countdownSeconds)
     {
         var packet = new Packet(GameOpcodes.GS_EVENT);
         packet.WriteByte((byte)TempleSubOpcode.TempleEventFinish);
-        packet.WriteByte(2);
-        packet.WriteByte(0);
+        packet.WriteUShort(eventId);
         packet.WriteByte(winnerNation);
         packet.WriteUInt(countdownSeconds);
         return packet;

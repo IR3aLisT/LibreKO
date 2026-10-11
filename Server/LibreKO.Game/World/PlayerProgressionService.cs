@@ -206,6 +206,12 @@ public class PlayerProgressionService(
             session.Mp = Math.Min(session.Mp, session.MaxMp);
         }
 
+        if (KurianStamina.Applies(session))
+        {
+            KurianStamina.Refill(session);
+            await session.Client.SendPacket(VitalsPacketWriter.StaminaChange(session.KurianMaxSp, session.KurianSp));
+        }
+
         await achievementProgressService.RefreshAsync(session);
 
         if (broadcast)
@@ -248,20 +254,5 @@ public class PlayerProgressionService(
     }
 
     private int GetPremiumExpPercent(UserSession session)
-    {
-        if (session.PremiumType == 0)
-            return 0;
-
-        foreach (var entry in gameDataService.PremiumItemExpTable)
-        {
-            if (entry.Type == session.PremiumType
-                && session.Level >= entry.MinLevel
-                && session.Level <= entry.MaxLevel)
-            {
-                return entry.Percent;
-            }
-        }
-
-        return 0;
-    }
+        => PremiumBonusList.ExperiencePercent(gameDataService.PremiumItemExpTable, session.PremiumType, session.Level);
 }

@@ -6,7 +6,10 @@ namespace LibreKO;
 
 public partial class World
 {
-    private static readonly Vector2 KnightCashHudPosition = new(228f, 11f);
+    private static readonly Vector2 OnlineTimeHudPosition = new(120f, 11f);
+    private const double OnlineTimeTickSeconds = 1.0;
+    private const ulong MsecPerSecond = 1000;
+    private Label? _onlineLabel;
     private PanelContainer _infoPanel = null!;
     private HFlowContainer _infoTabButtons = null!;
     private MarginContainer _infoTabContent = null!;
@@ -25,13 +28,12 @@ public partial class World
     private bool _hudEditMode;
 
     private LevelOrb _orb = null!;
-    private StatBar _hpBar = null!, _mpBar = null!;
+    private StatBar _hpBar = null!, _mpBar = null!, _vpBar = null!;
 
     private MiniMap _miniMap = null!;
     private Control? _statusHud;
     private readonly List<MiniMap.Blip> _blipScratch = new();
     private const float QuestTargetBlipRadius = 4.5f;
-    private Label _kcLabel = null!;
 
     private static readonly Vector2 StatusHudPos = new(HudAnchor.Edge, 10f);
     private static readonly Vector2 StatusHudSize = new(362f, 104f);
@@ -39,6 +41,13 @@ public partial class World
     private static readonly Vector2 HpBarSize = new(274f, 25f);
     private static readonly Vector2 MpBarPos = new(93f, 55f);
     private static readonly Vector2 MpBarSize = new(265f, 17f);
+    private const float VpBarGap = 3f;
+    private const float VpBarInset = 5f;
+    private static readonly Vector2 VpBarPos = new(MpBarPos.X + VpBarInset, MpBarPos.Y + MpBarSize.Y + VpBarGap);
+    private static readonly Vector2 VpBarSize = new(MpBarSize.X - VpBarInset * 2f, 14f);
+    private static readonly Vector2 TouchVpBarPos = new(0f, 50f);
+    private static readonly Vector2 TouchVpBarSize = new(362f, 12f);
+    private static readonly Color VpBarColor = Color.Color8(0, 157, 125);
     private const float StatusHudGap = 6f;
 
     private static readonly Vector2 TouchStatusSize = new(362f, 48f);
@@ -88,6 +97,7 @@ public partial class World
                              touch ? StatBar.RibbonKind.Plain : StatBar.RibbonKind.Upper)
         {
             Position = touch ? TouchHpBarPos : HpBarPos,
+            Glide = true,
         };
         status.AddChild(_hpBar);
         _mpBar = new StatBar(new Color("246fd0"),
@@ -95,20 +105,40 @@ public partial class World
                              touch ? StatBar.RibbonKind.Plain : StatBar.RibbonKind.Lower)
         {
             Position = touch ? TouchMpBarPos : MpBarPos,
+            Glide = true,
         };
         status.AddChild(_mpBar);
+        _vpBar = new StatBar(VpBarColor, touch ? TouchVpBarSize : VpBarSize, StatBar.RibbonKind.Plain)
+        {
+            Position = touch ? TouchVpBarPos : VpBarPos,
+            Visible = Vitals.MaxSp > 0,
+            Glide = true,
+        };
+        status.AddChild(_vpBar);
 
-        _kcLabel = HudStyle.Label(11, HorizontalAlignment.Right);
-        _kcLabel.Position = KnightCashHudPosition;
-        _kcLabel.AddThemeColorOverride("font_color", UiTheme.GoldBright);
-        _kcLabel.AddThemeColorOverride("font_outline_color", Colors.Black);
-        _kcLabel.AddThemeConstantOverride("outline_size", 2);
-        status.AddChild(_kcLabel);
+        if (!touch)
+        {
+            _onlineLabel = HudStyle.Label(11, HorizontalAlignment.Left);
+            _onlineLabel.Position = OnlineTimeHudPosition;
+            _onlineLabel.TooltipText = "Time online since this character entered the game";
+            _onlineLabel.MouseFilter = Control.MouseFilterEnum.Pass;
+            _onlineLabel.AddThemeColorOverride("font_color", UiTheme.TextDim);
+            _onlineLabel.AddThemeColorOverride("font_outline_color", Colors.Black);
+            _onlineLabel.AddThemeConstantOverride("outline_size", 2);
+            status.AddChild(_onlineLabel);
+            var onlineTick = new Godot.Timer { WaitTime = OnlineTimeTickSeconds, Autostart = true };
+            onlineTick.Timeout += RefreshOnlineTime;
+            status.AddChild(onlineTick);
+            RefreshOnlineTime();
+        }
 
         _orb = new LevelOrb(92f) { Position = new Vector2(8f, 7f), Visible = !touch };
         status.AddChild(_orb);
+        _rebirthEmblem = new RebirthEmblem(RebirthEmblemSize) { Position = RebirthEmblemPos, Visible = false };
+        status.AddChild(_rebirthEmblem);
 
         _orb.Set(Sheet.Level, Sheet.ExpPercent);
+        UpdateRebirthEmblem();
         _hpBar.Set(Vitals.Hp, Vitals.MaxHp);
         _mpBar.Set(Vitals.Mp, Vitals.MaxMp);
         UpdateStatusHud();
@@ -116,6 +146,13 @@ public partial class World
         HudLayout.Attach(status, "hud_status", status, () => StatusHudPos,
             anchor: HudPlacement.StatusAnchor, anchorMargin: HudPlacement.StatusMargin,
             anchorSize: VitalsSize);
+    }
+
+    private void RefreshOnlineTime()
+    {
+        if (_onlineLabel == null) return;
+        long seconds = (long)((Time.GetTicksMsec() - Net.I.OnlineSinceMsec) / MsecPerSecond);
+        _onlineLabel.Text = $"Online {Domain.OnlineTime.Format(seconds)}";
     }
 
     private void ApplyHudTheme()
@@ -159,6 +196,9 @@ public partial class World
         if (_miniMap == null) return;
         _blipScratch.Clear();
         if (!_blind.HidesOthers(Now())) AddEntityBlips();
+        AddVanguardBlips();
+        AddMonumentBlips();
+        AddRoyalePings();
         float heading = Coord.KoHeading(Mathf.Sin(_camYaw), -Mathf.Cos(_camYaw));
         _miniMap.UpdateView(_myKoX, _myKoZ, heading, _blipScratch);
         PluginNotifyMap(heading);
@@ -186,11 +226,19 @@ public partial class World
         }
     }
 
-    private void UpdateStatusHud()
+    private void ShowVpBar(int sp, int maxSp)
     {
-        if (_kcLabel == null || !IsInstanceValid(_kcLabel)) return;
-        _kcLabel.Text = $"KC {Sheet.KnightCash:n0}";
+        if (_vpBar == null || !IsInstanceValid(_vpBar)) return;
+        bool shown = maxSp > 0;
+        _vpBar.Set(sp, maxSp);
+        if (_vpBar.Visible == shown) return;
+        _vpBar.Visible = shown;
+        PlaceHudLauncher();
     }
+
+    private bool VpBarShown => _vpBar != null && IsInstanceValid(_vpBar) && _vpBar.Visible;
+
+    private void UpdateStatusHud() => RefreshInventoryCash();
 
     private static string MapName(int zone) => ZoneCatalog.Name(zone);
 

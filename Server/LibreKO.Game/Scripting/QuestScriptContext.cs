@@ -23,6 +23,10 @@ public class QuestScriptContext
     public List<int> PendingAchievements { get; } = [];
 
     public bool PendingTempleEventJoin { get; set; }
+    public byte PendingSoccerTeam { get; set; }
+    public bool PendingSoccerStart { get; set; }
+    public bool PendingRankBoard { get; set; }
+    public List<int> PendingItemAnnouncements { get; } = [];
 
     public int PendingLevel { get; set; }
 
@@ -47,6 +51,10 @@ public class QuestScriptContext
     public (int ZoneId, float X, float Z)? PendingClanZoneChange { get; private set; }
 
     public void RequestClanZoneChange(int zoneId, float x, float z) => PendingClanZoneChange = (zoneId, x, z);
+
+    public (int ZoneId, float X, float Z)? PendingPartyZoneChange { get; private set; }
+
+    public void RequestPartyZoneChange(int zoneId, float x, float z) => PendingPartyZoneChange = (zoneId, x, z);
 
     public (int ZoneId, int Set, float X, float Z)? PendingInstance { get; private set; }
 

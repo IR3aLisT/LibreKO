@@ -19,6 +19,7 @@ public partial class Net
 
     private const byte BifrostJoinSub    = 8;
     private const byte BifrostDisbandSub = 9;
+    private const byte TempleSignUpsSub  = 16;
     private const byte TempleScreenSub   = 3;
     private const byte AltarFlagSub      = 49;
     private const byte AltarTimerSub     = 50;
@@ -43,7 +44,9 @@ public partial class Net
 
     public event Action<int, TempleEventType>? BifrostTimeEvent;
 
-    public event Action<bool, int>? BifrostJoinEvent;
+    public event Action<byte, int>? BifrostJoinEvent;
+
+    public event Action<int, int, int>? TempleSignUpsEvent;
 
     public event Action? BifrostDisbandEvent;
 
@@ -71,6 +74,19 @@ public partial class Net
         BifrostTimeEvent?.Invoke(remaining, eventType);
     }
 
+    public event Action<byte>? FullMoonEntryEvent;
+    public event Action<byte>? FullMoonTowerEvent;
+    public event Action<byte, byte>? FullMoonStageEvent;
+
+    public void SendFullMoonEnter()
+    {
+        var p = new Packet(GameOpcodes.GS_EVENT);
+        p.WriteByte(Domain.FullMoon.EntrySub);
+        p.WriteByte(Domain.FullMoon.EntryKeyA);
+        p.WriteByte(Domain.FullMoon.EntryKeyB);
+        _conn.Send(p);
+    }
+
     private void HandleBifrostEvent(Packet p)
     {
         if (p.RemainingBytes < 1) return;
@@ -80,14 +96,32 @@ public partial class Net
             case MonsterStoneSub:
                 HandleMonsterStone(p);
                 break;
+            case Domain.FullMoon.EntrySub:
+                if (p.RemainingBytes >= 1) FullMoonEntryEvent?.Invoke(p.ReadByte());
+                break;
+            case Domain.FullMoon.TowerSub:
+                if (p.RemainingBytes >= 1) FullMoonTowerEvent?.Invoke(p.ReadByte());
+                break;
+            case Domain.FullMoon.StageSub:
+                if (p.RemainingBytes >= 2) FullMoonStageEvent?.Invoke(p.ReadByte(), p.ReadByte());
+                break;
             case TempleEventFinishSub:
                 HandleTempleEventFinish(p);
                 break;
             case BifrostJoinSub:
             {
-                bool ok = (p.RemainingBytes >= 1 ? p.ReadByte() : 0) == 1;
+                byte result = p.RemainingBytes >= 1 ? p.ReadByte() : TempleJoin.NotOpen;
                 int zone = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
-                BifrostJoinEvent?.Invoke(ok, zone);
+                BifrostJoinEvent?.Invoke(result, zone);
+                break;
+            }
+            case TempleSignUpsSub:
+            {
+                if (p.RemainingBytes < 6) break;
+                int eventId = p.ReadUShort();
+                int karus = p.ReadUShort();
+                int elMorad = p.ReadUShort();
+                TempleSignUpsEvent?.Invoke(eventId, karus, elMorad);
                 break;
             }
             case BifrostDisbandSub:

@@ -10,6 +10,8 @@ public sealed class RebirthPick
 
     private readonly int[] _picked = new int[StatCount];
 
+    public int Capacity { get; private set; } = PointsPerRebirth;
+
     public int PickedAt(int row) => (uint)row < StatCount ? _picked[row] : 0;
 
     public int Placed
@@ -22,7 +24,7 @@ public sealed class RebirthPick
         }
     }
 
-    public int Remaining => PointsPerRebirth - Placed;
+    public int Remaining => Capacity - Placed;
 
     public bool Complete => Remaining == 0;
 
@@ -44,7 +46,13 @@ public sealed class RebirthPick
         return true;
     }
 
-    public void Clear() => Array.Clear(_picked);
+    public void Clear() => Reset(PointsPerRebirth);
+
+    public void Reset(int capacity)
+    {
+        Array.Clear(_picked);
+        Capacity = Math.Max(0, capacity);
+    }
 
     public static bool Available(int level, int rebirthLevel) =>
         level >= CharacterSheet.MaxLevel && rebirthLevel < MaxRebirthLevel;

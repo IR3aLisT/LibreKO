@@ -480,6 +480,59 @@ public class EventTests : GameTestBase
     }
 
     [Fact]
+    public async Task LootPacketCoordinator_HandleBundleOpenAsync_StaysSilentForABoxOutOfRange()
+    {
+        const float beyondLootRange = 20f;
+
+        using var provider = CreateProvider(_ => { });
+        var (client, session, sentPackets) = CreateLooter(provider);
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var bundle = sessionManager.Regions.CreateBundle(session.X + beyondLootRange, session.Z, session.Y);
+        bundle.OwnerCharId = session.CharacterId;
+        bundle.Items.Add(new LootItem { ItemId = 379109000, Count = 1 });
+
+        var packet = new Packet(GameOpcodes.GS_BUNDLE_OPEN_REQ);
+        packet.WriteInt(bundle.BundleId);
+        await provider.GetRequiredService<ILootPacketCoordinator>().HandleBundleOpenAsync(client, packet);
+
+        sentPackets.Should().NotContain(sent => sent.GetOpcode() == (byte)GameOpcodes.GS_BUNDLE_OPEN_REQ);
+    }
+
+    [Fact]
+    public async Task LootPacketCoordinator_HandleBundleOpenAsync_ReportsAMissingBoxAsGone()
+    {
+        const int missingBundleId = 987_654;
+
+        using var provider = CreateProvider(_ => { });
+        var (client, _, sentPackets) = CreateLooter(provider);
+
+        var packet = new Packet(GameOpcodes.GS_BUNDLE_OPEN_REQ);
+        packet.WriteInt(missingBundleId);
+        await provider.GetRequiredService<ILootPacketCoordinator>().HandleBundleOpenAsync(client, packet);
+
+        var reply = sentPackets.Single(sent => sent.GetOpcode() == (byte)GameOpcodes.GS_BUNDLE_OPEN_REQ);
+        reply.ResetOffset();
+        reply.ReadInt().Should().Be(missingBundleId);
+        reply.ReadByte().Should().Be(BundleOpenPacketWriter.ResultGone);
+    }
+
+    private static (IClient Client, UserSession Session, List<Packet> Sent) CreateLooter(ServiceProvider provider)
+    {
+        var client = Substitute.For<IClient>();
+        client.Id.Returns(Guid.NewGuid());
+        var sentPackets = new List<Packet>();
+        client.SendPacket(Arg.Do<Packet>(packet => sentPackets.Add(packet)), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var session = provider.GetRequiredService<SessionManager>().CreateSession(client, characterId: 212, accountId: 312);
+        session.ZoneId = 21;
+        session.X = 100;
+        session.Z = 200;
+        session.Hp = 100;
+        return (client, session, sentPackets);
+    }
+
+    [Fact]
     public async Task LootPacketCoordinator_HandleItemGetAsync_AddsLootToInventoryAndRemovesBundle()
     {
         const int itemId = 810002000;

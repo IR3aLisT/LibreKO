@@ -11,11 +11,14 @@ public sealed partial class ItemSlotView : PanelContainer
 {
     private const float WearHeight = 3f;
     private const float WearInset = 3f;
-    private const float DragPreviewSize = 40f;
     private static readonly Color DimmedTint = new(1f, 1f, 1f, 0.32f);
     private static readonly Color UnfitTint = new(1f, 0.6f, 0.6f, 0.45f);
     private static readonly Color StagedTint = new(1f, 1f, 1f, 0.45f);
     private static readonly Color GhostTint = new(1f, 1f, 1f, 0.45f);
+    private static readonly Color LockTint = new(1f, 0.86f, 0.55f, 0.9f);
+    private static readonly Color LockedIconTint = new(0.45f, 0.45f, 0.45f);
+    private const float LockInset = 3f;
+    private const float LockSize = 14f;
     private static readonly Color WearTrackColour = new(0.13f, 0.13f, 0.13f, 0.9f);
     private static readonly Dictionary<(Color?, bool), StyleBoxFlat> Frames =
         Shutdown.Track(new Dictionary<(Color?, bool), StyleBoxFlat>());
@@ -23,9 +26,11 @@ public sealed partial class ItemSlotView : PanelContainer
     private readonly TextureRect _icon;
     private readonly Label _count;
     private readonly UpgradeBadge _plus;
+    private readonly IconVeilView _veil;
     private readonly ColorRect _wearTrack;
     private readonly ColorRect _wearFill;
     private SlotLook _look;
+    private Control? _lock;
     private bool _hover;
 
     public event Action<ItemSlotView>? Clicked;
@@ -40,6 +45,33 @@ public sealed partial class ItemSlotView : PanelContainer
 
     public int Index { get; set; }
     public ItemSlot Item { get; private set; }
+    public bool Veiled { get; init; }
+
+    public bool Locked
+    {
+        get => _lock?.Visible ?? false;
+        set
+        {
+            if (value && _lock == null)
+            {
+                _lock = new Control { MouseFilter = MouseFilterEnum.Ignore };
+                AddChild(_lock);
+                _lock.AddChild(new TextureRect
+                {
+                    Texture = UiIcons.Get("system/lock"),
+                    ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    Modulate = LockTint,
+                    AnchorLeft = 1f, AnchorRight = 1f, AnchorTop = 0f, AnchorBottom = 0f,
+                    OffsetLeft = -LockInset - LockSize, OffsetRight = -LockInset,
+                    OffsetTop = LockInset, OffsetBottom = LockInset + LockSize,
+                });
+            }
+            if (_lock != null) _lock.Visible = value;
+            _icon.SelfModulate = value ? LockedIconTint : _look == SlotLook.Ghost ? GhostTint : Colors.White;
+        }
+    }
 
     public ItemSlotView(float size)
     {
@@ -53,6 +85,7 @@ public sealed partial class ItemSlotView : PanelContainer
             MouseFilter = MouseFilterEnum.Ignore,
         };
         AddChild(_icon);
+        _veil = IconVeilView.Attach(this);
 
         var overlay = new Control { MouseFilter = MouseFilterEnum.Ignore };
         AddChild(overlay);
@@ -98,7 +131,7 @@ public sealed partial class ItemSlotView : PanelContainer
         ApplyFrame();
     }
 
-    public void Set(ItemSlot item)
+    public void Set(ItemSlot item, int? count = null)
     {
         Item = item;
         if (item.IsEmpty)
@@ -106,13 +139,15 @@ public sealed partial class ItemSlotView : PanelContainer
             _icon.Texture = null;
             _count.Text = "";
             _plus.Clear();
+            _veil.Clear();
         }
         else
         {
             _icon.Texture = ItemData.Icon(item.ItemId);
-            int shown = ItemData.ShownCount(ItemData.Get(item.ItemId), item);
+            int shown = count ?? ItemData.ShownCount(ItemData.Get(item.ItemId), item);
             _count.Text = shown > 1 ? shown.ToString() : "";
             _plus.Set(item.ItemId);
+            if (Veiled) _veil.Set(item);
         }
         ApplyFrame();
         if (!_hover) return;
@@ -136,7 +171,7 @@ public sealed partial class ItemSlotView : PanelContainer
                 SlotLook.Staged => StagedTint,
                 _ => Colors.White,
             };
-            _icon.SelfModulate = value == SlotLook.Ghost ? GhostTint : Colors.White;
+            _icon.SelfModulate = Locked ? LockedIconTint : value == SlotLook.Ghost ? GhostTint : Colors.White;
             ApplyFrame();
         }
     }
@@ -188,13 +223,7 @@ public sealed partial class ItemSlotView : PanelContainer
         if (DragOut == null || Item.IsEmpty) return default;
         var data = DragOut(this);
         if (data.VariantType == Variant.Type.Nil) return default;
-        DragLayer.Show(this, new TextureRect
-        {
-            Texture = ItemData.Icon(Item.ItemId),
-            CustomMinimumSize = new Vector2(DragPreviewSize, DragPreviewSize),
-            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-        });
+        DragLayer.ShowItem(this, Item.ItemId, atPosition);
         return data;
     }
 

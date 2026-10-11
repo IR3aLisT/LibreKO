@@ -25,6 +25,8 @@ public class NpcData
     public const byte TypeElectionOfficer = 79;
     public const byte TypeGrandChamberlain = 80;
     public const byte TypeGate = 50;
+    public const byte TypeDestroyedArtifact = 61;
+    public const byte TypeBattleMonument = 211;
     public const byte TypeTalk = 64;
     public const byte TypeRankerKarusFirst = 82;
     public const byte TypeRankerElMoradFirst = 85;
@@ -33,6 +35,10 @@ public class NpcData
     public const byte TypeObjectWood = 54;
     public const byte TypeChaoticGenerator = 162;
     public const byte TypeScarecrow = 171;
+    public const byte TypeKeyGate = 180;
+    public const byte TypeRollingStone = 181;
+    public const byte TypeSoccerBall = 197;
+    public const byte TypeDisassembler = 222;
     public const byte TypeGuardSummon = 255;
 
     public int Id { get; set; }

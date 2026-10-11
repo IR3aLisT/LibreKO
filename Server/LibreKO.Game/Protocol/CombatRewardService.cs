@@ -27,8 +27,12 @@ public class CombatRewardService(
     IAchievementProgressService achievementProgressService,
     ICollectionRaceService collectionRaceService,
     IJuraidMountainService juraidMountainService,
+    IKillStreakService killStreakService,
     IBorderDefenseWarService borderDefenseWarService,
     IMonsterStoneService monsterStoneService,
+    ICastleSiegeService castleSiegeService,
+    INereidMonumentService nereidMonuments,
+    IExpSealService expSeal,
     IUnderTheCastleService underTheCastleService,
     IForgottenTempleService forgottenTempleService,
     ILogger<CombatRewardService> logger) : ICombatRewardService
@@ -42,12 +46,15 @@ public class CombatRewardService(
             return;
 
         killer.PlayersDefeated++;
+        await killStreakService.OnPlayerKilledAsync(victim, killer);
         await questPacketCoordinator.CheckQuestKillAsync(killer, (int)victim.Nation);
         await achievementProgressService.ReportPlayerKillAsync(killer);
         await collectionRaceService.HandlePlayerKillAsync(victim, killer);
 
         if (victim.ZoneId == (byte)ZoneId.BorderDefenseWar)
             await borderDefenseWarService.OnPlayerKilledAsync(victim, killer);
+        else if (victim.ZoneId == (byte)ZoneId.JuradMountain)
+            await juraidMountainService.OnPlayerKilledAsync(victim, killer);
     }
 
     public async Task AwardNpcKillAsync(NpcInstance npc, UserSession killer)
@@ -83,6 +90,12 @@ public class CombatRewardService(
 
         if (npc.ZoneId == (byte)ZoneId.ForgottenTemple)
             await forgottenTempleService.OnNpcKilledAsync(npc, killer);
+
+        if (npc.ZoneId == (byte)ZoneId.Delos)
+            await castleSiegeService.OnNpcKilledAsync(npc, killer);
+
+        if (npc.ZoneId == (byte)ZoneId.NereidsIsland)
+            await nereidMonuments.OnNpcKilledAsync(npc, killer);
 
         var damagerIds = npc.WithLock(n => n.DamageMap.Keys.ToArray());
         foreach (var charId in damagerIds)
@@ -125,7 +138,7 @@ public class CombatRewardService(
         if (levelDiff > 5)
             expGain = expGain * Math.Max(10, 100 - (levelDiff - 5) * 10) / 100;
 
-        await playerProgressionService.AwardExperienceAsync(player, expGain);
+        await AwardKillExpAsync(player, expGain);
     }
 
     private async Task AwardPartyExpAsync(UserSession killer, NpcInstance npc)
@@ -168,8 +181,14 @@ public class CombatRewardService(
             if (levelDiff > 5)
                 memberExp = memberExp * Math.Max(10, 100 - (levelDiff - 5) * 10) / 100;
 
-            await playerProgressionService.AwardExperienceAsync(member, memberExp);
+            await AwardKillExpAsync(member, memberExp);
         }
+    }
+
+    private async Task AwardKillExpAsync(UserSession player, long exp)
+    {
+        if (!await expSeal.TrySealAsync(player, exp))
+            await playerProgressionService.AwardExperienceAsync(player, exp);
     }
 
     private ushort RollCoins(NpcInstance npc)

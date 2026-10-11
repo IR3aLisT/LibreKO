@@ -163,7 +163,7 @@ public class PartyPacketWriterTests
         var packet = PartyPacketWriter.Commander(70_001, "Aurelia");
         packet.ResetOffset();
 
-        packet.ReadByte().Should().Be((byte)PartySubOpcode.Commander);
+        packet.ReadByte().Should().Be(30);
         packet.ReadInt().Should().Be(70_001);
         packet.ReadShort().Should().Be(7);
         packet.ReadBytes(7).Should().Equal("Aurelia"u8.ToArray());
@@ -171,23 +171,24 @@ public class PartyPacketWriterTests
     }
 
     [Fact]
-    public void TargetNumberIsSub31AndPreservesNegativeCodes()
+    public void TheCommanderMarkIsSub31WithTheTargetAndAClearFlag()
     {
-        var packet = PartyPacketWriter.TargetNumber(70_001, -1);
+        var packet = PartyPacketWriter.CommanderMark(70_001, clear: true);
         packet.ResetOffset();
 
-        packet.ReadByte().Should().Be((byte)PartySubOpcode.TargetNumber);
+        packet.ReadByte().Should().Be(31);
         packet.ReadInt().Should().Be(70_001);
-        packet.ReadByte().Should().Be(0xFF);
+        packet.ReadByte().Should().Be(1);
+        packet.RemainingBytes.Should().Be(0);
     }
 
     [Fact]
-    public void AlertIsSub32()
+    public void TheCommanderOrderIsSub32()
     {
-        var packet = PartyPacketWriter.Alert(3);
+        var packet = PartyPacketWriter.CommanderOrder(3);
         packet.ResetOffset();
 
-        packet.ReadByte().Should().Be((byte)PartySubOpcode.Alert);
+        packet.ReadByte().Should().Be(32);
         packet.ReadByte().Should().Be(3);
         packet.RemainingBytes.Should().Be(0);
     }

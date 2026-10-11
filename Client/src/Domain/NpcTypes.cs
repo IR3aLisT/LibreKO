@@ -30,6 +30,9 @@ public static class NpcTypes
     public const int Lever = 55;
 
     public const int Scarecrow = 171;
+    public const int DestroyedArtifact = 61;
+    public const int BattleMonument = 211;
+    public const int KeyGate = 180;
     public const int GuardSummon = 255;
 
     public const int FixedPose = 178;

@@ -1,5 +1,12 @@
 ﻿namespace LibreKO.Domain;
 
+public static class ItemRemove
+{
+    public const byte FromInventory = 0;
+    public const byte FromEquipment = 1;
+    public const byte FromMagicBag = 3;
+}
+
 public static class ItemMove
 {
     public const byte InventoryToSlot = 1;

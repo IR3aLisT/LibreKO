@@ -34,6 +34,8 @@ public partial class Net
     public event Action? PetGoneEvent;
     public event Action<int>? PetModeEvent;
     public event Action? PetVitalsEvent;
+    public event Action<int>? PetHpDeltaEvent;
+    public event Action<int>? PetMpDeltaEvent;
     public event Action<long>? PetExpEvent;
     public event Action<int, int, int, int>? PetFedEvent;
     public event Action<int>? PetFoodRefusedEvent;
@@ -62,15 +64,25 @@ public partial class Net
         {
             case PetFunctionMode: HandlePetMode(p); break;
             case PetFunctionHp when p.RemainingBytes >= 4 && Pet is { } hpPet:
+            {
+                bool known = hpPet.MaxHp > 0;
+                int oldHp = hpPet.Hp;
                 hpPet.MaxHp = p.ReadShort();
                 hpPet.Hp = p.ReadShort();
                 PetVitalsEvent?.Invoke();
+                if (known && hpPet.Hp != oldHp) PetHpDeltaEvent?.Invoke(hpPet.Hp - oldHp);
                 break;
+            }
             case PetFunctionMp when p.RemainingBytes >= 4 && Pet is { } mpPet:
+            {
+                bool known = mpPet.MaxMp > 0;
+                int oldMp = mpPet.Mp;
                 mpPet.MaxMp = p.ReadShort();
                 mpPet.Mp = p.ReadShort();
                 PetVitalsEvent?.Invoke();
+                if (known && mpPet.Mp != oldMp) PetMpDeltaEvent?.Invoke(mpPet.Mp - oldMp);
                 break;
+            }
             case PetFunctionTargetHp when p.RemainingBytes >= 15:
                 int target = p.ReadInt();
                 p.ReadByte();
@@ -210,6 +222,13 @@ public partial class Net
         var slot = PetWire.ReadItemRecord(p, out var pet);
         if (pet is { } info) PetItems[info.Index] = info;
         return slot;
+    }
+
+    private int ReadUniqueItem(Packet p)
+    {
+        int uniqueId = PetWire.ReadUniqueId(p, out var summary);
+        if (summary is { } info) PetItems[info.Index] = info;
+        return uniqueId;
     }
 
     private void RefreshPetItem(PetSheet sheet)

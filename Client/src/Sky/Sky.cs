@@ -23,6 +23,8 @@ public partial class Sky : Node3D
     public float Wetness { get; private set; }
     public float SunShine { get; private set; }
 
+    public float WeatherLight { get; set; } = 1f;
+
     public float NightAmbient = 0.08f;
     public float NightSkyEnergy = 0.10f;
     public float NightMoonEnergy = 1.1f;
@@ -120,12 +122,12 @@ public partial class Sky : Node3D
             SsrFadeOut = 1.5f,
             SsrDepthTolerance = 0.3f,
             FogEnabled = true,
-            FogDensity = 0.0003f,
+            FogDensity = BaseFogDensity,
             FogAerialPerspective = 0.18f,
             FogSkyAffect = 0.1f,
             AdjustmentEnabled = true,
-            AdjustmentBrightness = 1.0f,
-            AdjustmentContrast = 1.12f,
+            AdjustmentBrightness = BaseBrightness,
+            AdjustmentContrast = BaseContrast,
             AdjustmentSaturation = 1.18f,
         };
         _we = new WorldEnvironment { Environment = _env };
@@ -203,8 +205,18 @@ public partial class Sky : Node3D
         ProjectSettings.SetSetting(DepthPrepassSetting, ssao);
     }
 
+    private const float BaseBrightness = 1.0f;
+    private const float BaseContrast = 1.12f;
+    private const float BaseFogDensity = 0.0003f;
+    private float _fogScale = 1f;
+    private float _nightScale = 1f;
+
     public void ApplyGraphics()
     {
+        _env.AdjustmentBrightness = BaseBrightness * LightRange.Multiplier(Config.Brightness);
+        _env.AdjustmentContrast = BaseContrast * LightRange.Multiplier(Config.Contrast);
+        _fogScale = LightRange.Multiplier(Config.Fog);
+        _nightScale = LightRange.Multiplier(Config.NightBrightness);
         if (_env == null) return;
         ApplyAmbientOcclusion();
         _env.GlowEnabled = Config.Bloom;
@@ -268,8 +280,8 @@ public partial class Sky : Node3D
             top = top.Lerp(cloudTop, tint);
             hor = hor.Lerp(cloudHor, tint);
         }
-        float skyEnergy = Mathf.Lerp(NightSkyEnergy, 1.0f, amb) * (_storm ? 0.72f : 1f);
-        float ambient = Mathf.Lerp(NightAmbient, 1.0f, amb) * (1f - (_storm ? 0.5f : 0.3f) * overcast);
+        float skyEnergy = Mathf.Lerp(NightSkyEnergy * _nightScale, 1.0f, amb) * (_storm ? 0.72f : 1f);
+        float ambient = Mathf.Lerp(NightAmbient * _nightScale, 1.0f, amb) * (1f - (_storm ? 0.5f : 0.3f) * overcast);
         if (_flash > 0.001f) { skyEnergy += _flash * 1.3f; ambient += _flash * 1.6f; }
 
         var sunLight = SunGoldColor.Lerp(SunDayColor, day);
@@ -277,7 +289,7 @@ public partial class Sky : Node3D
 
         _sun.Visible = sunAlt > -3f;
         _sun.LightColor = sunLight.Lerp(new Color(0.74f, 0.80f, 0.93f), _sunBlock * 0.35f);
-        _sun.LightEnergy = Mathf.Lerp(0f, 1.5f, day) * (1f - (_storm ? 0.9f : 0.75f) * overcast) * cloudSun;
+        _sun.LightEnergy = Mathf.Lerp(0f, 1.5f, day) * (1f - (_storm ? 0.9f : 0.75f) * overcast) * cloudSun * WeatherLight;
         // NOT _sunBlock: a penumbra that breathes with cloud cover is what made tree shadows crawl.
         _sun.LightAngularDistance = Mathf.Lerp(SunAngularClear, SunAngularOvercast, overcast);
         SunShine = day * (1f - 0.85f * overcast) * cloudSun;
@@ -287,7 +299,7 @@ public partial class Sky : Node3D
         _moonLit = moonRise * (1f - day);
         _moon.Visible = _moonLit > 0.002f;
         _moon.LightColor = MoonLightLow.Lerp(MoonLightHigh, moonWarm);
-        _moon.LightEnergy = _moonLit * NightMoonEnergy * (1f - (_storm ? 0.7f : 0.5f) * overcast)
+        _moon.LightEnergy = _moonLit * NightMoonEnergy * _nightScale * (1f - (_storm ? 0.7f : 0.5f) * overcast)
                           * (1f - MoonCloudBlock * _moonBlock);
         _skyMat.SetShaderParameter(Param.MoonDir, _moonDir);
         _skyMat.SetShaderParameter(Param.MoonDisc, _moonLit * (1f - MoonOvercastHaze * overcast));
@@ -302,8 +314,8 @@ public partial class Sky : Node3D
             StarsFor(sunAlt) * (1f - 0.8f * overcast) * (1f - _flash));
 
         _env.AmbientLightEnergy = ambient;
-        _env.VolumetricFogDensity = VolFogDensity + overcast * (_storm ? 0.02f : 0.012f);
-        _env.FogDensity = 0.0003f + overcast * (_storm ? 0.004f : 0.0025f);
+        _env.VolumetricFogDensity = (VolFogDensity + overcast * (_storm ? 0.02f : 0.012f)) * _fogScale;
+        _env.FogDensity = (BaseFogDensity + overcast * (_storm ? 0.004f : 0.0025f)) * _fogScale;
         _env.FogLightColor = hor;
         _env.VolumetricFogAlbedo = new Color(0.16f, 0.18f, 0.24f).Lerp(new Color(0.92f, 0.90f, 0.86f), amb);
 

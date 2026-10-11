@@ -9,6 +9,7 @@ public class ActiveBuff
     public long ExpireTicks { get; set; }
     public short Duration { get; set; }
     public BuffType BuffType { get; set; }
+    public bool DurationExtended { get; set; }
     public int SpecialAmount { get; set; } // Type-specific value (ExpPct, SpecialAmount from MagicType4Data)
 
     // Stat modifiers from MagicType4Data

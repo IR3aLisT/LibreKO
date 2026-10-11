@@ -1,6 +1,6 @@
 ﻿namespace LibreKO.Domain;
 
-public readonly record struct PetItemInfo(int Index, string Name, int Attack, int Level, int ExpPercent, int Satisfaction);
+public readonly record struct PetItemInfo(int Index, string Name, int Attack, int Level, int ExpPercent, int Satisfaction, int Tail = 0);
 
 public sealed class PetSheet
 {

@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Entities.GameData;
+﻿using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.World;
@@ -20,20 +20,10 @@ public class VipWarehousePacketCoordinator(
     IServiceScopeFactory scopeFactory,
     ILogger<VipWarehousePacketCoordinator> logger) : IVipWarehousePacketCoordinator
 {
-
-
-    private const int VipVaultKey = 800_442_000;
-    private const int VipSafeKey1 = 810_442_000;
-    private const int VipSafeKey7 = 998_019_000;
-
-    // Vault extension durations.
-    private const int VaultDurationDaysDefault = 7;
-    private const int VaultDurationDaysSafe1 = 1;
-    private const int VaultDurationDaysSafe7 = 7;
-    private const int VipWarehousePageSize = 12;
+    private const int RentalCapDays = 60;
+    private const int UseKeyBytes = 11;
+    internal const byte PasswordTriesAllowed = 3;
     private const int ItemCountMax = 9999;
-    private const int ItemNoTradeMin = 900_000_001;
-    private const int ItemNoTradeMax = 999_999_999;
     private const int CoinMax = 2_100_000_000;
 
     public async Task HandleAsync(IClient client, Packet packet)
@@ -47,6 +37,20 @@ public class VipWarehousePacketCoordinator(
             || session.IsGathering)
         {
             await SendResult(session, sub, VipWarehouseResult.Failed);
+            return;
+        }
+
+        if (PasswordPending(session) && sub is VipWarehouseSubOpcode.Input or VipWarehouseSubOpcode.Output
+                or VipWarehouseSubOpcode.Store or VipWarehouseSubOpcode.InventoryMove)
+        {
+            await SendResult(session, sub, VipWarehouseResult.Failed);
+            return;
+        }
+
+        if (PasswordPending(session) && sub is VipWarehouseSubOpcode.SetPassword
+                or VipWarehouseSubOpcode.CancelPassword or VipWarehouseSubOpcode.ChangePassword)
+        {
+            await SendResult(session, sub, VipWarehouseResult.Rejected);
             return;
         }
 
@@ -70,14 +74,7 @@ public class VipWarehousePacketCoordinator(
 
     private async Task OpenAsync(UserSession session)
     {
-        if (session.VipVaultExpiry <= DateTime.UtcNow)
-        {
-            await SendResult(session, VipWarehouseSubOpcode.Open, VipWarehouseResult.Expired);
-            return;
-        }
-
-        // hasn't entered it yet, prompt instead of opening the panel.
-        if (session.VipPasswordRequest != 0 && session.VipPassword.Length == 4)
+        if (PasswordPending(session))
         {
             await SendResult(session, VipWarehouseSubOpcode.EnterPassword, VipWarehouseResult.Succeeded);
             return;
@@ -86,17 +83,18 @@ public class VipWarehousePacketCoordinator(
         await SendOpenResponseAsync(session);
     }
 
+    private static bool PasswordPending(UserSession session) =>
+        session.VipPasswordRequest != 0 && session.VipPassword.Length == VipVault.PinLength;
+
     private static async Task SendOpenResponseAsync(UserSession session)
     {
-        // Remaining seconds — client uses this for "expires in X" display.
-        var remaining = (long)Math.Max(0, (session.VipVaultExpiry - DateTime.UtcNow).TotalSeconds);
-
         var slots = new List<ItemSlot>(UserSession.VipWarehouseMax);
         for (var i = 0; i < UserSession.VipWarehouseMax; i++)
             slots.Add(session.VipWarehouse[i]);
 
         await session.Client.SendPacket(WarehousePacketWriter.VipContents(
-            VipWarehouseSubOpcode.Open, VipWarehouseResult.Succeeded, (int)Math.Min(remaining, int.MaxValue), slots));
+            session.VipPassword.Length == VipVault.PinLength, session.VipVaultExpiry > DateTime.UtcNow,
+            VipVault.ExpiresAt(session.VipVaultExpiry), slots));
     }
 
     private async Task InputAsync(UserSession session, Packet packet)
@@ -117,8 +115,9 @@ public class VipWarehousePacketCoordinator(
         var itemData = gameDataService.GetItem(itemId);
         if (itemData == null
             || srcPos >= InventoryConstants.HaveMax
-            || dstPos >= VipWarehousePageSize
-            || (itemId >= ItemNoTradeMin && itemId <= ItemNoTradeMax)
+            || page != VipVault.OwnStorage
+            || dstPos >= UserSession.VipWarehouseMax
+            || !WarehousePacketCoordinator.Storable(itemData)
             || count <= 0
             || (itemData.Countable == 0 && count != 1))
         {
@@ -127,12 +126,7 @@ public class VipWarehousePacketCoordinator(
         }
 
         var absSrc = InventoryConstants.SlotMax + srcPos;
-        var realDst = page * VipWarehousePageSize + dstPos;
-        if (realDst >= UserSession.VipWarehouseMax)
-        {
-            await SendResult(session, VipWarehouseSubOpcode.Input, VipWarehouseResult.Failed);
-            return;
-        }
+        var realDst = dstPos;
 
         var success = session.WithLock(s =>
         {
@@ -173,6 +167,12 @@ public class VipWarehousePacketCoordinator(
 
     private async Task OutputAsync(UserSession session, Packet packet)
     {
+        if (session.VipVaultExpiry <= DateTime.UtcNow)
+        {
+            await SendResult(session, VipWarehouseSubOpcode.Output, VipWarehouseResult.Expired);
+            return;
+        }
+
         _ = packet.ReadInt();
         var itemId = packet.ReadInt();
         var page = packet.ReadByte();
@@ -180,18 +180,14 @@ public class VipWarehousePacketCoordinator(
         var dstPos = packet.ReadByte();
         var count = packet.ReadInt();
 
-        if (srcPos >= VipWarehousePageSize || dstPos >= InventoryConstants.HaveMax || count <= 0)
+        if (page != VipVault.OwnStorage || srcPos >= UserSession.VipWarehouseMax
+            || dstPos >= InventoryConstants.HaveMax || count <= 0)
         {
             await SendResult(session, VipWarehouseSubOpcode.Output, VipWarehouseResult.Failed);
             return;
         }
 
-        var realSrc = page * VipWarehousePageSize + srcPos;
-        if (realSrc >= UserSession.VipWarehouseMax)
-        {
-            await SendResult(session, VipWarehouseSubOpcode.Output, VipWarehouseResult.Failed);
-            return;
-        }
+        var realSrc = srcPos;
 
         var itemData = gameDataService.GetItem(itemId);
         if (itemData == null)
@@ -253,19 +249,15 @@ public class VipWarehousePacketCoordinator(
         var srcPos = packet.ReadByte();
         var dstPos = packet.ReadByte();
 
-        if (srcPos >= VipWarehousePageSize || dstPos >= VipWarehousePageSize)
+        if (page != VipVault.OwnStorage || srcPos >= UserSession.VipWarehouseMax
+            || dstPos >= UserSession.VipWarehouseMax)
         {
             await SendResult(session, VipWarehouseSubOpcode.Store, VipWarehouseResult.Failed);
             return;
         }
 
-        var realSrc = page * VipWarehousePageSize + srcPos;
-        var realDst = page * VipWarehousePageSize + dstPos;
-        if (realSrc >= UserSession.VipWarehouseMax || realDst >= UserSession.VipWarehouseMax)
-        {
-            await SendResult(session, VipWarehouseSubOpcode.Store, VipWarehouseResult.Failed);
-            return;
-        }
+        var realSrc = srcPos;
+        var realDst = dstPos;
 
         var moved = session.WithLock(s =>
         {
@@ -329,66 +321,65 @@ public class VipWarehousePacketCoordinator(
 
     private async Task UseVaultAsync(UserSession session, Packet packet)
     {
-        if (packet.RemainingBytes < 4)
+        if (packet.RemainingBytes < UseKeyBytes)
         {
-            await SendResult(session, VipWarehouseSubOpcode.UseVault, VipWarehouseResult.Failed);
+            await SendResult(session, VipWarehouseSubOpcode.UseVault, VipWarehouseResult.Rejected);
             return;
         }
 
+        _ = packet.ReadInt();
         var itemId = packet.ReadInt();
-        var days = itemId switch
-        {
-            VipVaultKey => VaultDurationDaysDefault,
-            VipSafeKey1 => VaultDurationDaysSafe1,
-            VipSafeKey7 => VaultDurationDaysSafe7,
-            _ => 0
-        };
+        _ = packet.ReadByte();
+        var bagPos = packet.ReadByte();
+        var storage = packet.ReadByte();
+        var days = VipVault.KeyDays(itemId);
         if (days <= 0)
         {
-            await SendResult(session, VipWarehouseSubOpcode.UseVault, VipWarehouseResult.Failed);
+            await SendResult(session, VipWarehouseSubOpcode.UseVault, VipWarehouseResult.NotAVaultKey);
+            return;
+        }
+        if (storage != VipVault.OwnStorage || bagPos >= InventoryConstants.HaveMax)
+        {
+            await SendResult(session, VipWarehouseSubOpcode.UseVault, VipWarehouseResult.Rejected);
             return;
         }
 
-        var newExpiry = session.WithLock(s =>
+        var keySlot = InventoryConstants.SlotMax + bagPos;
+        var outcome = session.WithLock(s =>
         {
-            var keySlot = FindKeyItemSlot(s, itemId);
-            if (keySlot < 0)
-                return (DateTime?)null;
-
-            var basis = s.VipVaultExpiry > DateTime.UtcNow ? s.VipVaultExpiry : DateTime.UtcNow;
-            s.VipVaultExpiry = basis.AddDays(days);
+            var now = DateTime.UtcNow;
+            if (s.VipVaultExpiry - now > TimeSpan.FromDays(RentalCapDays))
+                return VipWarehouseResult.RentalAtCap;
 
             var slot = s.Inventory[keySlot];
+            if (slot.ItemId != itemId || slot.Count == 0)
+                return VipWarehouseResult.Rejected;
+
+            var basis = s.VipVaultExpiry > now ? s.VipVaultExpiry : now;
+            s.VipVaultExpiry = basis.AddDays(days);
+            s.VipVaultExpiryAnnounced = false;
+
             slot.Count--;
             if (slot.Count == 0) slot.Clear();
-            return s.VipVaultExpiry;
+            return VipWarehouseResult.Succeeded;
         });
 
-        if (newExpiry == null)
+        if (outcome != VipWarehouseResult.Succeeded)
         {
-            await SendResult(session, VipWarehouseSubOpcode.UseVault, VipWarehouseResult.Failed);
+            await SendResult(session, VipWarehouseSubOpcode.UseVault, outcome);
             return;
         }
 
+        var newExpiry = session.VipVaultExpiry;
+        var key = session.Inventory[keySlot];
         await PersistAccountAsync(session);
-
+        await userNotificationService.SendStackChangeAsync(
+            session, (byte)keySlot, key.IsEmpty ? 0 : key.ItemId, key.Count, key.Durability);
         await session.Client.SendPacket(WarehousePacketWriter.VipVaultExtended(
-            VipWarehouseSubOpcode.UseVault, VipWarehouseResult.Succeeded, (int)(newExpiry.Value - DateTime.UtcNow).TotalSeconds));
+            VipVault.OwnStorage, VipVault.ExpiresAt(newExpiry)));
 
         logger.LogInformation("{Name} activated VIP vault with key {ItemId}: expires {Expiry:u}",
-            session.Name, itemId, newExpiry.Value);
-    }
-
-    private static int FindKeyItemSlot(UserSession session, int itemId)
-    {
-        for (var i = InventoryConstants.InventoryStart;
-             i < InventoryConstants.InventoryStart + InventoryConstants.HaveMax;
-             i++)
-        {
-            if (session.Inventory[i].ItemId == itemId && session.Inventory[i].Count > 0)
-                return i;
-        }
-        return -1;
+            session.Name, itemId, newExpiry);
     }
 
     private static async Task SendResult(UserSession session, VipWarehouseSubOpcode sub, VipWarehouseResult result)
@@ -445,12 +436,20 @@ public class VipWarehousePacketCoordinator(
     private async Task EnterPasswordAsync(UserSession session, Packet packet)
     {
         var pin = ReadPin(packet);
-        if (!IsValidPin(pin) || pin != session.VipPassword)
+        if (session.VipPasswordFailures >= PasswordTriesAllowed)
         {
-            await SendResult(session, VipWarehouseSubOpcode.EnterPassword, VipWarehouseResult.Rejected);
+            await session.Client.SendPacket(WarehousePacketWriter.VipPasswordRejected(session.VipPasswordFailures));
             return;
         }
 
+        if (!IsValidPin(pin) || pin != session.VipPassword)
+        {
+            session.VipPasswordFailures++;
+            await session.Client.SendPacket(WarehousePacketWriter.VipPasswordRejected(session.VipPasswordFailures));
+            return;
+        }
+
+        session.VipPasswordFailures = 0;
         session.VipPasswordRequest = 0;
 
         await session.Client.SendPacket(WarehousePacketWriter.VipPasswordAccepted(
@@ -469,7 +468,7 @@ public class VipWarehousePacketCoordinator(
 
     private static bool IsValidPin(string pin)
     {
-        if (pin.Length != 4) return false;
+        if (pin.Length != VipVault.PinLength) return false;
         for (var i = 0; i < pin.Length; i++)
             if (pin[i] < '0' || pin[i] > '9') return false;
         return true;

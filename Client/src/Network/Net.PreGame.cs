@@ -6,18 +6,29 @@ namespace LibreKO.Network;
 public partial class Net
 {
     private const byte CharListSub = 1;
+    private const byte KingFlag = 1;
     private const byte CharListReady = 1;
-    private const int CharSlots = 4;
-    private const int CharHeaderBytes = 1 + 2 + 1 + 1 + 1 + 4 + 2;
-    private const int CharGearBytes = 6;
 
     private int _selectRetries;
     private int _pendingZone;
+
+    private const byte ServerStateClientOutOfDate = 3;
+    public const string ClientOutOfDateText = "Your client is out of date. Run the launcher to update it.";
 
     private void HandleVersionCheck(Packet p)
     {
         p.ReadByte();
         ServerVersion = p.ReadUShort();
+        if (p.RemainingBytes >= 2)
+        {
+            p.ReadByte();
+            if (p.ReadByte() == ServerStateClientOutOfDate)
+            {
+                _autoLoginPending = false;
+                ErrorEvent?.Invoke(ClientOutOfDateText);
+                return;
+            }
+        }
 
         VersionEvent?.Invoke(ServerVersion);
         if (_autoLoginPending)
@@ -54,36 +65,10 @@ public partial class Net
         if (p.ReadByte() != CharListSub || p.ReadByte() != CharListReady) return;
 
         var list = new List<CharacterSummary>();
-        for (int slot = 0; slot < CharSlots; slot++)
+        for (int slot = 0; slot < CharacterRecordWire.SlotCount; slot++)
         {
             if (p.RemainingBytes < 2) break;
-            var ci = new CharacterSummary();
-            ci.Name = p.ReadString();
-            if (ci.Name.Length == 0)
-            {
-                SkipBytes(p, CharHeaderBytes + InventoryConstants.VisualSlotCount * CharGearBytes);
-                list.Add(ci);
-                continue;
-            }
-            ci.Race = p.ReadByte();
-            ci.Class = p.ReadShort();
-            ci.Level = p.ReadByte();
-            ci.Rebirth = p.ReadByte();
-            ci.Face = p.ReadByte();
-            ci.Hair = p.ReadUInt();
-            ci.Zone = p.ReadUShort();
-            ci.Gear = new int[InventoryConstants.VisualSlots.Length];
-            for (int i = 0; i < InventoryConstants.VisualSlotCount; i++)
-            {
-                int item = p.ReadInt();
-                p.ReadShort();
-                if (i >= InventoryConstants.CharacterListVisualSlots.Length) continue;
-                int equippedSlot = InventoryConstants.CharacterListVisualSlots[i];
-                int visualIndex = Array.IndexOf(InventoryConstants.VisualSlots, equippedSlot);
-                if (visualIndex >= 0)
-                    ci.Gear[visualIndex] = item;
-            }
-            list.Add(ci);
+            list.Add(CharacterRecordWire.Read(p));
         }
         CharListEvent?.Invoke(list);
     }
@@ -109,7 +94,7 @@ public partial class Net
         }
         _pendingZone = p.ReadShort();
         p.ReadShort(); p.ReadShort(); p.ReadShort();
-        SendGameStart(1);
+        SendGameStart(GameStartCharacterPicked);
     }
 
     private void ParseMyInfo(Packet p)
@@ -125,7 +110,7 @@ public partial class Net
         int level = 0, maxHp = 0, hp = 0, maxMp = 0, mp = 0;
         long exp = 0, maxExp = 0;
         int nation = 0, race = 0, cls = 0, face = 0, hair = 0;
-        int statPoints = 0, np = 0, gold = 0, maxWeight = 0;
+        int statPoints = 0, np = 0, monthlyNp = 0, gold = 0, maxWeight = 0;
         int str = 0, sta = 0, dex = 0, intel = 0, magicStat = 0;
         int strB = 0, staB = 0, dexB = 0, intelB = 0, magicB = 0;
         int ap = 0, ac = 0, fr = 0, cr = 0, lr = 0, mr = 0, dr = 0, pr = 0;
@@ -135,7 +120,9 @@ public partial class Net
         int capeId = 0, capeR = 0, capeG = 0, capeB = 0;
         short knightsId = 0; byte clanFame = 0, clanFlag = 0, clanGrade = 0, clanRanking = 0;
         int allianceId = 0, markVersion = 0; string clanName = "";
-        int rebirthLevel = 0, rebStr = 0, rebSta = 0, rebDex = 0, rebInt = 0, rebMag = 0;
+        bool isKing = false;
+        int rebirthLevel = 0, rebStr = 0, rebSta = 0, rebDex = 0, rebInt = 0, rebMag = 0, manner = 0;
+        long sealedExp = 0;
         try
         {
             nation = p.ReadByte();
@@ -143,13 +130,15 @@ public partial class Net
             cls = p.ReadShort();
             face = p.ReadByte();
             hair = p.ReadInt();
-            p.ReadByte(); p.ReadByte(); p.ReadByte(); p.ReadByte();
+            p.ReadByte(); p.ReadByte();
+            isKing = p.ReadByte() == KingFlag;
+            p.ReadByte();
             level = p.ReadByte();
             statPoints = p.ReadShort();
             maxExp = p.ReadLong();
             exp = p.ReadLong();
             np = p.ReadInt();
-            p.ReadInt();
+            monthlyNp = p.ReadInt();
             knightsId = p.ReadShort();
             clanFame = p.ReadByte();
             if (knightsId > 0)
@@ -203,7 +192,7 @@ public partial class Net
                 int vis = System.Array.IndexOf(InventoryConstants.VisualSlots, slot);
                 if (vis >= 0) gear[vis] = itemId;
             }
-            ReadRebirthTail(p, out rebirthLevel, out rebStr, out rebSta, out rebDex, out rebInt, out rebMag);
+            ReadMyInfoTail(p, out manner, out rebirthLevel, out rebStr, out rebSta, out rebDex, out rebInt, out rebMag, out sealedExp);
         }
         catch (System.Exception e)
         {
@@ -211,27 +200,46 @@ public partial class Net
             authority = 1;
         }
 
+        bool refresh = SelfRefreshInWorld;
         LastEnter = new MyInfo
         {
             CharId = MyCharId, Name = name, X = x, Z = z, Y = y,
-            Zone = _pendingZone, Authority = authority,
+            Zone = refresh ? LastEnter.Zone : _pendingZone, Authority = authority,
             Nation = nation, Race = race, Class = cls, Face = face, Hair = hair,
             Gear = gear, Inventory = inventory,
             CapeId = capeId, CapeR = capeR, CapeG = capeG, CapeB = capeB,
             KnightsId = knightsId, ClanFame = clanFame, AllianceId = allianceId, ClanFlag = clanFlag,
             ClanName = clanName, ClanGrade = clanGrade, ClanRanking = clanRanking, MarkVersion = markVersion,
-            KnightsRank = knightsRank, PersonalRank = personalRank,
+            KnightsRank = knightsRank, PersonalRank = personalRank, IsKing = isKing,
         };
         SeedMyClan(LastEnter);
+        if (!refresh) ResetSessionState();
         SeedPlayerState(
             level, exp, maxExp, hp, maxHp, mp, maxMp,
             str, sta, dex, intel, magicStat, statPoints,
             strB, staB, dexB, intelB, magicB,
             ap, ac, gold, np, maxWeight,
             fr, cr, lr, mr, dr, pr, skillPoints);
+        Sheet.ApplyLoyalty(np, monthlyNp);
+        Sheet.SetManner(manner);
         Sheet.SeedRebirth(rebirthLevel, rebStr, rebSta, rebDex, rebInt, rebMag);
+        if (refresh)
+        {
+            ResetExpSeal(sealedExp);
+            RebuildWorldInPlace(x, z, y);
+            return;
+        }
         _known.Clear();
         _gmFxStates.Clear();
+        _rankAuraHidden.Clear();
+        OwnRankAuraShown = true;
+        EventTitles.Clear();
+        _flashTitle = "";
+        SiegeWar = SiegeWarStatus.None;
+        SiegePointTotal = 0;
+        SiegeTowerPending = false;
+        ResetVanguard();
+        ResetExpSeal(sealedExp);
         if (ReconnectEntered()) return;
         EnterWorldEvent?.Invoke(LastEnter);
     }
@@ -239,19 +247,22 @@ public partial class Net
     private const int MyInfoSlotBytes = 19;
     private const int MyInfoTailBeforeRebirth = 4 + 4 + 6 + 2;
 
-    private static void ReadRebirthTail(Packet p, out int level, out int str, out int sta, out int dex, out int intel, out int mag)
+    internal static void ReadMyInfoTail(Packet p, out int manner, out int level, out int str, out int sta, out int dex, out int intel, out int mag,
+        out long sealedExp)
     {
-        level = str = sta = dex = intel = mag = 0;
+        manner = level = str = sta = dex = intel = mag = 0;
+        sealedExp = 0;
         int reserved = InventoryConstants.MyInfoReservedItemRecords * MyInfoSlotBytes;
         if (p.RemainingBytes < reserved + MyInfoTailBeforeRebirth + 6) return;
         for (int i = 0; i < reserved; i++) p.ReadByte();
         p.ReadByte();
         if (p.ReadByte() != 0) return;
         p.ReadByte(); p.ReadByte();
-        p.ReadInt();
+        manner = p.ReadInt();
         for (int i = 0; i < 6; i++) p.ReadByte();
         p.ReadShort();
         level = p.ReadByte();
         str = p.ReadByte(); sta = p.ReadByte(); dex = p.ReadByte(); intel = p.ReadByte(); mag = p.ReadByte();
+        if (p.RemainingBytes >= sizeof(long)) sealedExp = p.ReadLong();
     }
 }

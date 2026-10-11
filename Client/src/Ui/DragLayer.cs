@@ -1,4 +1,5 @@
 ﻿using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -6,6 +7,26 @@ public static class DragLayer
 {
     private const int TopLayer = 230;
     private const string LayerName = "DragLayer";
+
+    public static void ShowItem(Control source, int itemId, Vector2 grabAt)
+    {
+        var scale = source.GetGlobalTransformWithCanvas().Scale;
+        var size = source.Size * scale;
+        var icon = new TextureRect
+        {
+            Texture = ItemData.Icon(itemId),
+            CustomMinimumSize = size,
+            Size = size,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+        };
+        UpgradeBadge.Show(icon, itemId);
+        var shown = GmItemId.Wrap(icon, itemId);
+        shown.Position = -grabAt * scale;
+        var holder = new Control();
+        holder.AddChild(shown);
+        Show(source, holder);
+    }
 
     public static void Show(Control source, Control preview)
     {

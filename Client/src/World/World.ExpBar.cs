@@ -1,4 +1,5 @@
 ﻿using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -23,6 +24,9 @@ public partial class World : Node3D
     private Label? _expBarStats;
     private Label? _expBarClock;
     private double _expBarStatsAt;
+    private Tween? _expBarTween;
+    private float _expBarShown = -1f;
+    private static readonly Color SealedExpColour = new(0.62f, 0.45f, 0.95f, 0.92f);
 
     private void ExpBarInit()
     {
@@ -143,11 +147,30 @@ public partial class World : Node3D
     private void UpdateExpBar()
     {
         if (_expBarFill == null || _expBarLabel == null) return;
-        float ratio = Mathf.Clamp((float)(Sheet.ExpPercent / 100.0), 0f, 1f);
-        _expBarFill.AnchorRight = ratio;
-        if (_expBarGleam != null) _expBarGleam.AnchorRight = ratio;
-        _expBarLabel.Text = $"{Sheet.ExpPercent:0.0}%";
+        bool sealing = Net.I.ExpSealOn;
+        double percent = sealing ? ExpSeal.Percent(Net.I.SealedExperience) : Sheet.ExpPercent;
+        float ratio = Mathf.Clamp((float)(percent / 100.0), 0f, 1f);
+        _expBarFill.Color = sealing ? SealedExpColour : new Color(UiTheme.Gold, 0.92f);
+        GlideExpBar(ratio);
+        _expBarLabel.Text = sealing ? $"EXP:{percent:0.00}%" : $"{Sheet.ExpPercent:0.0}%";
         if (_expBarLevel != null) _expBarLevel.Text = $"Lv {Sheet.Level}";
+    }
+
+    private void GlideExpBar(float ratio)
+    {
+        _expBarTween?.Kill();
+        bool snap = _expBarShown < 0f || ratio < _expBarShown;
+        _expBarShown = ratio;
+        if (snap)
+        {
+            _expBarFill!.AnchorRight = ratio;
+            if (_expBarGleam != null) _expBarGleam.AnchorRight = ratio;
+            return;
+        }
+        double seconds = (ratio - _expBarFill!.AnchorRight) / BarGlide.GlidePerSecond;
+        _expBarTween = CreateTween().SetParallel();
+        _expBarTween.TweenProperty(_expBarFill, "anchor_right", ratio, seconds);
+        if (_expBarGleam != null) _expBarTween.TweenProperty(_expBarGleam, "anchor_right", ratio, seconds);
     }
 
     private void ExpBarStatsTick(double now)
@@ -183,5 +206,7 @@ public partial class World : Node3D
         _expBarLabel = null;
         _expBarStats = null;
         _expBarClock = null;
+        _expBarTween = null;
+        _expBarShown = -1f;
     }
 }

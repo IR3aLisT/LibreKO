@@ -40,7 +40,7 @@ public static class ItemData
         public int ReqCha;
         public int SellingGroup;
         public int ItemType;
-        public int Grade;
+        public int UnbindStones;
         public int Bound;
         public int Notice;
         public int Icon;
@@ -74,6 +74,7 @@ public static class ItemData
         public int Icon;
         public int Special;
         public int PriceMultiply;
+        public int AttackIntervalPercent;
         public int BonusDamage;
         public int BonusAc;
         public int BonusMaxHp;
@@ -115,6 +116,8 @@ public static class ItemData
         public int MpDamage;
         public int MpDrain;
         public int Mirror;
+        public int GradeClass;
+        public int UnbindStones;
     }
 
     public sealed class SetBonus
@@ -215,6 +218,19 @@ public static class ItemData
         }
     }
 
+    private static readonly Dictionary<int, int> _priceOverrides = new();
+
+    private static void LoadPriceOverrides()
+    {
+        using var f = Godot.FileAccess.Open("res://assets/items/price_overrides.json", Godot.FileAccess.ModeFlags.Read);
+        if (f == null) return;
+        var parsed = Json.ParseString(f.GetAsText());
+        if (parsed.VariantType != Variant.Type.Dictionary) return;
+        var d = parsed.AsGodotDictionary();
+        foreach (var key in d.Keys)
+            if (int.TryParse(key.AsString(), out int id)) _priceOverrides[id] = d[key].AsInt32();
+    }
+
     private static void Parse()
     {
         using var f = Godot.FileAccess.Open("res://assets/items/items.json", Godot.FileAccess.ModeFlags.Read);
@@ -230,6 +246,7 @@ public static class ItemData
         LoadUiHelp(d);
         LoadSetBonuses(d);
         LoadSkillOptions(d);
+        LoadPriceOverrides();
         foreach (var key in d.Keys)
         {
             if (!int.TryParse(key.AsString(), out int id)) continue;
@@ -253,7 +270,7 @@ public static class ItemData
                 ReqStr = Int(o, "reqStr"), ReqSta = Int(o, "reqSta"), ReqDex = Int(o, "reqDex"),
                 ReqInt = Int(o, "reqInt"), ReqCha = Int(o, "reqCha"),
                 SellingGroup = Int(o, "sellingGroup"), ReqCls = Int(o, "reqCls"), ItemType = Int(o, "itemType"),
-                Grade = Int(o, "grade"), Bound = Int(o, "bound"), Notice = Int(o, "notice"),
+                UnbindStones = Int(o, "grade"), Bound = Int(o, "bound"), Notice = Int(o, "notice"),
                 Icon = Int(o, "icon"), Duration = Int(o, "duration"),
             };
         }
@@ -287,6 +304,7 @@ public static class ItemData
                     Linked = Int(o, "linked"), GlowFx = Int(o, "glowFx"),
                     Resrc = Int(o, "resrc"), Icon = Int(o, "icon"), Special = Int(o, "special"),
                     PriceMultiply = Int(o, "priceMultiply"),
+                    AttackIntervalPercent = RawInt(o, ExtAttackIntervalColumn),
                     BonusDamage = Int(o, "bonusDamage"), BonusAc = Int(o, "bonusAc"),
                     BonusMaxHp = Int(o, "bonusMaxHp"), BonusMaxMp = Int(o, "bonusMaxMp"),
                     BonusStr = Int(o, "bonusStr"), BonusSta = Int(o, "bonusSta"),
@@ -312,6 +330,8 @@ public static class ItemData
                     LightningDamage = Int(o, "lightningDamage"), PoisonDamage = Int(o, "poisonDamage"),
                     HpDrain = Int(o, "hpDrain"), MpDamage = Int(o, "mpDamage"),
                     MpDrain = Int(o, "mpDrain"), Mirror = Int(o, "mirror"),
+                    GradeClass = RawInt(o, ExtGradeClassColumn),
+                    UnbindStones = RawInt(o, ExtUnbindStonesColumn),
                 };
                 _exts[ExtKey(cat, extId)] = e;
                 if (!_extsByCat.TryGetValue(cat, out var catList))
@@ -379,6 +399,35 @@ public static class ItemData
             }
             if (list.Count > 0) _skillOptions[id] = list;
         }
+    }
+
+    public readonly record struct SetPiece(int SlotType, string Name);
+
+    private static readonly Dictionary<int, List<SetPiece>> _setPieces = new();
+    private const int SetPieceRaceCap = 200;
+    private const int SlotTypeSpan = 100;
+
+    public static SetBonus? SetRow(int key)
+    {
+        EnsureLoaded();
+        return _setBonuses.TryGetValue(key, out var row) ? row : null;
+    }
+
+    public static IReadOnlyList<SetPiece> SetPieces(int race)
+    {
+        EnsureLoaded();
+        if (_setPieces.TryGetValue(race, out var cached)) return cached;
+        var rows = new List<Item>();
+        if (race < SetPieceRaceCap)
+            foreach (var it in _items.Values)
+                if (it.Race == race) rows.Add(it);
+        rows.Sort((a, b) => ((uint)a.Id).CompareTo((uint)b.Id));
+        var seen = new HashSet<int>();
+        var pieces = new List<SetPiece>();
+        foreach (var it in rows)
+            if (seen.Add(it.Slot % SlotTypeSpan)) pieces.Add(new SetPiece(it.Slot, it.Name));
+        _setPieces[race] = pieces;
+        return pieces;
     }
 
     public static SetBonus? CospreBonus(int itemId)
@@ -543,7 +592,7 @@ public static class ItemData
         int extId = ExtIdFor(id);
         if (extId % 1000 != 0 && _exts.TryGetValue(ExtKey(def.Cat, extId), out var byKey))
             return byKey;
-        return _linkedExts.TryGetValue(id, out var byLinked) ? byLinked : null;
+        return _linkedExts.TryGetValue(id, out var byLinked) && byLinked.Cat == def.Cat ? byLinked : null;
     }
 
     public static Ext? ExtRow(int cat, int extId)
@@ -566,13 +615,15 @@ public static class ItemData
         return s.DirectType == healTarget && s.FirstDamage > 0 ? s.FirstDamage : 0;
     }
 
-    public static int BuyPrice(int id) => (Get(id)?.BuyPrice ?? 0) * PriceMultiply(id);
+    public static int BuyPrice(int id) => _priceOverrides.TryGetValue(id, out int price) ? price : RawBuyPrice(id);
+
+    public static int RawBuyPrice(int id) => (Get(id)?.BuyPrice ?? 0) * PriceMultiply(id);
 
     public static int SellPrice(int id)
     {
         var def = Get(id);
         if (def == null) return 0;
-        int price = def.BuyPrice * PriceMultiply(id);
+        int price = BuyPrice(id);
         if (def.SaleType != SaleTypeFull) price /= SellPriceDivisor;
         return price < 1 ? 0 : price;
     }
@@ -733,4 +784,21 @@ public static class ItemData
     private static string Str(Godot.Collections.Dictionary o, string k) => o.ContainsKey(k) ? o[k].AsString() : "";
     private static int Int(Godot.Collections.Dictionary o, string k) =>
         o.ContainsKey(k) && o[k].VariantType != Variant.Type.Nil ? o[k].AsInt32() : 0;
+
+    private const string ExtAttackIntervalColumn = "9";
+    private const string ExtGradeClassColumn = "30";
+    private const string ExtUnbindStonesColumn = "55";
+
+    public static int GradeClass(Item def, Ext? ext) => def.ItemType + (ext?.GradeClass ?? 0);
+
+    public static int UnbindStones(Item def, Ext? ext) => def.UnbindStones + (ext?.UnbindStones ?? 0);
+
+    public static bool BindsOnEquip(int itemId) => Get(itemId)?.UnbindStones > 0;
+
+    public static ItemFlag ShownFlag(ItemSlot slot) => IconVeil.ShownFlag(slot.State, BindsOnEquip(slot.ItemId));
+
+    private static int RawInt(Godot.Collections.Dictionary o, string column) =>
+        o.ContainsKey("raw") && o["raw"].VariantType == Variant.Type.Dictionary
+            ? Int(o["raw"].AsGodotDictionary(), column)
+            : 0;
 }

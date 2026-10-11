@@ -19,6 +19,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<KnightsAllianceEntity> KnightsAlliances { get; set; }
     public DbSet<Friendship> Friendships { get; set; }
     public DbSet<UserDailyOp> UserDailyOps { get; set; }
+    public DbSet<RankerStatueNote> RankerStatueNotes { get; set; }
+    public DbSet<DailyRankCounter> DailyRankCounters { get; set; }
+    public DbSet<DailyRankPlace> DailyRankPlaces { get; set; }
     public DbSet<Pet> Pets { get; set; }
     public DbSet<MailBox> MailBoxes { get; set; }
     public DbSet<Mail> Mails { get; set; }
@@ -39,6 +42,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SpecialAuctionLotData> SpecialAuctionLots { get; set; }
     public DbSet<ItemCombineRecipeData> ItemCombineRecipes { get; set; }
     public DbSet<ItemCombineMaterialData> ItemCombineMaterials { get; set; }
+    public DbSet<ItemSmashClassData> ItemSmashClasses { get; set; }
+    public DbSet<ItemSmashRewardData> ItemSmashRewards { get; set; }
+    public DbSet<ItemGradeBonusData> ItemGradeBonuses { get; set; }
     public DbSet<CoefficientData> Coefficients { get; set; }
     public DbSet<StartPositionData> StartPositions { get; set; }
     public DbSet<HomeData> Homes { get; set; }
@@ -79,6 +85,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MonsterSummonData> MonsterSummons { get; set; }
     public DbSet<ZoneInfoData> ZoneInfos { get; set; }
     public DbSet<GameEventData> GameEvents { get; set; }
+    public DbSet<MapObjectData> MapObjects { get; set; }
     public DbSet<SiegeWarfareData> SiegeWarfare { get; set; }
     public DbSet<CollectionRaceData> CollectionRaces { get; set; }
     public DbSet<CollectionRaceObjectiveData> CollectionRaceObjectives { get; set; }

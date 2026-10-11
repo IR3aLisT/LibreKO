@@ -153,6 +153,6 @@ public class GenieSystemPacketCoordinator(
     private Task BroadcastActivationAsync(UserSession session) =>
         sessionManager.Regions.SendToRegion(
             session,
-            GenieSystemPacketWriter.ActivationState((ushort)session.CharacterId, session.GenieActive),
+            GenieSystemPacketWriter.ActivationState(session.CharacterId, session.GenieActive),
             excludeSender: false);
 }

@@ -5,6 +5,32 @@ namespace LibreKO;
 
 public partial class World
 {
+    internal Control BuildBeautyShopUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        var me = Net.I.LastEnter;
+        me.Name = "Zeus";
+        me.Nation = 2;
+        me.Class = 208;
+        me.Race = 12;
+        Net.I.SeedPreviewEnter(me);
+        _selfFace = 1;
+        _selfHair = (2 << 24) | 0x5A3820;
+        BuildChangeHairPanel();
+        OpenChangeHair();
+        return DetachPreviewControl(_changeHairPanel);
+    }
+
+    internal void ZoomBeautyPreview() => _beautyPreview.ToggleZoom();
+
+    internal void FlashBeautyPreview()
+    {
+        var material = new ShaderMaterial { Shader = _hitFlashShader ??= new Shader { Code = HitFlashCode } };
+        material.SetShaderParameter(HitFlashTint, HitFlashColour);
+        foreach (var node in _beautyPreview.FindChildren("*", nameof(MeshInstance3D), true, false))
+            if (node is MeshInstance3D mesh && !CutOut(mesh)) mesh.MaterialOverlay = material;
+    }
+
     internal Control BuildGenderChangeUiPreview()
     {
         ItemData.EnsureLoaded();
