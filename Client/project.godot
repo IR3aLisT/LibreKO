@@ -40,6 +40,10 @@ window/size/mode=2
 
 project/assembly_name="LibreKO"
 
+[gui]
+
+theme/default_font_generate_mipmaps=true
+
 [importer_defaults]
 
 texture={

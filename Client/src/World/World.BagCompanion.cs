@@ -14,9 +14,9 @@ public partial class World
         Func<int, BagFit> Fit,
         Func<int, string> Note,
         Action Close,
-        Func<int, int, bool>? IntoBag = null);
+        Func<int, int, int?, bool>? IntoBag = null);
 
-    private bool CompanionIntoBag(int from, int to) => _bagCompanion?.IntoBag?.Invoke(from, to) ?? false;
+    private bool CompanionIntoBag(int from, int to, int? amount) => _bagCompanion?.IntoBag?.Invoke(from, to, amount) ?? false;
 
     private BagCompanion? _bagCompanion;
     private readonly BagPairing<BagCompanion> _bagPairing = new();

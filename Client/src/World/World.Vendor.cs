@@ -182,7 +182,7 @@ public partial class World
         RefreshVendorWallet();
         _vendorPanel.Visible = true;
         _vendorShown = true;
-        _vendorCompanion ??= new BagCompanion(VendorTakeFromBag, VendorBagFit, VendorBagNote, CloseVendor, VendorIntoBag);
+        _vendorCompanion ??= new BagCompanion(VendorTakeFromBag, VendorBagFit, VendorBagNote, CloseVendor, (from, to, _) => VendorIntoBag(from, to));
         AttachBagCompanion(_vendorCompanion);
         ShowVendorPage(0);
     }

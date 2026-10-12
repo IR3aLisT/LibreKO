@@ -599,6 +599,7 @@ public partial class SettingsPanel : CanvasLayer
     {
         (GameLanguage.English, "English"),
         (GameLanguage.Spanish, "Espanol"),
+        (GameLanguage.Chinese, "中文"),
     };
 
     private void ApplyLanguage()

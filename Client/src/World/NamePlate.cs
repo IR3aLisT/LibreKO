@@ -160,6 +160,7 @@ public static class NamePlate
             OutlineSize = OutlinePx,
             OutlineModulate = Outline,
             NoDepthTest = true,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
         };
         label.SetMeta(BaseMeta, FontPx);
         label.AddToGroup(Group);

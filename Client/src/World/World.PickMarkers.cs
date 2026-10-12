@@ -155,6 +155,7 @@ public partial class World
                 PixelSize = 0.0032f,
                 OutlineSize = 10,
                 NoDepthTest = true,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
                 Visible = false,
             };
             _pickMarkerRoot!.AddChild(tag);

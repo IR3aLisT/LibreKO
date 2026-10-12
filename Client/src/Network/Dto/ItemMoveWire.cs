@@ -12,7 +12,7 @@ public static class ItemMoveWire
         p.WriteInt(itemId);
         p.WriteByte(sourcePosition);
         p.WriteByte(destinationPosition);
-        p.WriteUShort(amount);
+        if (amount != ItemMove.WholeStack) p.WriteUShort(amount);
         return p;
     }
 }

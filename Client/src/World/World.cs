@@ -123,7 +123,7 @@ public partial class World : Node3D, IWorldContext
         RefreshSelfClanLine();
         if (selfScene != null)
         {
-            AttachWeapons(_self, info.Gear);
+            AttachWeapons(_self, info.Gear, new HandWearer(info.Race));
             DressClanGauntlet(_self, info.Race, MyClan.InClan ? MyClan.Grade : 0, MyClan.InClan ? MyClan.Ranking : 0);
             _selfWingAnims = AttachWings(_self, info.Gear, info.Race, _zone, shineShadow: true);
             System.Array.Clear(_selfWingClips);

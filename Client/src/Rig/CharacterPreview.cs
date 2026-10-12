@@ -14,7 +14,14 @@ public static partial class CharacterPreview
     private static readonly (int Gear, int Part)[] ArmorSlotToPart =
         { (0, 0), (1, 1), (3, 2), (4, 3), (2, 5) };
 
-    private sealed class WeaponPlug { public string Stem = ""; public string Anim = ""; public Vector3 Pos; public Quaternion Quat = Quaternion.Identity; public Vector3 Scale = Vector3.One; }
+    private sealed class WeaponPlug
+    {
+        public string Stem = "";
+        public string Anim = "";
+        public PlugPose Pose = new(Vector3.Zero, Quaternion.Identity, Vector3.One);
+        public int Version;
+        public PlugPose[] RaceBlocks = Array.Empty<PlugPose>();
+    }
 
     public static Node3D? Build(int race, int face, int[]? gear, int hair = 0, Color? hairColour = null,
                                 bool enableShine = false)
@@ -24,7 +31,7 @@ public static partial class CharacterPreview
         var body = scene.Instantiate<Node3D>();
         SkinShare.ShareUnder(body);
         Graft(body, race, face, gear, hair, hairColour, enableShine);
-        AttachWeapons(body, gear, enableShine);
+        AttachWeapons(body, race, gear, enableShine);
         foreach (var wingAnim in World.AttachWings(body, gear, race, 0, enableShine))
         {
             if (wingAnim == null) continue;
@@ -239,24 +246,27 @@ public static partial class CharacterPreview
                                            e.TryGetValue("hairPart", out var hp) ? hp.AsString() : "");
     }
 
-    private static void AttachWeapons(Node3D body, int[]? gear, bool enableShine)
+    private static void AttachWeapons(Node3D body, int race, int[]? gear, bool enableShine)
     {
         if (gear == null) return;
         var skel = FindFirst<Skeleton3D>(body);
         if (skel == null) return;
         _weapons ??= LoadWeapons();
+        float bindHeight = WeaponMount.BindHeight(skel);
+        var wearer = new HandWearer(race);
         foreach (int slot in new[] { InventoryConstants.VisRightHand, InventoryConstants.VisLeftHand })
         {
             if (slot >= gear.Length || gear[slot] <= 0) continue;
             if (!TryGetWeapon(gear[slot], out var w)) continue;
             string path = $"res://assets/items/weapon/{w.Stem}.glb";
             if (!ResourceLoader.Exists(path) || ResourceLoader.Load(path) is not PackedScene scene) continue;
-            int bone = WeaponMount.Bone(skel, right: slot == 6, gear[slot]);
+            bool right = slot == InventoryConstants.VisRightHand;
+            int bone = WeaponMount.Bone(skel, right, gear[slot]);
             if (bone < 0) continue;
             var attach = new BoneAttachment3D { Name = $"weapon_{slot}", BoneIdx = bone };
             skel.AddChild(attach);
             var mesh = scene.Instantiate<Node3D>();
-            mesh.Transform = new Transform3D(new Basis(w.Quat).Scaled(w.Scale), w.Pos);
+            mesh.Transform = WeaponMount.HandPlugLocal(w.Pose, w.Version, w.RaceBlocks, right, wearer, bindHeight);
             attach.AddChild(mesh);
             WeaponIdle.Start(mesh, w.Anim);
             WeaponGlow.Attach(mesh, gear[slot]);
@@ -274,14 +284,14 @@ public static partial class CharacterPreview
             {
                 if (!int.TryParse(k.AsString(), out int id)) continue;
                 var e = d[k].AsGodotDictionary();
-                var pos = e["pos"].AsGodotArray(); var q = e["quat"].AsGodotArray(); var sc = e["scale"].AsGodotArray();
                 map[id] = new WeaponPlug
                 {
                     Stem = e["stem"].AsString(),
                     Anim = e.TryGetValue("anim", out var clip) ? clip.AsString() : "",
-                    Pos = new Vector3((float)pos[0], (float)pos[1], (float)pos[2]),
-                    Quat = new Quaternion((float)q[0], (float)q[1], (float)q[2], (float)q[3]),
-                    Scale = new Vector3((float)sc[0], (float)sc[1], (float)sc[2]),
+                    Pose = new PlugPose(WeaponCatalog.ReadVector(e["pos"]), WeaponCatalog.ReadQuaternion(e["quat"]),
+                                        WeaponCatalog.ReadVector(e["scale"])),
+                    Version = WeaponCatalog.ReadVersion(e),
+                    RaceBlocks = WeaponCatalog.ReadRaceBlocks(e),
                 };
             }
 

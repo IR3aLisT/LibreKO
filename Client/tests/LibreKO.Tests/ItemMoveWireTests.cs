@@ -30,25 +30,30 @@ public class ItemMoveWireTests
     }
 
     [Fact]
-    public void AWholeStackMoveSendsAZeroAmount()
+    public void AWholeStackMoveSendsNoAmount()
     {
         var bytes = ItemMoveWire.Move(ItemMove.InventoryToSlot, Potion, 0, 6, ItemMove.WholeStack).GetBytes();
 
-        Assert.Equal(new byte[] { 0, 0 }, bytes[^2..]);
+        Assert.Equal(new byte[]
+        {
+            (byte)GameOpcodes.GS_ITEM_MOVE, ItemMove.MoveRequest, ItemMove.InventoryToSlot,
+            0x50, 0xD2, 0x2F, 0x17, 0, 6,
+        }, bytes);
     }
 
     [Theory]
+    [InlineData(ItemMove.InventoryToInventory)]
     [InlineData(ItemMove.InventoryToMagicBag)]
     [InlineData(ItemMove.MagicBagToInventory)]
     [InlineData(ItemMove.MagicBagToMagicBag)]
-    public void PartOfAStackSplitsBetweenTheBagAndAMagicBag(byte direction)
+    public void PartOfAStackSplitsInTheBagAndTheMagicBags(byte direction)
     {
         Assert.True(ItemMove.Splits(direction, Stack(Potion, 10), default, Stackable, 4));
         Assert.True(ItemMove.Splits(direction, Stack(Potion, 10), Stack(Potion, 5), Stackable, 4));
     }
 
     [Theory]
-    [InlineData(ItemMove.InventoryToInventory)]
+    [InlineData(ItemMove.SlotToInventory)]
     [InlineData(ItemMove.InventoryToSlot)]
     [InlineData(ItemMove.InventoryToPet)]
     public void OtherMovesNeverSplit(byte direction) =>

@@ -62,7 +62,8 @@ internal sealed class FloaterSystem
 
     internal void WarmText()
     {
-        if (_host == null || !GodotObject.IsInstanceValid(_host) || !GlyphWarmer.Unscaled(_host)) return;
+        if (_host == null || !GodotObject.IsInstanceValid(_host)) return;
+        int level = GlyphWarmer.LevelOf(_host);
         var font = _host.GetThemeDefaultFont();
         int shadowOutline = _host.GetThemeConstant("shadow_outline_size", "Label");
         float ui = UiScaleFor(_host.GetViewportRect().Size.Y);
@@ -75,9 +76,9 @@ internal sealed class FloaterSystem
         }
         for (int size = smallest; size <= largest; size++)
         {
-            GlyphWarmer.Render(font, size, 0, GlyphWarmer.AsciiRange);
-            GlyphWarmer.Render(font, size, OutlineFor(size), GlyphWarmer.AsciiRange);
-            if (shadowOutline > 0) GlyphWarmer.Render(font, size, shadowOutline, GlyphWarmer.AsciiRange);
+            GlyphWarmer.Render(font, size, 0, GlyphWarmer.AsciiRange, level);
+            GlyphWarmer.Render(font, size, OutlineFor(size), GlyphWarmer.AsciiRange, level);
+            if (shadowOutline > 0) GlyphWarmer.Render(font, size, shadowOutline, GlyphWarmer.AsciiRange, level);
         }
     }
 

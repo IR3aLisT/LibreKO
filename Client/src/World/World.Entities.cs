@@ -237,7 +237,7 @@ public partial class World
         {
             (body, anim) = statue
                 ? MakeAnimatedEntity(scene, StatueOverheadName, RankerStatue.Scale)
-                : MakeAnimatedEntity(scene, label, info.Size > 0 ? info.Size / 100f : 1f);
+                : MakeAnimatedEntity(scene, label, SizeScale(info.Size));
             crowd = CrowdAnimator.Create(anim, body, scene.ResourcePath);
             if (crowd != null) anim!.CallbackModeProcess = AnimationMixer.AnimationCallbackModeProcess.Manual;
         }
@@ -273,7 +273,8 @@ public partial class World
             }
             using (Perf.Measure(Perf.Section.BuildGear))
             {
-                AttachWeapons(body, info.Gear, info.NpcType, info.NpcId);
+                AttachWeapons(body, info.Gear,
+                    WeaponWearer(info.IsNpc, statue, info.Race, info.NpcId, info.Size), info.NpcType);
                 if (!info.IsNpc) AttachClanGauntlet(body, info.Race, info.ClanGrade, info.ClanRanking);
                 if (info.IsNpc && !statue)
                 {
@@ -699,7 +700,7 @@ public partial class World
         CharacterMerge.Remove(e.Body);
         RestorePartDefaults(e.Body, e.DefaultParts);
         GraftEquipment(e.Body, e.LookRace, e.Face, e.Gear, e.Hair, e.HelmetHidden, e.CostumeHidden);
-        AttachWeapons(e.Body, e.Gear);
+        AttachWeapons(e.Body, e.Gear, WeaponWearer(e.IsNpc, e.Statue, e.Race, e.NpcId, e.Size));
         e.WingAnims = DressAccessories(e.Body, ShownCospre(e.Gear), e.Race);
         System.Array.Clear(e.WingClips);
         if (e.Sitting)

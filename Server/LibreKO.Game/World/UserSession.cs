@@ -78,6 +78,7 @@ public class UserSession
     public string LanguageCode => Language switch
     {
         GameLanguage.Spanish => "es",
+        GameLanguage.Chinese => "zh",
         _ => LibreKO.Quests.Localization.QuestTranslations.SourceLanguage,
     };
 

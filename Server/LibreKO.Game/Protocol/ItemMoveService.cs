@@ -87,6 +87,12 @@ public class ItemMoveService(
             }
 
             amount = packet.ReadUShort();
+            if (amount == ItemStackRule.WholeStack)
+            {
+                logger.LogDebug("Rejected item move for {Name}: zero amount", session.Name);
+                await SendItemMoveResponseAsync(session, 0);
+                return;
+            }
         }
 
         if (amount != ItemStackRule.WholeStack && !ItemStackRule.SplitsAcross(direction))

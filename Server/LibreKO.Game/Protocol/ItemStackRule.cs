@@ -8,7 +8,8 @@ public static class ItemStackRule
     public const ushort WholeStack = 0;
 
     public static bool SplitsAcross(ItemMoveDirection direction) =>
-        direction is ItemMoveDirection.InventoryToMagicBag
+        direction is ItemMoveDirection.InventoryToInventory
+            or ItemMoveDirection.InventoryToMagicBag
             or ItemMoveDirection.MagicBagToInventory
             or ItemMoveDirection.MagicBagToMagicBag;
 

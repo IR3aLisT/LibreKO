@@ -13,6 +13,7 @@ public partial class World
     private const float WhCellSize = 44f;
     private const string WhHint = "Right-click to store or take out · drag to place";
     private const string WhHitBadge = "•";
+    private const string StorageWholeStackText = "Only whole stacks move inside the storage.";
 
     private readonly ItemSlot[] _warehouse = new ItemSlot[WhSlots];
     private int _whMoney;
@@ -101,7 +102,7 @@ public partial class World
         well.AddChild(grid);
         for (int i = 0; i < WhPageSize; i++)
         {
-            var cell = new ItemSlotView(WhCellSize) { Index = i, Veiled = true };
+            var cell = new ItemSlotView(WhCellSize) { Index = i, Veiled = true, PicksAmount = true };
             cell.RightClicked += c => WithdrawSlot(WhAbs(c.Index));
             cell.Hovered += c => ShowItemTooltip(-1, c.Item);
             cell.Unhovered += _ => HideItemTooltip();
@@ -294,11 +295,16 @@ public partial class World
     private void DropOnWarehouse(int whIdx, Variant data)
     {
         var d = data.AsGodotDictionary();
-        if (d.ContainsKey("invFrom")) DepositSlot(d["invFrom"].AsInt32(), whIdx);
-        else if (d.ContainsKey("companionFrom")) MoveInsideWarehouse(d["companionFrom"].AsInt32(), whIdx);
+        int? amount = DragLayer.ChosenAmount(d);
+        if (d.ContainsKey("invFrom")) DepositSlot(d["invFrom"].AsInt32(), whIdx, amount);
+        else if (d.ContainsKey("companionFrom")) MoveInsideWarehouse(d["companionFrom"].AsInt32(), whIdx, amount);
     }
 
-    private void DepositSlot(int abs, int target)
+    private static bool AsksStackAmount(ItemSlot slot) => Platform.TouchUi && IsStackable(slot.ItemId) && slot.Count > 1;
+
+    private static bool IsPartOfStack(int? amount, ItemSlot slot) => amount < slot.Count;
+
+    private void DepositSlot(int abs, int target, int? amount = null)
     {
         if (StorageTransferBusy || !InMainBag(abs) || Inv[abs].IsEmpty) return;
         var slot = Inv[abs];
@@ -307,11 +313,17 @@ public partial class World
             _whStatus.Status(ItemData.Text(WarehouseRules.NonStorableText, "This item is non-storable"), bad: true);
             return;
         }
-        if (IsStackable(slot.ItemId) && slot.Count > 1)
-            _whAmount.Open(ItemData.Icon(slot.ItemId), $"Store {ItemData.DisplayName(slot.ItemId)}",
-                $"You carry {slot.Count:n0}", slot.Count, slot.Count, n => { if (_whShown && Inv[abs].Equals(slot)) DepositCount(abs, (int)n, target); }, "Store");
+        if (amount == null && AsksStackAmount(slot))
+            AskDepositAmount(abs, target);
         else
-            DepositCount(abs, Mathf.Max(1, (int)slot.Count), target);
+            DepositCount(abs, amount ?? Mathf.Max(1, (int)slot.Count), target);
+    }
+
+    private void AskDepositAmount(int abs, int target)
+    {
+        var slot = Inv[abs];
+        _whAmount.Open(ItemData.Icon(slot.ItemId), $"Store {ItemData.DisplayName(slot.ItemId)}",
+            $"You carry {slot.Count:n0}", slot.Count, slot.Count, n => { if (_whShown && Inv[abs].Equals(slot)) DepositCount(abs, (int)n, target); }, "Store");
     }
 
     private void DepositCount(int abs, int count, int target)
@@ -340,21 +352,21 @@ public partial class World
 
     private void WithdrawSlot(int whIdx) => AskWithdraw(whIdx, -1);
 
-    private bool WithdrawInto(int whIdx, int bagAbs)
+    private bool WithdrawInto(int whIdx, int bagAbs, int? amount)
     {
-        AskWithdraw(whIdx, bagAbs);
+        AskWithdraw(whIdx, bagAbs, amount);
         return true;
     }
 
-    private void AskWithdraw(int whIdx, int target)
+    private void AskWithdraw(int whIdx, int target, int? amount = null)
     {
         if (StorageTransferBusy || whIdx < 0 || whIdx >= WhSlots || _warehouse[whIdx].IsEmpty) return;
         var slot = _warehouse[whIdx];
-        if (IsStackable(slot.ItemId) && slot.Count > 1)
+        if (amount == null && AsksStackAmount(slot))
             _whAmount.Open(ItemData.Icon(slot.ItemId), $"Take out {ItemData.DisplayName(slot.ItemId)}",
                 $"Stored {slot.Count:n0}", slot.Count, slot.Count, n => { if (_whShown && _warehouse[whIdx].Equals(slot)) WithdrawCount(whIdx, (int)n, target); }, "Take out");
         else
-            WithdrawCount(whIdx, Mathf.Max(1, (int)slot.Count), target);
+            WithdrawCount(whIdx, amount ?? Mathf.Max(1, (int)slot.Count), target);
     }
 
     private void WithdrawCount(int whIdx, int count, int target)
@@ -381,9 +393,10 @@ public partial class World
             WarehouseView.ServerCell(whIdx), (byte)(dest - GridStart), count);
     }
 
-    private void MoveInsideWarehouse(int from, int to)
+    private void MoveInsideWarehouse(int from, int to, int? amount)
     {
         if (StorageTransferBusy || from == to || from < 0 || to < 0 || from >= WhSlots || to >= WhSlots || _warehouse[from].IsEmpty) return;
+        if (IsPartOfStack(amount, _warehouse[from])) { _whStatus.Status(StorageWholeStackText, bad: true); return; }
         if (!_warehouse[to].IsEmpty) { _whStatus.Status("That slot is taken.", bad: true); return; }
         _whPending = new WhPending { Op = WhOpMove, WhIdx = from, WhTo = to, Count = _warehouse[from].Count };
         _whInFlight = true;

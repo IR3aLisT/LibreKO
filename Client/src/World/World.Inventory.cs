@@ -913,7 +913,7 @@ public partial class World : Node3D
         RestorePartDefaults(_self, _selfDefaultParts);
         GraftEquipment(_self, PlayerRig.LookRace(_selfRace, _selfClass), _selfFace, gear, _selfHair, Net.I.HelmetHidden,
             Net.I.CostumeHidden);
-        AttachWeapons(_self, gear);
+        AttachWeapons(_self, gear, new HandWearer(_selfRace));
         _selfWingAnims = DressAccessories(_self, gear, _selfRace, shineShadow: true);
         System.Array.Clear(_selfWingClips);
         if (_selfSitting)
@@ -930,8 +930,8 @@ public partial class World : Node3D
         public System.Action<int>? OnContext;
         public System.Action<int>? OnClick;
         public System.Action<ItemCell, bool>? OnHoverChanged;
-        public System.Action<int, int>? OnDropItem;
-        public System.Func<int, int, bool>? OnCompanionDrop;
+        public System.Action<int, int, int>? OnDropItem;
+        public System.Func<int, int, int?, bool>? OnCompanionDrop;
         public ItemSlot Current { get; private set; }
         private readonly TextureRect _icon;
         private readonly LockGlyph _lockIcon;
@@ -1191,12 +1191,13 @@ public partial class World : Node3D
         public override Variant _GetDragData(Vector2 atPosition)
         {
             if (Locked || Current.IsEmpty) return default;
-            DragLayer.ShowItem(this, Current.ItemId, atPosition);
-            return new Godot.Collections.Dictionary
+            var data = new Godot.Collections.Dictionary
             {
                 { "id", Current.ItemId },
                 { "invFrom", Slot },
             };
+            DragLayer.ShowStack(this, Current, atPosition, data);
+            return data;
         }
 
         public override bool _CanDropData(Vector2 atPosition, Variant data)
@@ -1214,8 +1215,9 @@ public partial class World : Node3D
         {
             AddThemeStyleboxOverride("panel", _normal);
             var d = data.AsGodotDictionary();
-            if (d.ContainsKey("companionFrom")) OnCompanionDrop?.Invoke(d["companionFrom"].AsInt32(), Slot);
-            else OnDropItem?.Invoke(d["invFrom"].AsInt32(), Slot);
+            int? amount = DragLayer.ChosenAmount(d);
+            if (d.ContainsKey("companionFrom")) OnCompanionDrop?.Invoke(d["companionFrom"].AsInt32(), Slot, amount);
+            else OnDropItem?.Invoke(d["invFrom"].AsInt32(), Slot, amount ?? ItemMove.WholeStack);
         }
     }
 

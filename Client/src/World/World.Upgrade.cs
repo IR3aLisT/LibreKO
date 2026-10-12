@@ -387,7 +387,7 @@ public partial class World
         _anvilFooter.ResetStatus();
         _upgradePanel.Visible = true;
         _upgradeShown = true;
-        _anvilCompanion ??= new BagCompanion(AnvilTakeFromBag, AnvilBagFit, _ => "", CloseUpgrade, AnvilIntoBag);
+        _anvilCompanion ??= new BagCompanion(AnvilTakeFromBag, AnvilBagFit, _ => "", CloseUpgrade, (from, to, _) => AnvilIntoBag(from, to));
         AttachBagCompanion(_anvilCompanion);
         HoldBenchHeight();
         RefreshUpgradeActions();

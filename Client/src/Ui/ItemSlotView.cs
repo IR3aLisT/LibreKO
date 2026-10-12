@@ -46,6 +46,7 @@ public sealed partial class ItemSlotView : PanelContainer
     public int Index { get; set; }
     public ItemSlot Item { get; private set; }
     public bool Veiled { get; init; }
+    public bool PicksAmount { get; init; }
 
     public bool Locked
     {
@@ -223,7 +224,10 @@ public sealed partial class ItemSlotView : PanelContainer
         if (DragOut == null || Item.IsEmpty) return default;
         var data = DragOut(this);
         if (data.VariantType == Variant.Type.Nil) return default;
-        DragLayer.ShowItem(this, Item.ItemId, atPosition);
+        if (PicksAmount && data.VariantType == Variant.Type.Dictionary)
+            DragLayer.ShowStack(this, Item, atPosition, data.AsGodotDictionary());
+        else
+            DragLayer.ShowItem(this, Item.ItemId, atPosition);
         return data;
     }
 

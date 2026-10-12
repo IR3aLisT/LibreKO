@@ -855,7 +855,7 @@ public partial class World
 
     internal QuantityPrompt OpenWarehouseAmountUiPreview()
     {
-        DepositSlot(GridStart + 1, -1);
+        AskDepositAmount(GridStart + 1, -1);
         RemoveChild(_whAmount);
         foreach (var node in _whAmount.GetChildren())
             if (node is Control control) control.Theme = HudTheme.Shared;
@@ -1863,6 +1863,18 @@ public partial class World
         return (cell.GetGlobalRect().GetCenter(), _mailDropZone.GetGlobalRect().GetCenter());
     }
 
+    internal (Vector2 From, Vector2 To)? StackDragPointsUiPreview(int count)
+    {
+        int seed = Inv.FirstFreeGridSlot();
+        if (seed < 0) return null;
+        Inv[seed] = PreviewItem(PreviewPotion, count, 1);
+        RefreshInventoryUI();
+        var from = _invBagCells.FirstOrDefault(c => c.Slot == seed);
+        var to = _invBagCells.FirstOrDefault(c => c.Slot > seed && Inv[c.Slot].IsEmpty);
+        if (from == null || to == null || !from.IsInsideTree()) return null;
+        return (from.GetGlobalRect().GetCenter(), to.GetGlobalRect().GetCenter());
+    }
+
     internal string MailDragDebugUiPreview()
     {
         var has = _invCells.TryGetValue(_mailDragSeedSlot, out var cell);
@@ -2015,7 +2027,8 @@ public partial class World
         return row;
     }
 
-    internal void AttachWeaponsForCapture(Node3D body, int[] gear) => AttachWeapons(body, gear);
+    internal void AttachWeaponsForCapture(Node3D body, int[] gear, int race) =>
+        AttachWeapons(body, gear, new HandWearer(race));
 
     internal (bool Ready, int Paths, string InFlight) GearStreamProbe(EntitySnapshot info) =>
         (SceneReadyFor(info), GearPaths(PlayerRig.LookRace(info.Race, info.Class), info.Gear).Count, _sceneLoadInFlight ?? "");

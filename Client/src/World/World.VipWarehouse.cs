@@ -164,7 +164,7 @@ public partial class World
         well.AddChild(grid);
         for (int i = 0; i < VipWhSlots; i++)
         {
-            var cell = new ItemSlotView(VipWhCellSize) { Index = i, Veiled = true };
+            var cell = new ItemSlotView(VipWhCellSize) { Index = i, Veiled = true, PicksAmount = true };
             cell.RightClicked += c => AskVipWithdraw(c.Index, -1);
             cell.Hovered += c => ShowItemTooltip(-1, c.Item);
             cell.Unhovered += _ => HideItemTooltip();
@@ -265,9 +265,9 @@ public partial class World
         return true;
     }
 
-    private bool VipWithdrawInto(int vipIdx, int bagAbs)
+    private bool VipWithdrawInto(int vipIdx, int bagAbs, int? amount)
     {
-        AskVipWithdraw(vipIdx, bagAbs);
+        AskVipWithdraw(vipIdx, bagAbs, amount);
         return true;
     }
 
@@ -380,16 +380,17 @@ public partial class World
     private void DropOnVipVault(int vipIdx, Variant data)
     {
         var d = data.AsGodotDictionary();
+        int? amount = DragLayer.ChosenAmount(d);
         if (d.ContainsKey("invFrom"))
         {
             int abs = d["invFrom"].AsInt32();
             if (IsVipVaultKey(Inv[abs].ItemId)) AskVipKey(abs);
-            else VipDepositSlot(abs, vipIdx);
+            else VipDepositSlot(abs, vipIdx, amount);
         }
-        else if (d.ContainsKey("companionFrom")) MoveInsideVipVault(d["companionFrom"].AsInt32(), vipIdx);
+        else if (d.ContainsKey("companionFrom")) MoveInsideVipVault(d["companionFrom"].AsInt32(), vipIdx, amount);
     }
 
-    private void VipDepositSlot(int abs, int target)
+    private void VipDepositSlot(int abs, int target, int? amount = null)
     {
         if (StorageTransferBusy || !InMainBag(abs) || Inv[abs].IsEmpty) return;
         if (!_vipWhOpen) { RefuseLockedVault(); return; }
@@ -399,11 +400,11 @@ public partial class World
             _vipWhStatus.Status(ItemData.Text(vaultRefusal, "This item is non-storable"), bad: true);
             return;
         }
-        if (IsStackable(slot.ItemId) && slot.Count > 1)
+        if (amount == null && AsksStackAmount(slot))
             _vipWhAmount.Open(ItemData.Icon(slot.ItemId), $"Store {ItemData.DisplayName(slot.ItemId)}",
                 $"You carry {slot.Count:n0}", slot.Count, slot.Count, n => VipDepositCount(abs, (int)n, target), "Store");
         else
-            VipDepositCount(abs, Mathf.Max(1, (int)slot.Count), target);
+            VipDepositCount(abs, amount ?? Mathf.Max(1, (int)slot.Count), target);
     }
 
     private void VipDepositCount(int abs, int count, int target)
@@ -429,16 +430,16 @@ public partial class World
         Net.I.SendVipWarehouseInput(slot.ItemId, (byte)(abs - GridStart), (byte)vipIdx, count);
     }
 
-    private void AskVipWithdraw(int vipIdx, int target)
+    private void AskVipWithdraw(int vipIdx, int target, int? amount = null)
     {
         if (StorageTransferBusy || vipIdx < 0 || vipIdx >= VipWhSlots || _vipWh[vipIdx].IsEmpty) return;
         if (!_vipWhOpen) { RefuseLockedVault(); return; }
         var slot = _vipWh[vipIdx];
-        if (IsStackable(slot.ItemId) && slot.Count > 1)
+        if (amount == null && AsksStackAmount(slot))
             _vipWhAmount.Open(ItemData.Icon(slot.ItemId), $"Take out {ItemData.DisplayName(slot.ItemId)}",
                 $"Stored {slot.Count:n0}", slot.Count, slot.Count, n => VipWithdrawCount(vipIdx, (int)n, target), "Take out");
         else
-            VipWithdrawCount(vipIdx, Mathf.Max(1, (int)slot.Count), target);
+            VipWithdrawCount(vipIdx, amount ?? Mathf.Max(1, (int)slot.Count), target);
     }
 
     private void VipWithdrawCount(int vipIdx, int count, int target)
@@ -464,10 +465,11 @@ public partial class World
         Net.I.SendVipWarehouseOutput(slot.ItemId, (byte)vipIdx, (byte)(dest - GridStart), count);
     }
 
-    private void MoveInsideVipVault(int from, int to)
+    private void MoveInsideVipVault(int from, int to, int? amount)
     {
         if (StorageTransferBusy || from == to || from < 0 || to < 0 || from >= VipWhSlots || to >= VipWhSlots || _vipWh[from].IsEmpty) return;
         if (!_vipWhOpen) { RefuseLockedVault(); return; }
+        if (IsPartOfStack(amount, _vipWh[from])) { _vipWhStatus.Status(StorageWholeStackText, bad: true); return; }
         if (!_vipWh[to].IsEmpty) { _vipWhStatus.Status("That slot is taken.", bad: true); return; }
         _vipWhPending = new VipWhPending { Op = Net.VipWhMoveSub, VipIdx = from, VipTo = to, Count = _vipWh[from].Count };
         _vipWhInFlight = true;

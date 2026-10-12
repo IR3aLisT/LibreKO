@@ -109,8 +109,8 @@ public partial class World
         var cols = new HBoxContainer();
         cols.AddThemeConstantOverride("separation", 16);
         root.AddChild(cols);
-        cols.AddChild(BuildOfferGrid(_exMineCells, out _exMineHeader, out _exMineState, out _exMineGold));
-        cols.AddChild(BuildOfferGrid(_exTheirsCells, out _exTheirsHeader, out _exTheirsState, out _exTheirsGold));
+        cols.AddChild(BuildOfferGrid(_exMineCells, mine: true, out _exMineHeader, out _exMineState, out _exMineGold));
+        cols.AddChild(BuildOfferGrid(_exTheirsCells, mine: false, out _exTheirsHeader, out _exTheirsState, out _exTheirsGold));
 
         root.AddChild(new HSeparator());
 
@@ -268,7 +268,7 @@ public partial class World
         buttons.AddChild(ok);
     }
 
-    private Control BuildOfferGrid(ItemSlotView[] cells, out Label header, out Label state, out Label count)
+    private Control BuildOfferGrid(ItemSlotView[] cells, bool mine, out Label header, out Label state, out Label count)
     {
         var box = new VBoxContainer();
         box.AddThemeConstantOverride("separation", 4);
@@ -289,6 +289,11 @@ public partial class World
             cell.Hovered += view => ShowItemTooltip(-1, view.Item);
             cell.Unhovered += _ => HideItemTooltip();
             cell.RightClicked += view => ShowSealedCharacterSheet(view.Item);
+            if (mine)
+            {
+                cell.CanDrop = (_, data) => CanDropOnOffer(data);
+                cell.Dropped = (_, data) => DropOnOffer(data);
+            }
             cells[i] = cell;
             grid.AddChild(cell);
         }
@@ -440,6 +445,18 @@ public partial class World
         return true;
     }
 
+    private bool CanDropOnOffer(Variant data) =>
+        _exShown
+        && data.VariantType == Variant.Type.Dictionary
+        && data.AsGodotDictionary().ContainsKey("invFrom")
+        && InMainBag(data.AsGodotDictionary()["invFrom"].AsInt32());
+
+    private void DropOnOffer(Variant data)
+    {
+        var d = data.AsGodotDictionary();
+        OfferSlot(d["invFrom"].AsInt32(), DragLayer.ChosenAmount(d));
+    }
+
     private BagFit TradeBagFit(int abs) =>
         UseRefusal(ItemUse.Trade, Inv[abs]) == ItemUseRules.Allowed ? BagFit.Normal : BagFit.Unfit;
 
@@ -533,7 +550,7 @@ public partial class World
             ? (long)def.Weight * ItemData.CarriedUnits(def, new ItemSlot { ItemId = offer.ItemId, Count = (short)offer.Count, Durability = offer.Dura })
             : 0;
 
-    private void OfferSlot(int absSlot)
+    private void OfferSlot(int absSlot, int? amount = null)
     {
         if (_exConfirmedByMe) { SetExStatus("You already confirmed.", true); return; }
         if (_exAddInFlight || _exConfirmedByPartner) return;
@@ -546,6 +563,12 @@ public partial class World
         }
         if (!CanOfferItem(slot)) return;
         int have = Mathf.Max(1, (int)slot.Count);
+
+        if (amount is { } chosen)
+        {
+            OfferSlotAmount(absSlot, slot.ItemId, chosen);
+            return;
+        }
 
         if (have > 1 && (ItemData.Get(slot.ItemId)?.Countable ?? 0) != 0)
         {

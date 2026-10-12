@@ -26,6 +26,39 @@ internal static class WeaponCatalog
         public uint TraceColor = DefaultTraceColor;
         public float Trace0, Trace1;
         public string Anim = "";
+        public int Version;
+        public PlugPose[] RaceBlocks = System.Array.Empty<PlugPose>();
+
+        public PlugPose Pose => new(Pos, Quat, Scale);
+    }
+
+    internal static Vector3 ReadVector(Variant value)
+    {
+        var a = value.AsGodotArray();
+        return new Vector3((float)a[0], (float)a[1], (float)a[2]);
+    }
+
+    internal static Quaternion ReadQuaternion(Variant value)
+    {
+        var a = value.AsGodotArray();
+        return new Quaternion((float)a[0], (float)a[1], (float)a[2], (float)a[3]);
+    }
+
+    internal static int ReadVersion(Godot.Collections.Dictionary entry) =>
+        entry.TryGetValue("ver", out var version) ? version.AsInt32() : 0;
+
+    internal static PlugPose[] ReadRaceBlocks(Godot.Collections.Dictionary entry)
+    {
+        if (!entry.TryGetValue("race", out var race) || race.VariantType != Variant.Type.Array)
+            return System.Array.Empty<PlugPose>();
+        var blocks = race.AsGodotArray();
+        var poses = new PlugPose[blocks.Count];
+        for (int i = 0; i < blocks.Count; i++)
+        {
+            var b = blocks[i].AsGodotDictionary();
+            poses[i] = new PlugPose(ReadVector(b["pos"]), ReadQuaternion(b["quat"]), ReadVector(b["scale"]));
+        }
+        return poses;
     }
 
     private static Dictionary<int, Info>? _index;
@@ -187,6 +220,8 @@ internal static class WeaponCatalog
                     wi.FxGuide = e["fxg"].AsString();
                 if (e.ContainsKey("anim"))
                     wi.Anim = e["anim"].AsString();
+                wi.Version = ReadVersion(e);
+                wi.RaceBlocks = ReadRaceBlocks(e);
                 if (e.ContainsKey("trstep"))
                 {
                     wi.TraceSteps = e["trstep"].AsInt32();

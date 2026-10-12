@@ -300,7 +300,7 @@ public partial class World
     private void RearmWornLook(Node3D host, int[]? gear)
     {
         if (host.GetNodeOrNull<Node3D>(TransformNodeName) is { } worn)
-            AttachWeapons(worn, WornGear(worn, gear));
+            AttachWeapons(worn, WornGear(worn, gear), HandWearer.TransformedLook);
     }
 
     private static Node3D? WornLookOf(Node3D body)

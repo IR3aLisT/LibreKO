@@ -133,7 +133,7 @@ public static class ItemMove
         && source.Count + destination.Count <= Inventory.StackMax;
 
     public static bool SplitsAcross(byte direction) =>
-        direction is InventoryToMagicBag or MagicBagToInventory or MagicBagToMagicBag;
+        direction is InventoryToInventory or InventoryToMagicBag or MagicBagToInventory or MagicBagToMagicBag;
 
     public static bool Splits(byte direction, ItemSlot source, ItemSlot destination, int countable, int amount) =>
         SplitsAcross(direction)
@@ -147,4 +147,55 @@ public static class ItemMove
             && destination.Flag == source.Flag
             && !destination.IsLinked
             && amount + destination.Count <= Inventory.StackMax);
+}
+
+public sealed class StackDial
+{
+    public const int Up = 1;
+    public const int Down = -1;
+    public const double StreakPauseSeconds = 0.35;
+    public const int NotchesPerStep = 4;
+    private static readonly int[] Steps = { 1, 5, 10, 50, 100 };
+
+    private int _direction;
+    private int _streak;
+    private double _lastNotchAt;
+
+    public StackDial(int total)
+    {
+        Total = Math.Max(1, total);
+        Amount = Total;
+    }
+
+    public int Total { get; }
+    public int Amount { get; private set; }
+    public bool Whole => Amount == Total;
+
+    public static bool Applies(int countable, int count) => countable > 0 && count > 1;
+
+    public static int StepFor(int streak) => Steps[Math.Clamp((streak - 1) / NotchesPerStep, 0, Steps.Length - 1)];
+
+    public int Turn(int direction, double now)
+    {
+        if (direction == 0 || Total == 1) return Amount;
+        direction = Math.Sign(direction);
+        bool quick = direction == _direction && now - _lastNotchAt <= StreakPauseSeconds;
+        _streak = quick ? _streak + 1 : 1;
+        _direction = direction;
+        _lastNotchAt = now;
+        int step = StepFor(_streak);
+        if (direction == Up)
+        {
+            if (Amount == Total) return Wrap(1);
+            return Amount = Math.Min(Total, (Amount / step + 1) * step);
+        }
+        if (Amount == 1) return Wrap(Total);
+        return Amount = Math.Max(1, ((Amount + step - 1) / step - 1) * step);
+    }
+
+    private int Wrap(int amount)
+    {
+        _streak = 1;
+        return Amount = amount;
+    }
 }

@@ -91,6 +91,7 @@ internal sealed partial class ChatSystem
             Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
             FixedSize = true,
             NoDepthTest = true,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
             FontSize = fontPx,
             OutlineSize = BubbleOutlinePx,
             PixelSize = px,

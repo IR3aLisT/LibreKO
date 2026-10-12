@@ -82,7 +82,7 @@ public partial class World
         well.AddChild(grid);
         for (int i = 0; i < ClanWhPageSize; i++)
         {
-            var cell = new ItemSlotView(ClanWhCellSize) { Index = i, Veiled = true };
+            var cell = new ItemSlotView(ClanWhCellSize) { Index = i, Veiled = true, PicksAmount = true };
             cell.RightClicked += c => AskClanWithdraw(ClanWhAbs(c.Index), -1);
             cell.Hovered += c => ShowItemTooltip(-1, c.Item);
             cell.Unhovered += _ => HideItemTooltip();
@@ -147,9 +147,9 @@ public partial class World
         return true;
     }
 
-    private bool ClanWithdrawInto(int whIdx, int bagAbs)
+    private bool ClanWithdrawInto(int whIdx, int bagAbs, int? amount)
     {
-        AskClanWithdraw(whIdx, bagAbs);
+        AskClanWithdraw(whIdx, bagAbs, amount);
         return true;
     }
 
@@ -228,11 +228,12 @@ public partial class World
     private void DropOnClanWh(int whIdx, Variant data)
     {
         var d = data.AsGodotDictionary();
-        if (d.ContainsKey("invFrom")) ClanDepositSlot(d["invFrom"].AsInt32(), whIdx);
-        else if (d.ContainsKey("companionFrom")) MoveInsideClanWh(d["companionFrom"].AsInt32(), whIdx);
+        int? amount = DragLayer.ChosenAmount(d);
+        if (d.ContainsKey("invFrom")) ClanDepositSlot(d["invFrom"].AsInt32(), whIdx, amount);
+        else if (d.ContainsKey("companionFrom")) MoveInsideClanWh(d["companionFrom"].AsInt32(), whIdx, amount);
     }
 
-    private void ClanDepositSlot(int abs, int target)
+    private void ClanDepositSlot(int abs, int target, int? amount = null)
     {
         if (StorageTransferBusy || !InMainBag(abs) || Inv[abs].IsEmpty) return;
         var slot = Inv[abs];
@@ -241,11 +242,11 @@ public partial class World
             _clanWhStatus.Status(ItemData.Text(bankRefusal, ClanWhNotStorableText), bad: true);
             return;
         }
-        if (IsStackable(slot.ItemId) && slot.Count > 1)
+        if (amount == null && AsksStackAmount(slot))
             _clanWhAmount.Open(ItemData.Icon(slot.ItemId), $"Store {ItemData.DisplayName(slot.ItemId)}",
                 $"You carry {slot.Count:n0}", slot.Count, slot.Count, n => ClanDepositCount(abs, (int)n, target), "Store");
         else
-            ClanDepositCount(abs, Mathf.Max(1, (int)slot.Count), target);
+            ClanDepositCount(abs, amount ?? Mathf.Max(1, (int)slot.Count), target);
     }
 
     private void ClanDepositCount(int abs, int count, int target)
@@ -272,16 +273,16 @@ public partial class World
             (byte)(abs - GridStart), (byte)(whIdx % ClanWhPageSize), count);
     }
 
-    private void AskClanWithdraw(int whIdx, int target)
+    private void AskClanWithdraw(int whIdx, int target, int? amount = null)
     {
         if (StorageTransferBusy || whIdx < 0 || whIdx >= ClanWhSlots || _clanWh[whIdx].IsEmpty) return;
         if (!ClanCanWithdraw) { _clanWhStatus.Status(ClanWhNoRightsText, bad: true); return; }
         var slot = _clanWh[whIdx];
-        if (IsStackable(slot.ItemId) && slot.Count > 1)
+        if (amount == null && AsksStackAmount(slot))
             _clanWhAmount.Open(ItemData.Icon(slot.ItemId), $"Take out {ItemData.DisplayName(slot.ItemId)}",
                 $"Stored {slot.Count:n0}", slot.Count, slot.Count, n => ClanWithdrawCount(whIdx, (int)n, target), "Take out");
         else
-            ClanWithdrawCount(whIdx, Mathf.Max(1, (int)slot.Count), target);
+            ClanWithdrawCount(whIdx, amount ?? Mathf.Max(1, (int)slot.Count), target);
     }
 
     private void ClanWithdrawCount(int whIdx, int count, int target)
@@ -308,10 +309,11 @@ public partial class World
             (byte)(whIdx % ClanWhPageSize), (byte)(dest - GridStart), count);
     }
 
-    private void MoveInsideClanWh(int from, int to)
+    private void MoveInsideClanWh(int from, int to, int? amount)
     {
         if (StorageTransferBusy || from == to || from < 0 || to < 0 || from >= ClanWhSlots || to >= ClanWhSlots || _clanWh[from].IsEmpty) return;
         if (!ClanCanWithdraw) { _clanWhStatus.Status(ClanWhNoRightsText, bad: true); return; }
+        if (IsPartOfStack(amount, _clanWh[from])) { _clanWhStatus.Status(StorageWholeStackText, bad: true); return; }
         if (!_clanWh[to].IsEmpty) { _clanWhStatus.Status("That slot is taken.", bad: true); return; }
         _clanWhPending = new ClanWhPending { Op = Net.ClanWhMoveSub, WhIdx = from, WhTo = to, Count = _clanWh[from].Count };
         _clanWhInFlight = true;
