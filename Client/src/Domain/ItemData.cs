@@ -624,15 +624,13 @@ public static class ItemData
         return PotionHealFor(s.Type1, s.DirectType, s.FirstDamage, healTarget);
     }
 
-    private const int HealthPurchase = 20, ManaPurchase = 21;
-
     internal static int PotionHealFor(int type, int directType, int amount, int healTarget)
     {
         if (type != MagicType.DotHeal || amount <= 0) return 0;
         bool restores = healTarget switch
         {
-            HealTarget.Hp => directType is HealTarget.Hp or HealthPurchase,
-            HealTarget.Mp => directType is HealTarget.Mp or ManaPurchase,
+            HealTarget.Hp => directType is HealTarget.Hp or HealTarget.HpPurchase,
+            HealTarget.Mp => directType is HealTarget.Mp or HealTarget.MpPurchase,
             _ => false,
         };
         return restores ? amount : 0;

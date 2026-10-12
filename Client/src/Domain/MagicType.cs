@@ -86,6 +86,8 @@ public static class HealTarget
 {
     public const int Hp = 1;
     public const int Mp = 2;
+    public const int HpPurchase = 20;
+    public const int MpPurchase = 21;
 }
 
 public static class SpecialMagic
