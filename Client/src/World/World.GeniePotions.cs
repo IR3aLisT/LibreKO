@@ -101,7 +101,8 @@ public partial class World
     private void UseGeniePotion(int target)
     {
         int id = GeniePotionInUse(target);
-        if (id <= 0 || CountInBackpack(id) <= 0 || ItemData.PotionHeal(id, target) <= 0) return;
+        if (id <= 0 || CountInBackpack(id) <= 0 || ItemData.PotionHeal(id, target) <= 0
+            || !MaestroPotions.CanUse(id, Sheet.Gold)) return;
         UseHotItem(id);
     }
 }
