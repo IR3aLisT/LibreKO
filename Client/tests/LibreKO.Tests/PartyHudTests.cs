@@ -53,4 +53,43 @@ public class PartyHudTests
     [InlineData(UnknownClass, "system/user")]
     public void EachClassFamilyHasItsGlyph(int classCode, string icon) =>
         Assert.Equal(icon, PartyHud.ClassIcon(classCode));
+
+    private const int NoOne = -1;
+    private const int Member = 7001;
+    private const int OtherMember = 7002;
+    private const int Monster = 9001;
+
+    [Fact]
+    public void ASelectedMemberIsTheHighlightedRow() =>
+        Assert.Equal(Member, PartyHud.Highlight(Member, selectedInParty: true, pick: NoOne));
+
+    [Fact]
+    public void ASelectedMonsterHighlightsNoRow() =>
+        Assert.Equal(NoOne, PartyHud.Highlight(Monster, selectedInParty: false, pick: Member));
+
+    [Fact]
+    public void WithNothingSelectedThePickedMemberIsHighlighted() =>
+        Assert.Equal(Member, PartyHud.Highlight(NoOne, selectedInParty: false, pick: Member));
+
+    [Fact]
+    public void WithNothingSelectedAndNoPickNoRowIsHighlighted() =>
+        Assert.Equal(NoOne, PartyHud.Highlight(NoOne, selectedInParty: false, pick: NoOne));
+
+    [Fact]
+    public void ThePickHoldsWhileTheSelectionIsUnchanged() =>
+        Assert.Equal(Member, PartyHud.KeepPick(Member, selectedId: Member, selectionAtPick: Member));
+
+    [Theory]
+    [InlineData(NoOne)]
+    [InlineData(Monster)]
+    [InlineData(OtherMember)]
+    public void ThePickEndsWhenTheSelectionChanges(int selectedNow) =>
+        Assert.Equal(NoOne, PartyHud.KeepPick(Member, selectedNow, selectionAtPick: Member));
+
+    [Fact]
+    public void AnOutOfViewPickHoldsUntilSomethingIsSelected()
+    {
+        Assert.Equal(Member, PartyHud.KeepPick(Member, selectedId: NoOne, selectionAtPick: NoOne));
+        Assert.Equal(NoOne, PartyHud.KeepPick(Member, selectedId: Monster, selectionAtPick: NoOne));
+    }
 }

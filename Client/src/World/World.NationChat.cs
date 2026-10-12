@@ -363,7 +363,6 @@ public partial class World
         if (state.InPrivate && state.RoomId == _ncSelectedRoom) { ShowChatRoom(); return; }
         if (state.InRoom) { NationNotice(NationChatTexts.AlreadyInRoom, "You already are part of another chatroom."); return; }
         var room = _ncRooms.Find(r => r.Id == _ncSelectedRoom);
-        if (room.Nation != Net.I.LastEnter.Nation) { NationNotice(NationChatTexts.NationMismatch, "Nations do not match."); return; }
         Net.I.NameNextRoom(room.Name, room.Locked, room.Members, room.MaxMembers);
         if (room.Locked)
         {
@@ -589,12 +588,7 @@ public partial class World
         };
         if (text != 0) NationNotice(text, "");
 
-        bool entered = (sub == NationChatReplies.PublicEnter || sub == NationChatReplies.PrivateEnter) && code == 0;
         bool created = sub == NationChatReplies.Create && code == NationChatReplies.Created;
-        bool left = (sub is NationChatReplies.PublicLeave or NationChatReplies.PrivateLeave && code == 0)
-            || (sub == NationChatReplies.Kick && code == NationChatRules.KickedCode);
-        if (entered || created) Chat?.UseRoomChannel(true);
-        if (left) Chat?.UseRoomChannel(false);
         if (created || (sub == NationChatReplies.Options && code == 0)) _ncCreate.Visible = false;
         if (sub == NationChatReplies.Options) ChatRoomConfigReplied(code, text);
         if (sub == NationChatReplies.Search && code != 0) _ncSearchEdit.Text = "";

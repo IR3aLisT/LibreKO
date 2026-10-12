@@ -11,6 +11,7 @@ public static class TempleEventHelpers
     public static async Task<int> FormNationPartyAsync(
         SessionManager sessionManager,
         ICombatNotificationService combatNotificationService,
+        IPartyLevelProgressService partyLevelProgress,
         List<UserSession> sessions,
         string eventName,
         ushort roomId,
@@ -52,6 +53,8 @@ public static class TempleEventHelpers
 
             var memberPacket = PartyPacketWriter.MemberInfo(MemberStateOf(memberSession), statusCode);
             await combatNotificationService.SendToPartyAsync(party, memberPacket);
+            await combatNotificationService.SendPartyBuffsAsync(memberSession);
+            await partyLevelProgress.AnnounceAsync(memberSession);
         }
 
         var partyCount = party.MemberCount;

@@ -125,6 +125,7 @@ public class JuraidMountainTests
         _userNotificationService,
         _loyaltyService,
         _combatNotificationService,
+        Substitute.For<IPartyLevelProgressService>(),
         _logger);
 
     private UserSession CreateTestSession(int charId, AccountNation nation)

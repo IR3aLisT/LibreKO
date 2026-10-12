@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using LibreKO.Common.Domain.Entities;
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
@@ -279,7 +280,8 @@ public class UserSession
     public bool HasFullAngerGauge => AngerGauge >= 5;
 
     // Active buffs: magicId -> ActiveBuff
-    public ConcurrentDictionary<int, ActiveBuff> ActiveBuffs { get; } = new();
+    private readonly ConcurrentDictionary<int, ActiveBuff> _activeBuffs = new();
+    public IReadOnlyDictionary<int, ActiveBuff> ActiveBuffs => _activeBuffs;
     public ConcurrentDictionary<int, ActiveOverTimeEffect> ActiveOverTimeEffects { get; } = new();
 
     public ConcurrentDictionary<int, long> SkillCooldowns { get; } = new();
@@ -512,6 +514,55 @@ public class UserSession
         UserSessionBinaryState.LoadQuestData(Quest.QuestMap, Quest.QuestKillCountsMap, data, Quest.DailyCompletionDays);
         Quest.SyncActiveQuestKillCounts();
     }
+
+    public event Action<UserSession>? BuffsChanged;
+
+    public void SetBuff(int skillId, ActiveBuff buff)
+    {
+        _activeBuffs[skillId] = buff;
+        BuffsChanged?.Invoke(this);
+    }
+
+    public bool RemoveBuff(int skillId) => RemoveBuff(skillId, out _);
+
+    public bool RemoveBuff(int skillId, [MaybeNullWhen(false)] out ActiveBuff removed)
+    {
+        if (!_activeBuffs.TryRemove(skillId, out removed))
+            return false;
+
+        BuffsChanged?.Invoke(this);
+        return true;
+    }
+
+    public int RemoveBuffsWhere(Func<int, ActiveBuff, bool> match)
+    {
+        var removed = 0;
+        foreach (var (skillId, buff) in _activeBuffs)
+        {
+            if (match(skillId, buff) && _activeBuffs.TryRemove(skillId, out _))
+                removed++;
+        }
+
+        if (removed > 0)
+            BuffsChanged?.Invoke(this);
+        return removed;
+    }
+
+    public void ClearBuffs()
+    {
+        if (_activeBuffs.IsEmpty)
+            return;
+
+        _activeBuffs.Clear();
+        BuffsChanged?.Invoke(this);
+    }
+
+    public IReadOnlyList<int> LiveBuffIds() =>
+        _activeBuffs
+            .Where(entry => !entry.Value.IsExpired)
+            .Select(entry => entry.Key)
+            .Order()
+            .ToList();
 
     public byte[] SerializeSavedMagic() => UserSessionMagicState.SerializeSavedMagic(this);
 

@@ -16,7 +16,7 @@ public static class ChatCategories
     {
         ChatCategory.General, ChatCategory.Whisper, ChatCategory.Party, ChatCategory.Clan, ChatCategory.Alliance,
         ChatCategory.Shout, ChatCategory.Trade, ChatCategory.Commander, ChatCategory.Notice, ChatCategory.System,
-        ChatCategory.NoahKnights, ChatCategory.ChatRoom,
+        ChatCategory.NoahKnights,
     };
 
     public static ChatCategory Of(byte type, bool serverNotice)

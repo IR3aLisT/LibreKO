@@ -106,6 +106,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IClanBoardService, ClanBoardService>();
         services.AddSingleton<PartyWarBoardService>();
         services.AddSingleton<IPartyWarBoardService>(sp => sp.GetRequiredService<PartyWarBoardService>());
+        services.AddSingleton<PartySignalService>();
+        services.AddSingleton<IPartySignalService>(sp => sp.GetRequiredService<PartySignalService>());
+        services.AddSingleton<IPartyLevelProgressService, PartyLevelProgressService>();
         services.AddSingleton<IChangeHairPacketCoordinator, ChangeHairPacketCoordinator>();
         services.AddSingleton<IGeniePacketCoordinator, GeniePacketCoordinator>();
         services.AddSingleton<IGenieSystemPacketCoordinator, GenieSystemPacketCoordinator>();
@@ -293,6 +296,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<ClanBattleService>());
         services.AddHostedService(sp => sp.GetRequiredService<PartyUserVoteService>());
         services.AddHostedService(sp => sp.GetRequiredService<PartyWarBoardService>());
+        services.AddHostedService(sp => sp.GetRequiredService<PartySignalService>());
         services.AddHostedService<ItemExpiryService>();
         services.AddHostedService<QuestAvailabilityService>();
         services.AddHostedService<HpMpRegenService>();

@@ -255,6 +255,7 @@ public partial class ItemShineDriver : Node
 
     public void Restore(MeshInstance3D mesh)
     {
+        if (mesh.Mesh == null) return;
         foreach (var s in Surfaces)
             if (s.Index < mesh.GetSurfaceOverrideMaterialCount() && mesh.GetSurfaceOverrideMaterial(s.Index) == s.Surface)
                 mesh.SetSurfaceOverrideMaterial(s.Index, s.Original);

@@ -33,6 +33,7 @@ public class SessionManager
         _sessionsByCharacterId[characterId] = session;
         _sessionsByClientId[client.Id] = session;
         session.PartyLeaderChanged += BroadcastPartyLeader;
+        session.BuffsChanged += RaiseBuffsChanged;
         return session;
     }
 
@@ -42,7 +43,13 @@ public class SessionManager
         _sessionsByClientId[session.Client.Id] = session;
         session.PartyLeaderChanged -= BroadcastPartyLeader;
         session.PartyLeaderChanged += BroadcastPartyLeader;
+        session.BuffsChanged -= RaiseBuffsChanged;
+        session.BuffsChanged += RaiseBuffsChanged;
     }
+
+    public event Action<UserSession>? BuffsChanged;
+
+    private void RaiseBuffsChanged(UserSession session) => BuffsChanged?.Invoke(session);
 
     private void BroadcastPartyLeader(UserSession session) =>
         _ = Regions.SendToRegion(session, MovementPacketWriter.StateChange(

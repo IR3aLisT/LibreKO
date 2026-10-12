@@ -109,6 +109,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
     private readonly ILoyaltyService loyaltyService;
     private readonly IPlayerProgressionService playerProgressionService;
     private readonly ICombatNotificationService combatNotificationService;
+    private readonly IPartyLevelProgressService partyLevelProgress;
     private readonly IMagicStatusEffectService magicStatusEffectService;
     private readonly ILogger<BorderDefenseWarService> logger;
 
@@ -127,6 +128,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         ILoyaltyService loyaltyService,
         IPlayerProgressionService playerProgressionService,
         ICombatNotificationService combatNotificationService,
+        IPartyLevelProgressService partyLevelProgress,
         IMagicStatusEffectService magicStatusEffectService,
         ILogger<BorderDefenseWarService> logger)
     {
@@ -140,6 +142,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         this.loyaltyService = loyaltyService;
         this.playerProgressionService = playerProgressionService;
         this.combatNotificationService = combatNotificationService;
+        this.partyLevelProgress = partyLevelProgress;
         this.magicStatusEffectService = magicStatusEffectService;
         this.logger = logger;
 
@@ -268,9 +271,9 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         }
 
         match.KarusPartyIndex = await TempleEventHelpers.FormNationPartyAsync(
-            sessionManager, combatNotificationService, karusGroup, "Border Defense War", roomId, logger);
+            sessionManager, combatNotificationService, partyLevelProgress, karusGroup, "Border Defense War", roomId, logger);
         match.ElmoradPartyIndex = await TempleEventHelpers.FormNationPartyAsync(
-            sessionManager, combatNotificationService, elmoGroup, "Border Defense War", roomId, logger);
+            sessionManager, combatNotificationService, partyLevelProgress, elmoGroup, "Border Defense War", roomId, logger);
 
         await BroadcastScoresToRoomAsync(match);
         await BroadcastPacketToRoomAsync(match, BifrostPacketWriter.InstanceTimer((ushort)Math.Clamp(durationSeconds, 0, ushort.MaxValue)));

@@ -218,10 +218,10 @@ public class MagicDebuffTargetTests : GameTestBase
         await Cast(provider, client, CryEchoId, warrior, monster.UniqueId);
         monster.Hp.Should().Be(monster.MaxHp, "Cry Echo cannot be used without Battle Cry");
 
-        warrior.ActiveBuffs[BattleCryBuffId] = new ActiveBuff
+        warrior.SetBuff(BattleCryBuffId, new ActiveBuff
         {
             MagicId = BattleCryBuffId, BuffType = BuffType.BattleCry, ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks,
-        };
+        });
         await Cast(provider, client, CryEchoId, warrior, monster.UniqueId);
         monster.Hp.Should().BeLessThan(monster.MaxHp);
     }
@@ -292,7 +292,7 @@ public class MagicDebuffTargetTests : GameTestBase
         }
         victim.ActiveBuffs.Should().ContainKey(ChargeId);
 
-        victim.ActiveBuffs.Clear();
+        victim.ClearBuffs();
         for (var i = 0; i < EnoughTries; i++)
         {
             victim.Hp = victim.MaxHp;
@@ -316,7 +316,7 @@ public class MagicDebuffTargetTests : GameTestBase
         for (var i = 0; i < EnoughTries; i++)
         {
             victim.Hp = victim.MaxHp;
-            victim.ActiveBuffs.Clear();
+            victim.ClearBuffs();
             await execution.ExecuteAsync(caster, chill, ChillId, victim.CharacterId, new int[7]);
             if (victim.ActiveBuffs.ContainsKey(ChillId))
                 landed++;

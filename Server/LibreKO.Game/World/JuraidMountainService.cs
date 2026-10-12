@@ -65,6 +65,7 @@ public sealed class JuraidMountainService(
     IUserNotificationService userNotificationService,
     ILoyaltyService loyaltyService,
     ICombatNotificationService combatNotificationService,
+    IPartyLevelProgressService partyLevelProgress,
     ILogger<JuraidMountainService> logger) : IJuraidMountainService
 {
     private const byte JuraidZoneId = (byte)ZoneId.JuradMountain;
@@ -701,6 +702,8 @@ public sealed class JuraidMountainService(
 
             var memberPacket = PartyPacketWriter.MemberInfo(MemberStateOf(memberSession), statusCode);
             await combatNotificationService.SendToPartyAsync(party, memberPacket);
+            await combatNotificationService.SendPartyBuffsAsync(memberSession);
+            await partyLevelProgress.AnnounceAsync(memberSession);
         }
 
         var partyCount = party.MemberCount;

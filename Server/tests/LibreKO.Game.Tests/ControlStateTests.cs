@@ -57,10 +57,10 @@ public class ControlStateTests : GameTestBase
         var service = provider.GetRequiredService<IControlStateService>();
         var (victim, _) = Join(sessions, 901);
         var (_, watcherSent) = Join(sessions, 902);
-        victim.ActiveBuffs[StunSkill] = new ActiveBuff
+        victim.SetBuff(StunSkill, new ActiveBuff
         {
             MagicId = StunSkill, BuffType = BuffType.Stun, ExpireTicks = DateTime.UtcNow.AddSeconds(2).Ticks,
-        };
+        });
 
         await service.SyncAsync(victim);
         await service.SyncAsync(victim);
@@ -71,7 +71,7 @@ public class ControlStateTests : GameTestBase
         state.Flags.Should().Be(ControlFlags.Stunned);
         state.Effects.Should().ContainSingle().Which.Skill.Should().Be(StunSkill);
 
-        victim.ActiveBuffs.Clear();
+        victim.ClearBuffs();
         await service.SyncAsync(victim);
 
         var cleared = Read(Controls(watcherSent).Last(), victim.CharacterId);
@@ -85,10 +85,10 @@ public class ControlStateTests : GameTestBase
         using var provider = CreateProvider(_ => { });
         var sessions = provider.GetRequiredService<SessionManager>();
         var (runner, sent) = Join(sessions, 903);
-        runner.ActiveBuffs[SwiftSkill] = new ActiveBuff
+        runner.SetBuff(SwiftSkill, new ActiveBuff
         {
             MagicId = SwiftSkill, BuffType = BuffType.Speed, BonusSpeed = 150, ExpireTicks = DateTime.UtcNow.AddSeconds(30).Ticks,
-        };
+        });
 
         await provider.GetRequiredService<IControlStateService>().SyncAsync(runner);
 

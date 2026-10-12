@@ -170,9 +170,7 @@ public partial class World
         {
             CustomMinimumSize = new Vector2(BuffChipSize, BuffChipSize),
             MouseFilter = Control.MouseFilterEnum.Pass,
-            TooltipText = harmful
-                ? $"{s.Name}\n{TextWrap.Wrap(s.Desc, BuffTooltipWidth)}"
-                : $"{s.Name}\n{TextWrap.Wrap(s.Desc, BuffTooltipWidth)}\nDouble-click to remove.",
+            TooltipText = harmful ? BuffTooltip(s) : $"{BuffTooltip(s)}\nDouble-click to remove.",
         };
         int chipSkill = s.Id;
         chip.GuiInput += ev => BuffChipInput(ev, chipSkill, harmful);
@@ -244,6 +242,8 @@ public partial class World
         });
         ShowBuffRows();
     }
+
+    private static string BuffTooltip(SkillData.Skill s) => $"{s.Name}\n{TextWrap.Wrap(s.Desc, BuffTooltipWidth)}";
 
     private void BuffChipInput(InputEvent ev, int skillId, bool harmful)
     {

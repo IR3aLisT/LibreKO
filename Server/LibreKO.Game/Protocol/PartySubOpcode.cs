@@ -17,6 +17,10 @@ public enum PartySubOpcode : byte
     UserVoteResult = 35,
     WarBoard = 38,
     RejoinForget = 39,
+    MemberBuffs = 64,
+    SignalProbe = 65,
+    SignalTable = 66,
+    LevelProgress = 67,
 }
 
 public enum PartyRequest : byte
@@ -33,4 +37,5 @@ public enum PartyRequest : byte
     UserVote = 33,
     UserVoteAnswer = 34,
     WarBoard = 38,
+    SignalEcho = 65,
 }

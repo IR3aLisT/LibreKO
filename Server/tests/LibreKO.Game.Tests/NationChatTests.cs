@@ -110,19 +110,28 @@ public class NationChatTests
         list.ReadUShort().Should().Be((ushort)AccountNation.Karus);
         list.ReadUShort().Should().Be(1);
         list.ReadUShort().Should().Be(30);
+
+        var other = Player(2, AccountNation.ElMorad);
+        await Send(other, Request(NationChatPacketWriter.PrivateList));
+        var seen = Last(2, NationChatPacketWriter.PrivateList);
+        seen.ReadUShort();
+        seen.ReadUShort();
+        seen.ReadString();
+        seen.ReadByte();
+        seen.ReadUShort().Should().Be((ushort)AccountNation.ElMorad, "every room is open to the viewer's nation");
     }
 
     [Fact]
-    public async Task EnteringChecksNationAndPasswordAndTellsTheRoom()
+    public async Task EnteringChecksThePasswordLetsEitherNationInAndTellsTheRoom()
     {
         var owner = Player(1, AccountNation.Karus);
         var friend = Player(2, AccountNation.Karus);
-        var enemy = Player(3, AccountNation.ElMorad);
+        var other = Player(3, AccountNation.ElMorad);
         await Create(owner, "Locked", "pw");
         ushort roomId = NationChatService.PrivateRoomIdBase;
 
-        await Enter(enemy, roomId, "pw");
-        Last(3, NationChatPacketWriter.PrivateEnter).ReadByte().Should().Be(NationChatResults.NationMismatch);
+        await Enter(other, roomId, "nope");
+        Last(3, NationChatPacketWriter.PrivateEnter).ReadByte().Should().Be(NationChatResults.PasswordWrong);
 
         await Enter(friend, roomId, "nope");
         Last(2, NationChatPacketWriter.PrivateEnter).ReadByte().Should().Be(NationChatResults.PasswordWrong);
@@ -138,7 +147,13 @@ public class NationChatTests
         notice.ReadByte().Should().Be(NationChatPacketWriter.SayEntered);
         notice.ReadUShort().Should().Be(2);
         notice.ReadString().Should().Be(friend.Name);
+
+        await Enter(other, roomId, "pw");
+        Last(3, NationChatPacketWriter.PrivateEnter).ReadByte().Should().Be(NationChatResults.Ok);
+        _service.MembersOf(RoomKeyOf(1)).Should().BeEquivalentTo([1, 2, 3]);
     }
+
+    private string RoomKeyOf(int characterId) => _service.TryGetSeat(characterId, out var seat) ? seat.Key : "";
 
     [Fact]
     public async Task RoomChatReachesOnlyTheMembers()
@@ -223,7 +238,7 @@ public class NationChatTests
     }
 
     [Fact]
-    public async Task PublicChannelsCountEachNationApart()
+    public async Task PublicChannelsAreSharedByBothNations()
     {
         var karus = Player(1, AccountNation.Karus);
         var elmo = Player(2, AccountNation.ElMorad);
@@ -237,7 +252,9 @@ public class NationChatTests
         list.ReadUShort().Should().Be((ushort)NationChatService.PublicChannelNames.Length);
         list.ReadUShort().Should().Be(1);
         list.ReadString().Should().Be(NationChatService.PublicChannelNames[0]);
-        list.ReadUShort().Should().Be(0);
+        list.ReadUShort().Should().Be(1);
+        await Send(elmo, enter);
+        _service.MembersOf(RoomKeyOf(2)).Should().BeEquivalentTo([1, 2]);
 
         var again = Request(NationChatPacketWriter.Create);
         again.WriteString("Second");

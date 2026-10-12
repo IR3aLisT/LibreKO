@@ -253,12 +253,36 @@ public partial class StatBar : Control
                  new Color(0.62f, 0.56f, 0.38f, 0.55f), false, 1f);
     }
 
+    private static readonly Vector2[] UpperShape = { new(0, 0), new(251, 0), new(273, 23), new(23, 24) };
+    private static readonly Vector2 UpperFrame = new(274, 25);
+    private static readonly Vector2[] LowerShape = { new(13, 0), new(264, 1), new(245, 16), new(0, 15) };
+    private static readonly Vector2 LowerFrame = new(265, 17);
+
+    public bool ShowNumbers
+    {
+        get => _text.Visible;
+        set => _text.Visible = value;
+    }
+
     private Vector2[] Silhouette() => _ribbon switch
     {
-        RibbonKind.Upper => new Vector2[] { new(0, 0), new(251, 0), new(273, 23), new(23, 24) },
-        RibbonKind.Lower => new Vector2[] { new(13, 0), new(264, 1), new(245, 16), new(0, 15) },
+        RibbonKind.Upper => Fitted(UpperShape, UpperFrame),
+        RibbonKind.Lower => Fitted(LowerShape, LowerFrame),
         _ => new Vector2[] { new(0, 0), new(Size.X, 0), new(Size.X, Size.Y), new(0, Size.Y) },
     };
+
+    private Vector2[] Fitted(Vector2[] shape, Vector2 frame)
+    {
+        float scale = Size.Y / frame.Y;
+        var fitted = new Vector2[shape.Length];
+        for (int i = 0; i < shape.Length; i++)
+        {
+            var point = shape[i];
+            float x = point.X * 2f < frame.X ? point.X * scale : Size.X - (frame.X - point.X) * scale;
+            fitted[i] = new Vector2(x, point.Y * scale);
+        }
+        return fitted;
+    }
 
     private Vector2[] FilledQuad(Vector2[] silhouette) => FilledQuad(silhouette, _frac);
 
@@ -330,8 +354,16 @@ public partial class StatBar : Control
 
 public partial class LevelOrb : Control
 {
+    private const float IconInset = 0.28f;
+    private static readonly Color IconTint = new(0.86f, 0.87f, 0.90f);
+    private static readonly Color HighlightIconTint = new(0.12f, 0.09f, 0.04f);
+    private static readonly Color Face = new(0.115f, 0.120f, 0.125f, 0.97f);
+    private static readonly Color HighlightFace = new(0.86f, 0.66f, 0.27f, 0.98f);
+    private readonly CenterContainer _labels;
     private readonly Label _level;
     private readonly Label _exp;
+    private TextureRect? _icon;
+    private bool _highlighted;
     private float _expFraction;
     private float _expShown;
     private bool _expPlaced;
@@ -343,6 +375,7 @@ public partial class LevelOrb : Control
         var center = new CenterContainer();
         center.SetAnchorsPreset(LayoutPreset.FullRect);
         AddChild(center);
+        _labels = center;
         var vb = new VBoxContainer();
         vb.AddThemeConstantOverride("separation", -2);
         center.AddChild(vb);
@@ -358,11 +391,55 @@ public partial class LevelOrb : Control
         Resized += QueueRedraw;
     }
 
+    public Texture2D? Icon
+    {
+        get => _icon?.Texture;
+        set
+        {
+            if (_icon == null)
+            {
+                float inset = Mathf.Min(CustomMinimumSize.X, CustomMinimumSize.Y) * IconInset;
+                _icon = new TextureRect
+                {
+                    ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    SelfModulate = _highlighted ? HighlightIconTint : IconTint,
+                };
+                _icon.SetAnchorsPreset(LayoutPreset.FullRect);
+                _icon.OffsetLeft = _icon.OffsetTop = inset;
+                _icon.OffsetRight = _icon.OffsetBottom = -inset;
+                AddChild(_icon);
+            }
+            _icon.Texture = value;
+            _labels.Visible = value == null;
+        }
+    }
+
+    public bool Highlighted
+    {
+        get => _highlighted;
+        set
+        {
+            if (_highlighted == value) return;
+            _highlighted = value;
+            if (_icon != null) _icon.SelfModulate = value ? HighlightIconTint : IconTint;
+            QueueRedraw();
+        }
+    }
+
     public void Set(int level, double expPercent)
     {
-        _expFraction = Mathf.Clamp((float)(expPercent / 100.0), 0f, 1f);
         _level.Text = level.ToString();
         _exp.Text = $"{expPercent:0.000}%";
+        SetGauge(expPercent);
+    }
+
+    public void SetGauge(double percent)
+    {
+        float fraction = Mathf.Clamp((float)(percent / 100.0), 0f, 1f);
+        if (_expPlaced && Mathf.IsEqualApprox(fraction, _expFraction)) return;
+        _expFraction = fraction;
         if (!_expPlaced || _expFraction < _expShown) _expShown = _expFraction;
         _expPlaced = true;
         SetProcess(_expShown < _expFraction);
@@ -387,7 +464,7 @@ public partial class LevelOrb : Control
         {
             new(c.X, c.Y - r), new(c.X + r, c.Y), new(c.X, c.Y + r), new(c.X - r, c.Y),
         };
-        DrawColoredPolygon(dia, new Color(0.115f, 0.120f, 0.125f, 0.97f));
+        DrawColoredPolygon(dia, _highlighted ? HighlightFace : Face);
         Vector2[] outline = { dia[0], dia[1], dia[2], dia[3], dia[0] };
         DrawPolyline(outline, new Color(0.025f, 0.027f, 0.030f, 0.98f), 3f, true);
         DrawPolyline(outline, new Color(0.24f, 0.22f, 0.17f, 0.92f), 1.25f, true);

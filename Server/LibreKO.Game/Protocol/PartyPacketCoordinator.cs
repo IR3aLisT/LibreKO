@@ -20,6 +20,8 @@ public class PartyPacketCoordinator(
     ICombatNotificationService combatNotificationService,
     IPartyWarBoardService partyWarBoard,
     IPartyUserVoteService userVote,
+    IPartySignalService partySignal,
+    IPartyLevelProgressService partyLevelProgress,
     ILogger<PartyPacketCoordinator> logger) : IPartyPacketCoordinator
 {
     public async Task HandleAsync(IClient client, Packet packet)
@@ -92,6 +94,11 @@ public class PartyPacketCoordinator(
             case PartyRequest.WarBoard:
                 if (packet.RemainingBytes >= 2)
                     await partyWarBoard.SetModeAsync(session, packet.ReadByte(), packet.ReadByte());
+                break;
+
+            case PartyRequest.SignalEcho:
+                if (packet.RemainingBytes >= sizeof(uint))
+                    partySignal.Echo(session, packet.ReadUInt());
                 break;
         }
     }
@@ -442,6 +449,11 @@ public class PartyPacketCoordinator(
         }
 
         await combatNotificationService.SendToPartyAsync(party, BuildPartyMemberPacket(session, party));
+        await SendMemberBuffsToJoinerAsync(session, party);
+        await combatNotificationService.SendPartyBuffsAsync(session);
+        await partyLevelProgress.SendPartyToJoinerAsync(session, party);
+        await partyLevelProgress.AnnounceAsync(session);
+        await partySignal.SendTableAsync(session, party);
         if (party.MemberCount == FormedPartySize)
             await combatNotificationService.SendToPartyAsync(party, CommanderPacket(party));
         else
@@ -449,6 +461,18 @@ public class PartyPacketCoordinator(
     }
 
     private const int FormedPartySize = 2;
+
+    private async Task SendMemberBuffsToJoinerAsync(UserSession joiner, PartyGroup party)
+    {
+        foreach (var memberId in party.MemberIds)
+        {
+            if (memberId < 0 || memberId == joiner.CharacterId)
+                continue;
+
+            if (sessionManager.GetByCharacterId(memberId) is { } member)
+                await joiner.Client.SendPacket(PartyPacketWriter.MemberBuffs(member.CharacterId, member.LiveBuffIds()));
+        }
+    }
 
     private async Task StopSeekingAsync(UserSession session)
     {

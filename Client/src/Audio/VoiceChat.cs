@@ -60,6 +60,7 @@ public partial class VoiceChat : Node
     private readonly byte[] _plain = new byte[MaxOpusPacket + 16];
     private readonly PcmFrameCutter _cutter = new();
     private readonly VoiceActivityGate _gate = new();
+    private readonly VoiceAutoGain _autoGain = new();
     private IOpusEncoder? _encoder;
     private VoiceSeal? _seal;
     private PacketPeerUdp? _udp;
@@ -251,6 +252,7 @@ public partial class VoiceChat : Node
         _encoder.SignalType = OpusSignal.OPUS_SIGNAL_VOICE;
         _seq = 0;
         _gate.Reset();
+        _autoGain.Reset();
         _cutter.Clear();
         bool udp = session.UdpPort != 0 && VoiceSeal.Supported && Net.I.ServerHost.Length > 0;
         if (udp)
@@ -367,8 +369,11 @@ public partial class VoiceChat : Node
         while (_cutter.TryTake(_frame))
         {
             bool open = _gate.Process(_frame, Config.VoiceThreshold);
-            if (Recording) RecordFrame(_frame, _gate.Above(Config.VoiceThreshold));
-            if (InVoice) Transmit(open);
+            bool voice = _gate.Above(Config.VoiceThreshold);
+            if (Recording) RecordFrame(_frame, voice);
+            if (!InVoice) continue;
+            _autoGain.Process(_frame, voice);
+            Transmit(open);
         }
     }
 

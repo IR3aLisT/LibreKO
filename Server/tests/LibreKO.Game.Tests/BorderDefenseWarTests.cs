@@ -112,6 +112,7 @@ public class BorderDefenseWarTests
             _loyaltyService,
             _playerProgressionService,
             _combatNotificationService,
+            Substitute.For<IPartyLevelProgressService>(),
             _magicStatusEffectService,
             _logger);
 
@@ -403,12 +404,12 @@ public class BorderDefenseWarTests
         session.Hp = 1000;
         session.MaxHp = 1000;
         session.ZoneId = BorderDefenseWarService.BdwZoneId;
-        session.ActiveBuffs[BorderDefenseWarService.FragmentOfManesSkillId] = new ActiveBuff
+        session.SetBuff(BorderDefenseWarService.FragmentOfManesSkillId, new ActiveBuff
         {
             MagicId = BorderDefenseWarService.FragmentOfManesSkillId,
             BuffType = BuffType.FragmentOfManes,
             ExpireTicks = DateTime.UtcNow.AddMinutes(10).Ticks
-        };
+        });
 
         var movementService = new WorldMovementService(
             _sessionManager,

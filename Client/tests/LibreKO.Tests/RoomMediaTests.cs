@@ -336,6 +336,23 @@ public class RoomMediaTests
         Assert.Empty(RoomMediaResults.Text(RoomMediaResults.Ok));
     }
 
+    [Fact]
+    public void NotesAreCachedPerServerAndNotByNumberAlone()
+    {
+        var time = new DateTime(2026, 10, 11, 22, 27, 0, DateTimeKind.Local);
+        var note = new RoomPost(13, RoomPostKind.VoiceNote, 4, "prueba", time, "", 52, 8220);
+
+        string live = VoiceNoteRules.CacheName("libreko.org", note);
+
+        Assert.StartsWith("libreko.org/13_", live);
+        Assert.EndsWith("_8220" + VoiceNoteRules.CacheExtension, live);
+        Assert.NotEqual(live, VoiceNoteRules.CacheName("127.0.0.1", note));
+        Assert.NotEqual(live, VoiceNoteRules.CacheName("libreko.org", note with { Size = 8221 }));
+        Assert.NotEqual(live, VoiceNoteRules.CacheName("libreko.org", note with { Time = time.AddSeconds(1) }));
+        Assert.StartsWith("my_host_15001/", VoiceNoteRules.CacheName("my host:15001", note));
+        Assert.StartsWith("local/", VoiceNoteRules.CacheName("", note));
+    }
+
     [Theory]
     [InlineData("old.example", "old.example", "new.example")]
     [InlineData(" OLD.example ", "old.example", "new.example")]

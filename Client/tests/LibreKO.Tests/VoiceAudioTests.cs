@@ -157,6 +157,42 @@ public class VoiceAudioTests
         Assert.Equal(3, same.Process([1f, 2f, 3f], new float[3]));
     }
 
+    private static float[] Sine(float amplitude) =>
+        Enumerable.Range(0, PcmFrameCutter.FrameSamples)
+            .Select(i => amplitude * MathF.Sin(2 * MathF.PI * 440 * i / PcmFrameCutter.SampleRate)).ToArray();
+
+    [Fact]
+    public void AutoGainLiftsAQuietVoiceToSpeechLevel()
+    {
+        var gain = new VoiceAutoGain();
+        float[] frame = [];
+        for (int i = 0; i < 200; i++)
+        {
+            frame = Sine(0.02f);
+            gain.Process(frame, speech: true);
+        }
+
+        Assert.InRange(VoiceWaveform.Rms(frame), VoiceAutoGain.TargetRms * 0.9f, VoiceAutoGain.TargetRms * 1.1f);
+        Assert.InRange(gain.Gain, 1f, VoiceAutoGain.MaxGain);
+    }
+
+    [Fact]
+    public void AutoGainHoldsOutsideSpeechAndKeepsALoudWordUnderTheCeiling()
+    {
+        var gain = new VoiceAutoGain();
+        for (int i = 0; i < 200; i++) gain.Process(Sine(0.02f), speech: true);
+        float lifted = gain.Gain;
+        for (int i = 0; i < 50; i++) gain.Process(Sine(0.001f), speech: false);
+        Assert.Equal(lifted, gain.Gain);
+
+        for (int i = 0; i < 3; i++)
+        {
+            var shout = Sine(0.9f);
+            gain.Process(shout, speech: true);
+            Assert.All(shout, sample => Assert.True(Math.Abs(sample) <= VoiceAutoGain.PeakCeiling + 1e-4f));
+        }
+    }
+
     private static float[] Tone(double seconds)
     {
         int samples = (int)(seconds * PcmFrameCutter.SampleRate);

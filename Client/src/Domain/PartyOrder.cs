@@ -33,4 +33,23 @@ public sealed class PartyOrder
         (_ids[from], _ids[to]) = (_ids[to], _ids[from]);
         return true;
     }
+
+    public bool MoveTo(int id, int index)
+    {
+        int from = _ids.IndexOf(id);
+        if (from < 0) return false;
+        int to = Math.Clamp(index, 0, _ids.Count - 1);
+        if (to == from) return false;
+        _ids.RemoveAt(from);
+        _ids.Insert(to, id);
+        return true;
+    }
+
+    public static int DropIndex(IReadOnlyList<float> otherCentres, float centre)
+    {
+        int index = 0;
+        foreach (float other in otherCentres)
+            if (other < centre) index++;
+        return index;
+    }
 }

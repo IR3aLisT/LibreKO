@@ -297,11 +297,11 @@ public class MagicCancelTests : GameTestBase
                 });
             });
         var (caster, client, _) = CreateArcher(provider);
-        caster.ActiveBuffs[instantMagic] = new ActiveBuff
+        caster.SetBuff(instantMagic, new ActiveBuff
         {
             MagicId = instantMagic, BuffType = BuffType.InstantMagic, Duration = 180,
             ExpireTicks = DateTime.UtcNow.AddMinutes(3).Ticks,
-        };
+        });
         var worm = provider.GetRequiredService<SessionManager>().Regions.SpawnNpc(new NpcInstance
         {
             IsMonster = true, NpcId = 750, Name = "Worm", ZoneId = 21, X = 104, Z = 100, SpawnX = 104,
@@ -340,11 +340,11 @@ public class MagicCancelTests : GameTestBase
                 });
             });
         var (caster, client, _) = CreateArcher(provider);
-        caster.ActiveBuffs[instantMagic] = new ActiveBuff
+        caster.SetBuff(instantMagic, new ActiveBuff
         {
             MagicId = instantMagic, BuffType = BuffType.InstantMagic, Duration = 180,
             ExpireTicks = DateTime.UtcNow.AddMinutes(3).Ticks,
-        };
+        });
         var worm = provider.GetRequiredService<SessionManager>().Regions.SpawnNpc(new NpcInstance
         {
             IsMonster = true, NpcId = 750, Name = "Worm", ZoneId = 21, X = 104, Z = 100, SpawnX = 104,

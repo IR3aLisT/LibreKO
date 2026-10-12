@@ -672,15 +672,15 @@ public class CombatTests : GameTestBase
         session.Hp = 0;
         session.TransformId = 321;
         session.Invisibility = InvisibilityType.DispelOnAttack;
-        session.ActiveBuffs[490001] = new ActiveBuff
+        session.SetBuff(490001, new ActiveBuff
         {
             MagicId = 490001,
             CasterId = session.CharacterId,
             Duration = 60,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks,
             BonusAttack = 20
-        };
-        session.ActiveBuffs[500034] = new ActiveBuff
+        });
+        session.SetBuff(500034, new ActiveBuff
         {
             MagicId = 500034,
             CasterId = session.CharacterId,
@@ -688,8 +688,8 @@ public class CombatTests : GameTestBase
             ExpireTicks = DateTime.UtcNow.AddMinutes(30).Ticks,
             BuffType = BuffType.Damage,
             BonusAttack = 130
-        };
-        session.ActiveBuffs[491008] = new ActiveBuff
+        });
+        session.SetBuff(491008, new ActiveBuff
         {
             MagicId = 491008,
             CasterId = session.CharacterId,
@@ -697,8 +697,8 @@ public class CombatTests : GameTestBase
             ExpireTicks = DateTime.UtcNow.AddMinutes(10).Ticks,
             BuffType = BuffType.Ac,
             BonusAc = 150
-        };
-        session.ActiveBuffs[490025] = new ActiveBuff
+        });
+        session.SetBuff(490025, new ActiveBuff
         {
             MagicId = 490025,
             CasterId = session.CharacterId + 1,
@@ -706,7 +706,7 @@ public class CombatTests : GameTestBase
             ExpireTicks = DateTime.UtcNow.AddSeconds(10).Ticks,
             BuffType = BuffType.Speed,
             BonusSpeed = 30
-        };
+        });
         sessionManager.Regions.AddToRegion(session);
 
         var packet = new Packet(GameOpcodes.GS_REGENE);
@@ -796,7 +796,7 @@ public class CombatTests : GameTestBase
         session.ZoneId = 1;
         session.X = 20;
         session.Z = 20;
-        session.ActiveBuffs[skillId] = new ActiveBuff
+        session.SetBuff(skillId, new ActiveBuff
         {
             MagicId = skillId,
             CasterId = session.CharacterId,
@@ -804,7 +804,7 @@ public class CombatTests : GameTestBase
             ExpireTicks = DateTime.UtcNow.AddMinutes(2).Ticks,
             BuffType = BuffType.Speed,
             BonusSpeed = 150
-        };
+        });
         session.RecalculateStats(CreateBasicCoefficient(101), provider.GetRequiredService<IGameDataService>());
         session.SpeedAmount.Should().Be(150);
         sessionManager.Regions.AddToRegion(session);
@@ -1281,7 +1281,7 @@ public class CombatTests : GameTestBase
         session.ZoneId = 1;
         session.X = 20;
         session.Z = 20;
-        session.ActiveBuffs[scrollId] = new ActiveBuff
+        session.SetBuff(scrollId, new ActiveBuff
         {
             MagicId = scrollId,
             CasterId = session.CharacterId,
@@ -1290,7 +1290,7 @@ public class CombatTests : GameTestBase
             BuffType = BuffType.Ac,
             BonusAc = 150,
             BonusAcPct = 100
-        };
+        });
         sessionManager.Regions.AddToRegion(session);
 
         var packet = new Packet(GameOpcodes.GS_MAGIC_PROCESS);
@@ -1359,7 +1359,7 @@ public class CombatTests : GameTestBase
         session.Class = 101;
         session.Level = 20;
         session.ZoneId = 1;
-        session.ActiveBuffs[skillId] = new ActiveBuff
+        session.SetBuff(skillId, new ActiveBuff
         {
             MagicId = skillId,
             CasterId = session.CharacterId,
@@ -1368,7 +1368,7 @@ public class CombatTests : GameTestBase
             BuffType = BuffType.Ac,
             BonusAc = 150,
             BonusAcPct = 100
-        };
+        });
         sessionManager.Regions.AddToRegion(session);
 
         var packet = new Packet(GameOpcodes.GS_MAGIC_PROCESS);
@@ -1418,7 +1418,7 @@ public class CombatTests : GameTestBase
         session.Class = 101;
         session.Level = 20;
         session.ZoneId = 1;
-        session.ActiveBuffs[skillId] = new ActiveBuff
+        session.SetBuff(skillId, new ActiveBuff
         {
             MagicId = skillId,
             CasterId = session.CharacterId,
@@ -1427,7 +1427,7 @@ public class CombatTests : GameTestBase
             BuffType = BuffType.Ac,
             BonusAc = 0,
             BonusAcPct = 75
-        };
+        });
         sessionManager.Regions.AddToRegion(session);
 
         var packet = new Packet(GameOpcodes.GS_MAGIC_PROCESS);
@@ -1810,7 +1810,7 @@ public class CombatTests : GameTestBase
             Intelligence = 50,
             Magic = 50
         };
-        buffed.ActiveBuffs[101007] = new ActiveBuff
+        buffed.SetBuff(101007, new ActiveBuff
         {
             MagicId = 101007,
             BuffType = BuffType.Ac,
@@ -1819,7 +1819,7 @@ public class CombatTests : GameTestBase
             BonusMaxHpPct = 100,
             BonusMaxMpPct = 100,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks
-        };
+        });
 
         buffed.RecalculateStats(coefficient, gameData);
 
@@ -1846,14 +1846,14 @@ public class CombatTests : GameTestBase
         var baseline = Warrior(1);
         baseline.RecalculateStats(coefficient, gameData);
         var buffed = Warrior(2);
-        buffed.ActiveBuffs[106781] = new ActiveBuff
+        buffed.SetBuff(106781, new ActiveBuff
         {
             MagicId = 106781,
             BuffType = BuffType.Stats,
             BonusStr = 15, BonusSta = 15, BonusDex = 15, BonusIntel = 15, BonusCha = 15,
             BonusAcPct = 100, BonusMaxHpPct = 100, BonusMaxMpPct = 100,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks
-        };
+        });
         buffed.RecalculateStats(coefficient, gameData);
 
         buffed.Stats.StrBonus.Should().Be((short)(baseline.Stats.StrBonus + 15));
@@ -1894,14 +1894,14 @@ public class CombatTests : GameTestBase
             Intelligence = 50,
             Magic = 50
         };
-        buffed.ActiveBuffs[610001] = new ActiveBuff
+        buffed.SetBuff(610001, new ActiveBuff
         {
             MagicId = 610001,
             BuffType = BuffType.HpMp,
             BonusMaxHpPct = 150,
             BonusMaxMpPct = 200,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks
-        };
+        });
 
         buffed.RecalculateStats(coefficient, gameData);
 
@@ -1973,20 +1973,20 @@ public class CombatTests : GameTestBase
         session.ZoneId = 1;
         session.TransformId = 321;
         session.Invisibility = InvisibilityType.DispelOnMove;
-        session.ActiveBuffs[transformSkillId] = new ActiveBuff
+        session.SetBuff(transformSkillId, new ActiveBuff
         {
             MagicId = transformSkillId,
             CasterId = session.CharacterId,
             Duration = 60,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks
-        };
-        session.ActiveBuffs[stealthSkillId] = new ActiveBuff
+        });
+        session.SetBuff(stealthSkillId, new ActiveBuff
         {
             MagicId = stealthSkillId,
             CasterId = session.CharacterId,
             Duration = 60,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks
-        };
+        });
 
         var executionService = provider.GetRequiredService<IMagicExecutionService>();
         await executionService.CancelAsync(session, transformSkillId);
@@ -2899,21 +2899,21 @@ public class CombatTests : GameTestBase
         var sourceClient = Substitute.For<IClient>();
         sourceClient.Id.Returns(Guid.NewGuid());
         var source = new UserSession(sourceClient, 1, 1);
-        source.ActiveBuffs[armorSkillId] = new ActiveBuff
+        source.SetBuff(armorSkillId, new ActiveBuff
         {
             MagicId = armorSkillId,
             CasterId = 99,
             Duration = 120,
             ExpireTicks = DateTime.UtcNow.AddMinutes(2).Ticks,
             BonusAc = 30
-        };
-        source.ActiveBuffs[transformSkillId] = new ActiveBuff
+        });
+        source.SetBuff(transformSkillId, new ActiveBuff
         {
             MagicId = transformSkillId,
             CasterId = 99,
             Duration = 90,
             ExpireTicks = DateTime.UtcNow.AddMinutes(2).Ticks
-        };
+        });
 
         var serialized = source.SerializeSavedMagic();
 
@@ -2988,7 +2988,7 @@ public class CombatTests : GameTestBase
         var sourceClient = Substitute.For<IClient>();
         sourceClient.Id.Returns(Guid.NewGuid());
         var source = new UserSession(sourceClient, 1, 1);
-        source.ActiveBuffs[attackScrollId] = new ActiveBuff
+        source.SetBuff(attackScrollId, new ActiveBuff
         {
             MagicId = attackScrollId,
             CasterId = 1,
@@ -2996,7 +2996,7 @@ public class CombatTests : GameTestBase
             Duration = 1800,
             ExpireTicks = DateTime.UtcNow.AddMinutes(30).Ticks,
             BonusAttack = 155
-        };
+        });
 
         var serialized = source.SerializeSavedMagic();
 

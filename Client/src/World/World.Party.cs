@@ -9,6 +9,10 @@ public partial class World
 {
     private CanvasLayer _partyLayer = null!;
     private int _partyPick = -1;
+    private int _partyPickSelection = -1;
+    private int _partyHudHighlight = -1;
+
+    private int PartyHighlight => PartyHud.Highlight(_selectedId, IsPartyMember(_selectedId), _partyPick);
 
     private ConfirmationDialog _inviteAskDialog = null!;
     private CanvasLayer _partyDialogLayer = null!;
@@ -32,6 +36,7 @@ public partial class World
         BuildPartyPanel();
         BuildSeekPartyPanel();
         BuildPartyHud();
+        if (!PluginHost.Ui.HudHidden(LibreKO.Plugins.HudPart.Party)) KeepRowMeterOff();
 
         Net.I.PartyMemberEvent += OnPartyMember;
         Net.I.PartyRejoinForgetEvent += _partyRejoin.Forget;
@@ -43,6 +48,9 @@ public partial class World
         Net.I.PartyMemberLevelEvent += OnPartyMemberLevel;
         Net.I.PartyMemberClassEvent += OnPartyMemberClass;
         Net.I.PartyMemberStatusEvent += OnPartyMemberStatus;
+        Net.I.PartyMemberBuffsEvent += OnPartyMemberBuffs;
+        Net.I.PartySignalEvent += RefreshPartySignals;
+        Net.I.PartyLevelProgressEvent += OnPartyLevelProgress;
         Net.I.PartyBbsRegisterEvent += OnBbsRegister;
         Net.I.PartyBbsDeleteEvent += OnBbsDelete;
         Net.I.PartyBbsListEvent += OnBbsList;
@@ -64,6 +72,9 @@ public partial class World
         Net.I.PartyMemberLevelEvent -= OnPartyMemberLevel;
         Net.I.PartyMemberClassEvent -= OnPartyMemberClass;
         Net.I.PartyMemberStatusEvent -= OnPartyMemberStatus;
+        Net.I.PartyMemberBuffsEvent -= OnPartyMemberBuffs;
+        Net.I.PartySignalEvent -= RefreshPartySignals;
+        Net.I.PartyLevelProgressEvent -= OnPartyLevelProgress;
         Net.I.PartyBbsRegisterEvent -= OnBbsRegister;
         Net.I.PartyBbsDeleteEvent -= OnBbsDelete;
         Net.I.PartyBbsListEvent -= OnBbsList;
@@ -179,6 +190,7 @@ public partial class World
     {
         if (m.CharId != _myId) _partyRejoin.Remember(m.CharId, m.Name);
         RefreshPartyUI();
+        RefreshPartyPlates();
     }
 
     private void TryPartyRejoin(string name)
@@ -191,16 +203,16 @@ public partial class World
     }
 
     private string PartyRejoinTip => _partyRejoin.On
-        ? ItemData.Text(PartyRejoin.TipOnText, "Members who drop out are invited again when they come back into view.")
-        : ItemData.Text(PartyRejoin.TipOffText, "Members who drop out are not invited again.");
+        ? ItemData.Text(PartyRejoin.TipOnText, PartyRejoin.TipOnFallback)
+        : ItemData.Text(PartyRejoin.TipOffText, PartyRejoin.TipOffFallback);
 
     private void TogglePartyRejoin()
     {
         _partyRejoin.Toggle();
         CombatNotice(_partyRejoin.On
-            ? ItemData.Text(PartyRejoin.TurnedOnText, "Automatic party re-invite is on.")
-            : ItemData.Text(PartyRejoin.TurnedOffText, "Automatic party re-invite is off."));
-        RefreshPartyRejoinToggle();
+            ? ItemData.Text(PartyRejoin.TurnedOnText, PartyRejoin.TurnedOnFallback)
+            : ItemData.Text(PartyRejoin.TurnedOffText, PartyRejoin.TurnedOffFallback));
+        RefreshPartyConfig();
         PluginNotifyParty();
     }
 
@@ -215,6 +227,7 @@ public partial class World
         if (memberId == _myId) CombatNotice(ItemData.Text(PartyQuitText, "You've quit the party."));
         else if (who.Length > 0) CombatNotice($"{who} left the party.");
         RefreshPartyUI();
+        RefreshPartyPlates();
     }
 
     private void OnPartyDisband()
@@ -222,6 +235,7 @@ public partial class World
         _partyRejoin.Clear();
         CombatNotice(ItemData.Text(PartyDisbandedText, "The party has been disbanded."));
         RefreshPartyUI();
+        RefreshPartyPlates();
     }
 
     private void OnPartySelfHp(int hp, int maxHp, int attackerId) => RefreshPartyRows();
@@ -234,6 +248,10 @@ public partial class World
     private void OnPartyMemberClass(int cid, int cls) => RefreshPartyRows();
 
     private void OnPartyMemberStatus(int cid, byte statusType, bool applied) => RefreshPartyRows();
+
+    private void OnPartyMemberBuffs(int cid, IReadOnlyList<int> skillIds) => RefreshPartyRows();
+
+    private void OnPartyLevelProgress(int cid, int permille) => RefreshPartyRows();
 
     private void RefreshPartyRows() => RefreshPartyHud();
 

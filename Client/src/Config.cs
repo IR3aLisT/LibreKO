@@ -139,7 +139,7 @@ public static class Config
     public static bool DestroyWellLocked { get; private set; }
     public static WhisperSize WhisperSize { get; private set; } = WhisperLook.DefaultSize;
     public static float WhisperAlpha { get; private set; } = WhisperLook.DefaultAlpha;
-    public static byte PartyRowMeter { get; private set; } = PartyWarBoard.ModeDamage;
+    public static byte PartyRowMeter { get; private set; } = PartyWarBoard.ModeOff;
     public static byte PartyBoardMode { get; private set; } = PartyWarBoard.ModeOff;
     public static float PartyBoardAlpha { get; private set; } = 1f;
     public static event System.Action? WhisperLookChanged;

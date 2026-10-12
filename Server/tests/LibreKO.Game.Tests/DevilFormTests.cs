@@ -18,12 +18,12 @@ public class DevilFormTests : GameTestBase
         var client = Substitute.For<IClient>();
         client.Id.Returns(Guid.NewGuid());
         var session = provider.GetRequiredService<SessionManager>().CreateSession(client, characterId: 500, accountId: 501);
-        session.ActiveBuffs[DevilSkill] = new ActiveBuff
+        session.SetBuff(DevilSkill, new ActiveBuff
         {
             MagicId = DevilSkill,
             BuffType = BuffType.DevilTransform,
             ExpireTicks = DateTime.UtcNow.AddMinutes(10).Ticks,
-        };
+        });
 
         var start = DevilForms.Sync(session);
         start.Should().NotBeNull();
@@ -32,7 +32,7 @@ public class DevilFormTests : GameTestBase
         start.ReadInt().Should().Be(1);
         DevilForms.Sync(session).Should().BeNull();
 
-        session.ActiveBuffs.TryRemove(DevilSkill, out _);
+        session.RemoveBuff(DevilSkill);
         var end = DevilForms.Sync(session);
         end.Should().NotBeNull();
         end!.ReadInt();

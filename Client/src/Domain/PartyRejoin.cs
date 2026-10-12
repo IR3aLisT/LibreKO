@@ -9,6 +9,12 @@ public sealed class PartyRejoin
     public const int TipOffText = 44731;
     public const int TurnedOnText = 44732;
     public const int TurnedOffText = 44733;
+    public const string TipOnFallback = "After a party member disconnects unexpectedly and then reconnects, if they are nearby, " +
+        "a party invitation is automatically sent. The party invitation is sent only once. (Currently enabled)";
+    public const string TipOffFallback = "After a party member disconnects unexpectedly and then reconnects, if they are nearby, " +
+        "a party invitation is automatically sent. The party invitation is sent only once. (Currently disabled)";
+    public const string TurnedOnFallback = "Party Member Re-Invite Mode After Unexpected Disconnection: on";
+    public const string TurnedOffFallback = "Party Member Re-Invite Mode After Unexpected Disconnection: off";
 
     private readonly Dictionary<int, string> _names = new();
 

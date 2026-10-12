@@ -616,6 +616,6 @@ public sealed class RoomMediaTests : IDisposable
         var pub = Player(2, AccountNation.ElMorad);
         await EnterPublic(pub, 3);
         _rooms.TryGetSeat(2, out var channel).Should().BeTrue();
-        channel.Key.Should().Be("pub:2:3");
+        channel.Key.Should().Be("pub:3");
     }
 }

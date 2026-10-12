@@ -45,7 +45,7 @@ public class BuffExtensionTests
     private ActiveBuff Buff()
     {
         var buff = new ActiveBuff { MagicId = BuffSkill, Duration = BuffSeconds, ExpireTicks = DateTime.UtcNow.AddSeconds(BuffSeconds).Ticks };
-        _session.ActiveBuffs[BuffSkill] = buff;
+        _session.SetBuff(BuffSkill, buff);
         return buff;
     }
 
@@ -72,7 +72,7 @@ public class BuffExtensionTests
         Buff();
         (await _service.ExtendAsync(_session, BuffSkill)).Should().BeFalse();
 
-        _session.ActiveBuffs.Clear();
+        _session.ClearBuffs();
         CarryContinuanceItem();
         (await _service.ExtendAsync(_session, BuffSkill)).Should().BeFalse();
         _sent.Should().BeEmpty();

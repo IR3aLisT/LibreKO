@@ -32,7 +32,6 @@ internal sealed partial class ChatSystem
         public DateTime Time { get; init; }
         public int Rank { get; init; } = NationRankAura.Unranked;
         public bool Masked { get; init; }
-        public string Place { get; init; } = "";
 
         public static ChatEntry Raw(ChatCategory category, string bbcode) =>
             new(category, 0, WhisperSide.None, "", 0, false, "", bbcode);
@@ -302,7 +301,6 @@ internal sealed partial class ChatSystem
         };
         if (tag.Length > 0) line.Append($"[color=#{hex}][lb]{tag}[rb][/color] ");
         if (RankSymbol.TexturePath(entry.Rank) is { } symbol) line.Append($"[img={RankSymbolSize}]{symbol}[/img] ");
-        if (entry.Place.Length > 0) line.Append($"[color=#{hex}][lb] {BbCode.Esc(entry.Place)} [rb][/color] ");
         line.Append(entry.Masked ? $"[color=#{hex}]{BbCode.Esc(entry.Name)}[/color]" : NameLink(entry.Name, hex));
         line.Append($"[color=#{hex}]: [/color]");
         line.Append(RenderText(entry.Text, hex));

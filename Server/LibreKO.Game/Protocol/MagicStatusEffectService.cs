@@ -59,7 +59,7 @@ public class MagicStatusEffectService(
             return;
         }
 
-        if (!session.ActiveBuffs.TryRemove(skillId, out var removedBuff))
+        if (!session.RemoveBuff(skillId, out var removedBuff))
             return;
 
         await SyncSizeStateAsync(session);
@@ -357,13 +357,13 @@ public class MagicStatusEffectService(
             if (!isDebuff)
                 return (BuffOutcome.Refused, target);
 
-            target.ActiveBuffs.TryRemove(existingKey, out _);
+            target.RemoveBuff(existingKey);
         }
 
         logger.LogDebug("Buff {SkillId} applied to {Name} type={BuffType} duration={Duration}s",
             skillId, target.Name, buffType, type4Data.Duration);
 
-        target.ActiveBuffs[skillId] = new ActiveBuff
+        target.SetBuff(skillId, new ActiveBuff
         {
             MagicId = skillId,
             CasterId = caster.CharacterId,
@@ -394,7 +394,7 @@ public class MagicStatusEffectService(
             BonusDiseaseR = type4Data.DiseaseR,
             BonusSpeed = type4Data.Speed,
             BonusAttackSpeed = type4Data.AttackSpeed
-        };
+        });
 
         target.RecalculateStatsWithBuffs(gameDataService);
         await userNotificationService.SendStatUpdateAsync(target);
@@ -657,7 +657,7 @@ public class MagicStatusEffectService(
 
         foreach (var id in debuffIds)
         {
-            if (target.ActiveBuffs.TryRemove(id, out var removed) && removed.BuffType != BuffType.None)
+            if (target.RemoveBuff(id, out var removed) && removed.BuffType != BuffType.None)
             {
                 await target.Client.SendPacket(
                     MagicProcessPacketWriter.CreateDurationExpired((byte)removed.BuffType));
@@ -758,13 +758,13 @@ public class MagicStatusEffectService(
     {
         target.TransformId = type6Data.TransformId;
         target.TransformSkillId = skillId;
-        target.ActiveBuffs[skillId] = new ActiveBuff
+        target.SetBuff(skillId, new ActiveBuff
         {
             MagicId = skillId,
             CasterId = caster.CharacterId,
             Duration = type6Data.Duration,
             ExpireTicks = DateTime.UtcNow.AddSeconds(type6Data.Duration).Ticks
-        };
+        });
 
         var statePkt = MovementPacketWriter.Transformation(
             target.CharacterId, (byte)StateChangeType.Transformation, skillId);
@@ -952,13 +952,13 @@ public class MagicStatusEffectService(
         if (type9Data.Duration <= 0)
             return;
 
-        target.ActiveBuffs[skillId] = new ActiveBuff
+        target.SetBuff(skillId, new ActiveBuff
         {
             MagicId = skillId,
             CasterId = caster.CharacterId,
             Duration = type9Data.Duration,
             ExpireTicks = DateTime.UtcNow.AddSeconds(type9Data.Duration).Ticks
-        };
+        });
     }
 
     private bool HoldsStealthState(UserSession session, MagicStealthType stealthType) =>

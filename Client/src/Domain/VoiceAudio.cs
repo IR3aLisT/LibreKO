@@ -130,6 +130,52 @@ public sealed class VoiceJitterBuffer
     }
 }
 
+public sealed class VoiceAutoGain
+{
+    public const float TargetRms = 0.1f;
+    public const float MaxGain = 8f;
+    public const float MinGain = 0.5f;
+    public const float PeakCeiling = 0.89f;
+    private const float RiseRate = 0.05f;
+    private const float FallRate = 0.4f;
+    private const float QuietRms = 1e-4f;
+
+    private float _applied = 1f;
+
+    public float Gain { get; private set; } = 1f;
+
+    public void Process(Span<float> frame, bool speech)
+    {
+        if (frame.IsEmpty) return;
+        float sum = 0f, peak = 0f;
+        foreach (float sample in frame)
+        {
+            sum += sample * sample;
+            peak = Math.Max(peak, Math.Abs(sample));
+        }
+        float rms = MathF.Sqrt(sum / frame.Length);
+        if (speech && rms > QuietRms)
+        {
+            float wanted = Math.Clamp(TargetRms / rms, MinGain, MaxGain);
+            Gain += (wanted - Gain) * (wanted < Gain ? FallRate : RiseRate);
+        }
+        float target = peak * Gain > PeakCeiling ? PeakCeiling / peak : Gain;
+        float from = Math.Min(_applied, target);
+        for (int i = 0; i < frame.Length; i++)
+        {
+            float gain = from + (target - from) * (i + 1) / frame.Length;
+            frame[i] = Math.Clamp(frame[i] * gain, -1f, 1f);
+        }
+        _applied = target;
+    }
+
+    public void Reset()
+    {
+        Gain = 1f;
+        _applied = 1f;
+    }
+}
+
 public sealed class VoiceActivityGate
 {
     public const float MinDb = -60f;

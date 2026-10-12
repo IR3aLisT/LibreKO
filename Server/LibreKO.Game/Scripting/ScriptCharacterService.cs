@@ -270,7 +270,7 @@ public class ScriptCharacterService(
             BonusAttackSpeed = type4Data.AttackSpeed
         };
 
-        session.ActiveBuffs[skillId] = buff;
+        session.SetBuff(skillId, buff);
         if (buff.HasStatModifiers)
             session.RecalculateStatsWithBuffs(gameData);
         return true;

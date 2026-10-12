@@ -42,11 +42,16 @@ public interface IGameWhispers
 
 public readonly record struct GameWarBoardRow(int Rank, string Name, int Class, int Share);
 
+public readonly record struct GamePartyBuff(int SkillId, Texture2D? Icon, string Tooltip);
+
 public interface IGameParty
 {
     bool InParty { get; }
     bool IsLeader { get; }
     IReadOnlyList<GamePartyMember> Members { get; }
+    IReadOnlyList<GamePartyBuff> MemberBuffs(int id);
+    int PingMs(int id);
+    double LevelPercent(int id);
 
     void Pick(int id);
     void Leave();
@@ -67,6 +72,7 @@ public interface IGameParty
     void SetWarBoardMode(byte mode);
     void SetWarBoardAlpha(float alpha);
     void MoveRow(int id, int step);
+    void MoveRowTo(int id, int index);
     bool AutoRejoin { get; }
     string AutoRejoinTip { get; }
     void ToggleAutoRejoin();
@@ -161,6 +167,9 @@ public sealed partial class PluginGame
         public bool InParty => Source?.InParty ?? false;
         public bool IsLeader => Source?.IsLeader ?? false;
         public IReadOnlyList<GamePartyMember> Members => Source?.Members ?? Array.Empty<GamePartyMember>();
+        public IReadOnlyList<GamePartyBuff> MemberBuffs(int id) => Source?.MemberBuffs(id) ?? Array.Empty<GamePartyBuff>();
+        public int PingMs(int id) => Source?.PingMs(id) ?? PartySignal.Unknown;
+        public double LevelPercent(int id) => Source?.LevelPercent(id) ?? 0.0;
         public void Pick(int id) => Source?.Pick(id);
         public void Leave() => Source?.Leave();
         public void MakeLeader(int id) => Source?.MakeLeader(id);
@@ -180,6 +189,7 @@ public sealed partial class PluginGame
         public void SetWarBoardMode(byte mode) => Source?.SetWarBoardMode(mode);
         public void SetWarBoardAlpha(float alpha) => Source?.SetWarBoardAlpha(alpha);
         public void MoveRow(int id, int step) => Source?.MoveRow(id, step);
+        public void MoveRowTo(int id, int index) => Source?.MoveRowTo(id, index);
         public bool AutoRejoin => Source?.AutoRejoin ?? false;
         public string AutoRejoinTip => Source?.AutoRejoinTip ?? "";
         public void ToggleAutoRejoin() => Source?.ToggleAutoRejoin();

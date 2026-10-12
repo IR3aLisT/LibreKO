@@ -146,7 +146,7 @@ public partial class World
         _friends.Clear();
         _friends.AddRange(list);
         RefreshFriends();
-        RefreshFriendNameColours();
+        RefreshPlayerNameColours();
     }
 
     private void OnFriendAdd(byte code, string name, FriendEntry entry)

@@ -57,12 +57,12 @@ public class TargetStateTests : GameTestBase
         var sessions = provider.GetRequiredService<SessionManager>();
         var (_, viewerClient, sent) = Join(sessions, 801);
         var (target, _, _) = Join(sessions, 802);
-        target.ActiveBuffs[(int)BuffType.Speed] = new ActiveBuff
+        target.SetBuff((int)BuffType.Speed, new ActiveBuff
         {
             MagicId = SwiftSkill,
             BuffType = BuffType.Speed,
             ExpireTicks = DateTime.UtcNow.AddSeconds(30).Ticks,
-        };
+        });
 
         await Ask(provider, viewerClient, target.CharacterId);
 

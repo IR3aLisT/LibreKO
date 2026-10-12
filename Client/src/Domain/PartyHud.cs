@@ -5,6 +5,13 @@ public enum PartyHpLook { Normal, Lasting, Drop, Slow, Undead }
 public static class PartyHud
 {
     public const int MaxRows = 8;
+    public const int NoMember = -1;
+
+    public static int Highlight(int selectedId, bool selectedInParty, int pick) =>
+        selectedId >= 0 ? (selectedInParty ? selectedId : NoMember) : pick;
+
+    public static int KeepPick(int pick, int selectedId, int selectionAtPick) =>
+        pick >= 0 && selectedId != selectionAtPick ? NoMember : pick;
     public const byte StatusDamageOverTime = 1;
     public const byte StatusPoison = 2;
     public const byte StatusSlow = 3;
@@ -69,4 +76,44 @@ public static class PartyHud
             if (s == status) return true;
         return false;
     }
+
+    public const int PermillePerPercent = 10;
+
+    public static double LevelPercent(int permille) => System.Math.Clamp(permille / (double)PermillePerPercent, 0.0, 100.0);
+}
+
+public enum PartySignalLevel { Unknown, Lost, Poor, Weak, Good, Strong }
+
+public static class PartySignal
+{
+    public const int Unknown = -1;
+    public const int NoSignal = ushort.MaxValue;
+    public const int StrongMs = 100;
+    public const int GoodMs = 200;
+    public const int WeakMs = 350;
+
+    public static PartySignalLevel Level(int ms) => ms switch
+    {
+        < 0 => PartySignalLevel.Unknown,
+        >= NoSignal => PartySignalLevel.Lost,
+        <= StrongMs => PartySignalLevel.Strong,
+        <= GoodMs => PartySignalLevel.Good,
+        <= WeakMs => PartySignalLevel.Weak,
+        _ => PartySignalLevel.Poor,
+    };
+
+    public static int Arcs(PartySignalLevel level) => level switch
+    {
+        PartySignalLevel.Strong => 3,
+        PartySignalLevel.Good => 2,
+        PartySignalLevel.Weak => 1,
+        _ => 0,
+    };
+
+    public static string Tooltip(int ms) => Level(ms) switch
+    {
+        PartySignalLevel.Unknown => "Ping: unknown",
+        PartySignalLevel.Lost => "No signal",
+        _ => $"Ping: {ms} ms",
+    };
 }

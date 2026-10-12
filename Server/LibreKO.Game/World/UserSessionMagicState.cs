@@ -204,15 +204,7 @@ internal static class UserSessionMagicState
 
     public static int DropVolatileMagic(UserSession session, IGameDataService gameData)
     {
-        var dropped = 0;
-        foreach (var (magicId, buff) in session.ActiveBuffs)
-        {
-            if (SurvivesDeath(session, magicId, buff, gameData))
-                continue;
-
-            if (session.ActiveBuffs.TryRemove(magicId, out _))
-                dropped++;
-        }
+        var dropped = session.RemoveBuffsWhere((magicId, buff) => !SurvivesDeath(session, magicId, buff, gameData));
 
         session.SizeState = SizeStates.Current(session);
         dropped += session.ActiveOverTimeEffects.Count;
@@ -271,7 +263,7 @@ internal static class UserSessionMagicState
 
     public static void LoadSavedMagic(UserSession session, byte[]? data, IGameDataService gameData)
     {
-        session.ActiveBuffs.Clear();
+        session.ClearBuffs();
         session.ActiveOverTimeEffects.Clear();
         session.Invisibility = InvisibilityType.None;
         session.TransformId = 0;
@@ -294,8 +286,8 @@ internal static class UserSessionMagicState
             if (remainingMs <= 0)
                 continue;
 
-            session.ActiveBuffs[magicId] =
-                CreateSavedBuff(gameData, magicId, casterId, buffType, specialAmount, remainingMs);
+            session.SetBuff(magicId,
+                CreateSavedBuff(gameData, magicId, casterId, buffType, specialAmount, remainingMs));
         }
 
         RebuildSpecialStates(session, gameData);

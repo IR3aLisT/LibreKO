@@ -12,6 +12,9 @@ public static class WeaponMount
     private const string RightArm = "rightarm";
     private const string LeftArm = "leftarm";
 
+    public static Transform3D PlugLocal(Vector3 position, Quaternion rotation, Vector3 scale) =>
+        new(new Basis(rotation) * Basis.FromScale(scale), position * scale);
+
     public static int Bone(Skeleton3D skel, bool right, int itemId)
     {
         if (!right && ItemData.Get(itemId) is { Kind: ShieldKind })

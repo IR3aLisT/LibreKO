@@ -6,12 +6,17 @@ public sealed class PartyPacketWriter
 {
     public readonly record struct WarBoardShare(int MemberId, ushort Share);
 
+    public readonly record struct SignalEntry(int CharacterId, ushort Ms);
+
+    public const ushort NoSignal = ushort.MaxValue;
+
     public const short StatusMemberRecord = 1;
 
     public const byte MemberJoined = 1;
     public const byte MemberPromotedToLeader = 100;
 
     public const int NoTargetMark = -1;
+    public const int MaxMemberBuffs = byte.MaxValue;
     private const byte TrailingDefault = 0;
 
     public readonly record struct MemberState(
@@ -109,6 +114,29 @@ public sealed class PartyPacketWriter
             p.WriteInt(characterId);
             p.WriteByte(statusType);
             p.WriteByte(applied ? (byte)1 : (byte)0);
+        }).Build();
+    public static Packet MemberBuffs(int characterId, IReadOnlyList<int> skillIds) => new PartyPacketWriter(PartySubOpcode.MemberBuffs, p =>
+        {
+            var count = Math.Min(skillIds.Count, MaxMemberBuffs);
+            p.WriteInt(characterId);
+            p.WriteByte((byte)count);
+            for (var index = 0; index < count; index++)
+                p.WriteInt(skillIds[index]);
+        }).Build();
+    public static Packet SignalProbe(uint token) => new PartyPacketWriter(PartySubOpcode.SignalProbe, p => p.WriteUInt(token)).Build();
+    public static Packet SignalTable(IReadOnlyList<SignalEntry> entries) => new PartyPacketWriter(PartySubOpcode.SignalTable, p =>
+        {
+            p.WriteByte((byte)entries.Count);
+            foreach (var entry in entries)
+            {
+                p.WriteInt(entry.CharacterId);
+                p.WriteUShort(entry.Ms);
+            }
+        }).Build();
+    public static Packet LevelProgress(int characterId, ushort permille) => new PartyPacketWriter(PartySubOpcode.LevelProgress, p =>
+        {
+            p.WriteInt(characterId);
+            p.WriteUShort(permille);
         }).Build();
     public static Packet Commander(int characterId, string name) => new PartyPacketWriter(PartySubOpcode.Commander, p =>
         {

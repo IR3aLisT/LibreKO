@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Services;
+﻿using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Configuration;
 using LibreKO.Game.Protocol;
@@ -27,6 +27,7 @@ public class PlayerProgressionService(
     IUserNotificationService userNotificationService,
     ICharacterStatePersister characterStatePersister,
     IAchievementProgressService achievementProgressService,
+    IPartyLevelProgressService partyLevelProgress,
     SessionManager sessionManager,
     LibreKO.Game.Scripting.IQuestDefinitionSource? quests = null) : IPlayerProgressionService
 {
@@ -83,9 +84,14 @@ public class PlayerProgressionService(
         }
 
         if (leveledUp)
+        {
             await BroadcastLevelChangeAsync(session);
+            await partyLevelProgress.ProgressChangedAsync(session);
+        }
         else
+        {
             await SendExperienceAsync(session);
+        }
     }
 
     public async Task SetLevelAsync(UserSession session, byte level)
@@ -252,9 +258,10 @@ public class PlayerProgressionService(
         await combatNotificationService.SendPartyLevelUpdateAsync(session);
     }
 
-    private static async Task SendExperienceAsync(UserSession session)
+    private async Task SendExperienceAsync(UserSession session)
     {
         await session.Client.SendPacket(ExperiencePacketWriter.Current(session.Experience));
+        await partyLevelProgress.ProgressChangedAsync(session);
     }
 
     private int GetPremiumExpPercent(UserSession session)

@@ -1874,23 +1874,71 @@ public partial class World
 
     internal Control BuildPartyHudUiPreview()
     {
+        SkillData.EnsureLoaded();
         Net.I.SeedPartyPreview(
-            new PartyMember(1001, 1, "WatchMeSeducto", 4210, 4210, 83, 208, 1820, 1500),
-            new PartyMember(1002, 1, "HurinPachaCristi", 5120, 3900, 81, 206, 1400, 1210),
-            new PartyMember(1003, 1, "LikeAKitty", 3890, 2210, 80, 210, 2300, 2300),
-            new PartyMember(1004, 1, "NevilleLongbotto", 4470, 4470, 82, 212, 1990, 640),
-            new PartyMember(1005, 1, "IGaLaXia", 3320, 980, 79, 204, 2600, 2000),
-            new PartyMember(1006, 1, "TuMachoUrsoPol", 5600, 5100, 83, 206, 1100, 900),
-            new PartyMember(1007, 1, "NOAAAAAAAAA", 3010, 3010, 80, 212, 2800, 2650));
-        _partyPick = 1001;
+            new PartyMember(1001, 1, "Tansie", 4210, 3890, 62, 208, 1820, 1500),
+            new PartyMember(1002, 1, "HiddenTuna", 5120, 4630, 61, 206, 1400, 1210),
+            new PartyMember(1003, 1, "LikeAKitty", 3890, 2210, 60, 210, 2300, 2300),
+            new PartyMember(1004, 1, "NevilleLongbotto", 4470, 1040, 59, 212, 1990, 640));
+        var buffs = PreviewPartyBuffs();
+        foreach (var (id, ping, permille, first, count) in PreviewPartyMembers)
+            Net.I.SeedPartyMemberPreview(id, ping, permille, buffs.Skip(first).Take(count).ToArray());
+        Net.I.SeedPartyCommanderPreview(PreviewPartyCommander);
+        _partyPick = PreviewPartyPick;
         foreach (var (id, share) in PreviewWarBoardShares) _warBoardRowShares[id] = share;
         BuildPartyHud();
         return DetachPreviewControl(_partyHud!);
     }
 
+    internal Control BuildPartyHudDragUiPreview()
+    {
+        var hud = BuildPartyHudUiPreview();
+        if (PartyRowFor(PreviewPartyDragged) is not { } row) return hud;
+        float grab = PartyDiamondSize * 0.5f;
+        float pressY = row.Frame.Position.Y + grab;
+        _partyDrag = new PartyRowDrag(row, pressY, grab);
+        DragPartyRow(pressY - PreviewPartyDragLift);
+        return hud;
+    }
+
+    internal Control BuildPartyHudConfigUiPreview()
+    {
+        var hud = BuildPartyHudUiPreview();
+        BuildPartyConfig();
+        RefreshPartyConfig();
+        var popup = _partyConfig!;
+        popup.GetParent().RemoveChild(popup);
+        hud.AddChild(popup);
+        popup.TreeEntered += () => Callable.From(() => Callable.From(() =>
+        {
+            popup.ResetSize();
+            popup.Position = (Vector2I)PartyConfigSpot(popup.Size, hud.GetViewportRect().Size);
+            popup.Popup();
+        }).CallDeferred()).CallDeferred();
+        return hud;
+    }
+
+    private static List<int> PreviewPartyBuffs() => SkillData.All
+        .Where(s => s.Duration > 0 && s.Type1 == MagicType.Buff && SkillData.Icon(s.Id) != null)
+        .Select(s => s.Id).Take(PreviewPartyBuffCount).ToList();
+
+    private const int PreviewPartyBuffCount = 6;
+    private const int PreviewPartyCommander = 1003;
+    private const int PreviewPartyPick = 1002;
+    private const int PreviewPartyDragged = 1004;
+    private const float PreviewPartyDragLift = 74f;
+
+    private static readonly (int Id, int PingMs, int LevelPermille, int FirstBuff, int Buffs)[] PreviewPartyMembers =
+    {
+        (1001, 84, 625, 0, 2),
+        (1002, 172, 310, 2, 2),
+        (1003, 290, 880, 1, 5),
+        (1004, PartySignal.NoSignal, 50, 0, 0),
+    };
+
     private static readonly (int Id, int Share)[] PreviewWarBoardShares =
     {
-        (1001, 312), (1002, 241), (1003, 168), (1004, 97), (1005, 0), (1006, 152), (1007, 30),
+        (1001, 312), (1002, 241), (1003, 168), (1004, 97),
     };
 
     internal Control BuildClanBoardsUiPreview(string view)

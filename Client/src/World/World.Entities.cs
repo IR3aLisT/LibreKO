@@ -871,17 +871,33 @@ public partial class World
     private int AnonymousNameText(EntitySnapshot info) =>
         PlateRules.AnonymousNameText(_zone, Net.I.Nation, MyClan.InClan ? MyClan.ClanId : 0, info.Nation, info.KnightsId);
 
-    private void RefreshFriendNameColours()
+    private void RefreshPlayerNameColours()
     {
         foreach (var e in _ents.Values)
             if (AtSiegeWar) ApplySiegeName(e);
-            else RefreshFriendNameColour(e);
+            else RefreshPlayerNameColour(e);
     }
 
-    private void RefreshFriendNameColour(Ent e)
+    private void RefreshPartyPlates()
+    {
+        if (AtSiegeWar) return;
+        var party = PartyPlateColour;
+        foreach (var e in _ents.Values)
+        {
+            if (e.IsNpc || e.NameTag == null || !GodotObject.IsInstanceValid(e.NameTag)) continue;
+            bool member = IsPartyPlate(e.Id);
+            if (member == NamePlate.TintOf(e.NameTag).IsEqualApprox(party)) continue;
+            if (member) NamePlate.Tint(e.NameTag, party);
+            else RefreshPlayerNameColour(e);
+        }
+        RefreshMatchNames();
+    }
+
+    private void RefreshPlayerNameColour(Ent e)
     {
         if (e.IsNpc || e.NameTag == null || !GodotObject.IsInstanceValid(e.NameTag)) return;
-        NamePlate.Tint(e.NameTag, PlateRules.FriendColour(_zone) && IsFriendName(e.Name) ? FriendNameColour
+        NamePlate.Tint(e.NameTag, IsPartyPlate(e.Id) ? PartyPlateColour
+            : PlateRules.FriendColour(_zone) && IsFriendName(e.Name) ? FriendNameColour
             : PlateRules.AnonymousNameText(_zone, Net.I.Nation, MyClan.InClan ? MyClan.ClanId : 0, e.Nation, e.KnightsId)
                 == PlateRules.DelosHeroText ? NamePlate.Enemy
             : PlayerNameColor(e.Nation));
@@ -892,8 +908,13 @@ public partial class World
 
     private static readonly Color FriendNameColour = new(0.5f, 1f, 0.5f);
 
+    private Color PartyPlateColour => new(PlateRules.PartyNameColour(_zone));
+
+    private bool IsPartyPlate(int charId) => charId != _myId && InMyParty(charId);
+
     private Color NameColor(EntitySnapshot info)
     {
+        if (!info.IsNpc && IsPartyPlate(info.Id)) return PartyPlateColour;
         if (!info.IsNpc && PlateRules.FriendColour(_zone) && IsFriendName(info.Name)) return FriendNameColour;
         if (!info.IsNpc && AnonymousNameText(info) == PlateRules.DelosHeroText) return NamePlate.Enemy;
         if (!info.IsNpc && ZoneNameText(info) == ChatSender.PathoistText) return PathoistColour;

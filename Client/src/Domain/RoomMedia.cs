@@ -98,6 +98,15 @@ public static class VoiceNoteRules
     public const int ChunkBytes = 8192;
     public const int CacheDays = 90;
     public const int DecisecondsPerSecond = 10;
+    public const string CacheExtension = ".opus";
+    private const string LocalHostFolder = "local";
+
+    public static string CacheName(string host, RoomPost note)
+    {
+        string folder = new(host.Trim().Select(c => char.IsLetterOrDigit(c) || c is '.' or '-' ? c : '_').ToArray());
+        long unix = new DateTimeOffset(note.Time.ToUniversalTime()).ToUnixTimeSeconds();
+        return $"{(folder.Length > 0 ? folder : LocalHostFolder)}/{note.Id}_{unix}_{note.Size}{CacheExtension}";
+    }
 
     public static string Clock(double seconds)
     {

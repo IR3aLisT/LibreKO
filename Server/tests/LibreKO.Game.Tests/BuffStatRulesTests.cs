@@ -89,7 +89,7 @@ public class BuffStatRulesTests
         session.RecalculateStats(Coefficient(WarriorClass), gameData);
         var ac = session.Stats.TotalAc;
 
-        session.ActiveBuffs[106781] = Buff(BuffType.BattleCry, ac: 100, sta: 15);
+        session.SetBuff(106781, Buff(BuffType.BattleCry, ac: 100, sta: 15));
         session.RecalculateStats(Coefficient(WarriorClass), gameData);
 
         session.Stats.TotalAc.Should().Be(ac);
@@ -101,7 +101,7 @@ public class BuffStatRulesTests
     {
         var gameData = GameData();
         var session = Session(WarriorClass);
-        session.ActiveBuffs[511561] = Buff(BuffType.AntiDagger, dex: 9);
+        session.SetBuff(511561, Buff(BuffType.AntiDagger, dex: 9));
 
         session.RecalculateStats(Coefficient(WarriorClass), gameData);
 
@@ -114,8 +114,8 @@ public class BuffStatRulesTests
     {
         var gameData = GameData();
         var session = Session(WarriorClass);
-        session.ActiveBuffs[1] = Buff(BuffType.Damage, attack: 120);
-        session.ActiveBuffs[2] = Buff(BuffType.AttackSpeedArmor, attack: 120);
+        session.SetBuff(1, Buff(BuffType.Damage, attack: 120));
+        session.SetBuff(2, Buff(BuffType.AttackSpeedArmor, attack: 120));
 
         session.RecalculateStats(Coefficient(WarriorClass), gameData);
 
@@ -127,7 +127,7 @@ public class BuffStatRulesTests
     {
         var gameData = GameData();
         var session = Session(WarriorClass);
-        session.ActiveBuffs[1] = Buff(BuffType.Damage, attack: 120, magicAttack: 60);
+        session.SetBuff(1, Buff(BuffType.Damage, attack: 120, magicAttack: 60));
 
         session.RecalculateStats(Coefficient(WarriorClass), gameData);
 

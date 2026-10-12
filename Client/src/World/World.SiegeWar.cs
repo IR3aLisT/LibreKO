@@ -125,7 +125,7 @@ public partial class World
         {
             int hidden = PlateRules.AnonymousNameText(_zone, Net.I.Nation, MyClan.InClan ? MyClan.ClanId : 0, e.Nation, e.KnightsId);
             e.NameTag.Text = hidden > 0 ? ItemData.Text(hidden, e.Name) : e.Name;
-            RefreshFriendNameColour(e);
+            RefreshPlayerNameColour(e);
             return;
         }
         bool owner = SiegeWar.OwnerSide(e.KnightsId, e.AllianceId, Net.I.SiegeWar);

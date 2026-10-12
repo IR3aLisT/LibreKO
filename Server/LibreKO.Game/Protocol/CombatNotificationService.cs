@@ -16,14 +16,29 @@ public interface ICombatNotificationService
     Task SendPartyLevelUpdateAsync(UserSession session);
     Task SendPartyClassUpdateAsync(UserSession session);
     Task SendPartyStatusUpdateAsync(UserSession session, byte statusType, bool applied);
+    Task SendPartyBuffsAsync(UserSession session);
     Task SendToPartyAsync(PartyGroup party, Packet packet);
 }
 
-public class CombatNotificationService(SessionManager sessionManager,
-    ILogger<CombatNotificationService> logger,
-    IPartyWarBoardService? partyWarBoard = null,
-    IKingSystemRuntimeService? kings = null) : ICombatNotificationService
+public class CombatNotificationService : ICombatNotificationService
 {
+    private readonly SessionManager sessionManager;
+    private readonly ILogger<CombatNotificationService> logger;
+    private readonly IPartyWarBoardService? partyWarBoard;
+    private readonly IKingSystemRuntimeService? kings;
+
+    public CombatNotificationService(SessionManager sessionManager,
+        ILogger<CombatNotificationService> logger,
+        IPartyWarBoardService? partyWarBoard = null,
+        IKingSystemRuntimeService? kings = null)
+    {
+        this.sessionManager = sessionManager;
+        this.logger = logger;
+        this.partyWarBoard = partyWarBoard;
+        this.kings = kings;
+        sessionManager.BuffsChanged += session => _ = SendPartyBuffsAsync(session);
+    }
+
     public async Task SendDeathNoticeAsync(UserSession killer, UserSession victim, bool slainVanguard = false)
     {
         logger.LogInformation("PvP death: {Killer} killed {Victim} in zone {Zone}", killer.Name, victim.Name, victim.ZoneId);
@@ -133,6 +148,18 @@ public class CombatNotificationService(SessionManager sessionManager,
 
         var packet = PartyPacketWriter.StatusEffect(session.CharacterId, statusType, applied);
         await SendToPartyAsync(party, packet);
+    }
+
+    public async Task SendPartyBuffsAsync(UserSession session)
+    {
+        if (!session.IsInParty)
+            return;
+
+        var party = sessionManager.Parties.GetParty(session.PartyIndex);
+        if (party == null || party.FindMember((short)session.CharacterId) < 0)
+            return;
+
+        await SendToPartyAsync(party, PartyPacketWriter.MemberBuffs(session.CharacterId, session.LiveBuffIds()));
     }
 
     public async Task SendToPartyAsync(PartyGroup party, Packet packet)

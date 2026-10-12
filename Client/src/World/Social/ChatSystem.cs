@@ -48,7 +48,6 @@ internal sealed partial class ChatSystem
     internal const byte WhisperChannel = ChatType.Private;
     private const byte GeneralChannel = ChatType.General;
     private const byte ClanChannel = ChatType.Clan;
-    private const byte ChatRoomChannel = ChatType.ChatRoom;
     private const byte NoahKnightsChannel = ChatType.NoahKnights;
     private const byte CommanderChannel = ChatType.Command;
 
@@ -61,7 +60,6 @@ internal sealed partial class ChatSystem
     private static readonly HashSet<string> ReplyCommands = new(StringComparer.OrdinalIgnoreCase) { "r", "reply" };
     private static readonly HashSet<string> WhisperCommands = new(StringComparer.OrdinalIgnoreCase) { "w", "tell", "whisper" };
     private const int NationChatCommandText = 8019;
-    private const int NotInChatRoomText = 30958;
     private const int NoahChatBlockedText = 40101;
     private static readonly HashSet<string> CommandsOpenToEveryone = new(StringComparer.OrdinalIgnoreCase) { "setlevel" };
 
@@ -181,7 +179,6 @@ internal sealed partial class ChatSystem
         BuildNoticeBanner();
 
         Net.I.ChatEvent += OnChat;
-        Net.I.RoomChatEvent += OnRoomChat;
         Net.I.RoyalOrderEvent += OnRoyalOrder;
         Net.I.KingEventResultEvent += OnKingEventResult;
         Net.I.ChatTargetEvent += OnChatTarget;
@@ -191,7 +188,6 @@ internal sealed partial class ChatSystem
     internal void DetachNetwork()
     {
         Net.I.ChatEvent -= OnChat;
-        Net.I.RoomChatEvent -= OnRoomChat;
         Net.I.RoyalOrderEvent -= OnRoyalOrder;
         Net.I.KingEventResultEvent -= OnKingEventResult;
         Net.I.ChatTargetEvent -= OnChatTarget;
@@ -460,11 +456,6 @@ internal sealed partial class ChatSystem
         {
             if (chan == CommanderChannel && Net.I.MyClan.Fame != ClanRanks.CommandCaptain)
                 Info("Only war captains can use commander chat.");
-            else if (chan == ChatRoomChannel)
-            {
-                if (Net.I.NationChat.InRoom) Net.I.SendRoomChat(body);
-                else Info(ItemData.Text(NotInChatRoomText, "You are not participating in a chatroom. You may use the '/nation_chat' command to open the UI."));
-            }
             else if (chan == NoahKnightsChannel && NoahKnight?.Invoke() != true)
                 Info(ItemData.Text(NoahChatBlockedText, "Currently the Noah Knights chat is blocked"));
             else
@@ -531,8 +522,6 @@ internal sealed partial class ChatSystem
     internal Action? NationChatRequested;
     internal Action<int>? GestureRequested;
 
-    internal void UseRoomChannel(bool inRoom) => SetChannel(inRoom ? ChatRoomChannel : GeneralChannel);
-
     private const string RoyalOrderColour = "ff6994";
 
     private void OnRoyalOrder(byte kind, string message)
@@ -548,12 +537,6 @@ internal sealed partial class ChatSystem
     {
         int text = KingCommands.ResultText(kingEvent, result);
         if (text != 0) Info(ItemData.Text(text, ""));
-    }
-
-    private void OnRoomChat(RoomChatLine line)
-    {
-        string place = ZoneCatalog.Knows(line.ZoneId) ? ZoneCatalog.Name(line.ZoneId) : "";
-        AddEntry(ChatEntry.Player(ChatRoomChannel, line.Name, Net.I.LastEnter.Nation, false, line.Text) with { Place = place });
     }
 
     internal Action<string, string>? WhisperEcho;

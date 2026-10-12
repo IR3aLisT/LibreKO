@@ -40,7 +40,6 @@ public partial class World
     private readonly Label[] _commanderCooldowns = new Label[CommanderOrders.Bar.Length];
     private BoxContainer _commanderSlots = null!;
     private bool _commanderUserHidden;
-    private Button? _commanderRestore;
     private TextureRect _commanderPin = null!;
     private int _commanderMarkId = -1;
     private double _commanderMarkSentAt;
@@ -246,8 +245,7 @@ public partial class World
 
     private void RefreshCommanderBar()
     {
-        if (_commanderRestore != null && IsInstanceValid(_commanderRestore))
-            _commanderRestore.Visible = CommanderBarHidden;
+        RefreshPartyConfig();
         PluginNotifyParty();
         if (_commanderBar == null) return;
         _commanderBar.Visible = AmCommander && !_commanderUserHidden;

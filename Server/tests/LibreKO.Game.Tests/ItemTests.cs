@@ -1100,13 +1100,13 @@ public class ItemTests : GameTestBase
         session.Inventory[InventoryConstants.RightHand].ItemId = itemId;
         session.Inventory[InventoryConstants.RightHand].Durability = 30;
         session.Inventory[InventoryConstants.RightHand].Count = 1;
-        session.ActiveBuffs[skillId] = new ActiveBuff
+        session.SetBuff(skillId, new ActiveBuff
         {
             MagicId = skillId,
             BonusAttack = 25,
             Duration = 60,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks
-        };
+        });
         session.RecalculateStats(CreateBasicCoefficient(101), provider.GetRequiredService<IGameDataService>());
         session.RecalculateStatsWithBuffs(provider.GetRequiredService<IGameDataService>());
 

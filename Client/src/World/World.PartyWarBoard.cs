@@ -21,7 +21,6 @@ public partial class World
     private static readonly Vector2 WarBoardDefaultPos = new(HudAnchor.Edge + PartyHudWidth + 12f, PartyHudTop);
     private static readonly Color WarBoardCoolColour = Color.Color8(255, 128, 128);
     private static readonly Color MeterDamageFill = Color.Color8(182, 132, 13);
-    private static readonly Color MeterHealingFill = Color.Color8(29, 165, 162);
     private static readonly Dictionary<int, Color> WarBoardClassFills = new()
     {
         [1] = Color.Color8(112, 9, 33),
@@ -43,7 +42,6 @@ public partial class World
     private readonly Dictionary<int, int> _warBoardRowShares = new();
     private readonly List<GameWarBoardRow> _warBoardLines = new();
     private readonly WarBoardRow[] _warBoardRows = new WarBoardRow[PartyWarBoard.MaxRows];
-    private TextureButton _meterToggle = null!;
     private PanelContainer? _warBoard;
     private TextureButton _warBoardDeal = null!;
     private TextureButton _warBoardHeal = null!;
@@ -91,36 +89,11 @@ public partial class World
         return button;
     }
 
-    private void AddMeterButtons(HBoxContainer headRow)
+    private void KeepRowMeterOff()
     {
-        _meterToggle = WarBoardButton("meter_toggle", "meter_toggle_hover", "");
-        _meterToggle.Pressed += ToggleRowMeter;
-        headRow.AddChild(_meterToggle);
-        var board = WarBoardButton("meter_board", "meter_board_hover", "Party War Board");
-        board.Pressed += ToggleWarBoard;
-        headRow.AddChild(board);
-        RefreshMeterToggle();
-    }
-
-    private void RefreshMeterToggle()
-    {
-        byte mode = Net.I.PartyRowMeterMode;
-        _meterToggle.TextureNormal = WarBoardTexture(mode == PartyWarBoard.ModeOff ? "meter_toggle_off" : "meter_toggle");
-        _meterToggle.TooltipText = mode switch
-        {
-            PartyWarBoard.ModeDamage => "Party meter: damage dealt",
-            PartyWarBoard.ModeHealing => "Party meter: healing",
-            _ => "Party meter: off",
-        };
-    }
-
-    private void FillPartyMeter(PartyMeter meter, int memberId)
-    {
-        byte mode = Net.I.PartyRowMeterMode;
-        meter.Visible = mode != PartyWarBoard.ModeOff;
-        if (!meter.Visible) return;
-        meter.Fill = mode == PartyWarBoard.ModeHealing ? MeterHealingFill : MeterDamageFill;
-        meter.Target = PartyWarBoard.Fill(_warBoardRowShares.GetValueOrDefault(memberId));
+        if (Net.I.PartyRowMeterMode == PartyWarBoard.ModeOff) return;
+        if (InParty) Net.I.SendPartyWarBoard(PartyWarBoard.TargetRows, PartyWarBoard.ModeOff);
+        else Config.SetPartyRowMeter(PartyWarBoard.ModeOff);
     }
 
     private void ToggleRowMeter()
@@ -134,8 +107,6 @@ public partial class World
         _meterToggleSentAt = Now();
         Net.I.SendPartyWarBoard(PartyWarBoard.TargetRows, PartyWarBoard.NextRowMode(Net.I.PartyRowMeterMode));
         _warBoardRowShares.Clear();
-        RefreshMeterToggle();
-        RefreshPartyHud();
         PluginNotifyParty();
     }
 
@@ -150,7 +121,6 @@ public partial class World
             if (reply.Mode != Net.I.PartyRowMeterMode) return;
             _warBoardRowShares.Clear();
             foreach (var share in reply.Shares) _warBoardRowShares[share.MemberId] = share.Share;
-            RefreshPartyHud();
             PluginNotifyParty();
             return;
         }
@@ -192,6 +162,7 @@ public partial class World
         _warBoard ??= BuildWarBoard();
         _warBoard.Visible = true;
         FillWarBoard(Array.Empty<WarBoardShare>());
+        RefreshPartyConfig();
         PluginNotifyParty();
         RequestWarBoardMode(_warBoardMode == PartyWarBoard.ModeOff ? PartyWarBoard.DefaultBoardMode(_selfClass) : _warBoardMode);
     }
@@ -203,6 +174,7 @@ public partial class World
         _warBoardPending = false;
         _warBoardCool.Visible = false;
         if (InParty) Net.I.SendPartyWarBoard(PartyWarBoard.TargetBoard, PartyWarBoard.ModeOff);
+        RefreshPartyConfig();
         PluginNotifyParty();
     }
 

@@ -121,13 +121,24 @@ public partial class World
                 {
                     var view = w.PartyRowOf(m, m.CharId == leader, second);
                     rows.Add(new GamePartyMember(m.CharId, m.Name, view.Level, view.Class, view.Hp, view.MaxHp, view.Mp,
-                        view.MaxMp, m.CharId == leader, m.CharId == w._partyPick, view.NameColour, view.HpColour, view.Tooltip,
+                        view.MaxMp, m.CharId == leader, m.CharId == w.PartyHighlight, view.NameColour, view.HpColour, view.Tooltip,
                         view.HpLook));
                 }
                 return rows;
             }
         }
 
+        IReadOnlyList<GamePartyBuff> IGameParty.MemberBuffs(int id)
+        {
+            var buffs = new List<GamePartyBuff>();
+            foreach (int skillId in Net.I.PartyBuffsOf(id))
+                if (SkillData.Get(skillId) is { } skill)
+                    buffs.Add(new GamePartyBuff(skillId, SkillData.Icon(skillId), BuffTooltip(skill)));
+            return buffs;
+        }
+
+        int IGameParty.PingMs(int id) => w.PartyPingOf(id);
+        double IGameParty.LevelPercent(int id) => w.PartyLevelPercentOf(id);
         void IGameParty.Pick(int id) => w.PickPartyMember(id);
         void IGameParty.Leave() => w.AskLeaveParty();
         void IGameParty.MakeLeader(int id) => w.RunPartyMemberMenu(id, PartyMenuMakeLeader);
@@ -147,6 +158,7 @@ public partial class World
         void IGameParty.SetWarBoardMode(byte mode) => w.RequestWarBoardMode(mode);
         void IGameParty.SetWarBoardAlpha(float alpha) => w.SetWarBoardAlpha(alpha);
         void IGameParty.MoveRow(int id, int step) => w.MovePartyRow(id, step);
+        void IGameParty.MoveRowTo(int id, int index) => w.MovePartyRowTo(id, index);
         bool IGameParty.AutoRejoin => w._partyRejoin.On;
         string IGameParty.AutoRejoinTip => w.PartyRejoinTip;
         void IGameParty.ToggleAutoRejoin() => w.TogglePartyRejoin();

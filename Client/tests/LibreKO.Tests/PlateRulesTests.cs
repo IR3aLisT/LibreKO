@@ -28,6 +28,14 @@ public class PlateRulesTests
         Assert.Equal(0, PlateRules.AnonymousNameText(Moradon, Nations.Karus, ClanA, Nations.ElMorad, ClanB));
     }
 
+    [Theory]
+    [InlineData(Moradon, PlateRules.PartyNameRgba)]
+    [InlineData(37, PlateRules.PathosPartyNameRgba)]
+    [InlineData(76, PlateRules.PathosPartyNameRgba)]
+    [InlineData(PlateRules.DelosBasement, PlateRules.DelosPartyNameRgba)]
+    public void PartyMembersAreYellowExceptWhereTheZonePaintsThemItsOwnColour(int zone, uint rgba) =>
+        Assert.Equal(rgba, PlateRules.PartyNameColour(zone));
+
     [Fact]
     public void InDelosBasementEveryoneOutsideYourClanIsTheHeroFromDelos()
     {

@@ -10,7 +10,6 @@ namespace LibreKO;
 public partial class VoiceChat
 {
     private const string NoteCacheDir = "user://voice_notes";
-    private const string NoteExtension = ".opus";
     private const double MinNoteSeconds = 0.5;
 
     public enum NoteState
@@ -118,8 +117,8 @@ public partial class VoiceChat
         }
         if (_loadingNotes.Contains(noteId)) return;
         HookNet();
-        string cached = CachePath(noteId);
-        if (File.Exists(cached))
+        if (NoteById(noteId) is { } note && CachePath(note) is var cached && File.Exists(cached)
+            && new FileInfo(cached).Length == note.Size)
         {
             DecodeAndPlay(noteId, File.ReadAllBytes(cached));
             return;
@@ -154,9 +153,12 @@ public partial class VoiceChat
     {
         try
         {
-            string path = CachePath(noteId);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, file);
+            if (NoteById(noteId) is { } note && file.Length == note.Size)
+            {
+                string path = CachePath(note);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllBytes(path, file);
+            }
         }
         catch (IOException ex)
         {
@@ -235,7 +237,15 @@ public partial class VoiceChat
 
     private static string CacheRoot() => ProjectSettings.GlobalizePath(NoteCacheDir);
 
-    private static string CachePath(long noteId) => Path.Combine(CacheRoot(), noteId + NoteExtension);
+    private static string CachePath(RoomPost note) => Path.Combine(CacheRoot(), VoiceNoteRules.CacheName(Net.I.ServerHost, note));
+
+    private static RoomPost? NoteById(long noteId)
+    {
+        var posts = Net.I.RoomTimeline.Posts;
+        for (int i = posts.Count - 1; i >= 0; i--)
+            if (posts[i].Id == noteId && posts[i].Kind == RoomPostKind.VoiceNote) return posts[i];
+        return null;
+    }
 
     private static void PruneNoteCache()
     {
@@ -244,7 +254,9 @@ public partial class VoiceChat
             string root = CacheRoot();
             if (!Directory.Exists(root)) return;
             var cutoff = DateTime.UtcNow.AddDays(-VoiceNoteRules.CacheDays);
-            foreach (string file in Directory.EnumerateFiles(root, "*" + NoteExtension))
+            foreach (string file in Directory.EnumerateFiles(root, "*" + VoiceNoteRules.CacheExtension, SearchOption.TopDirectoryOnly))
+                File.Delete(file);
+            foreach (string file in Directory.EnumerateFiles(root, "*" + VoiceNoteRules.CacheExtension, SearchOption.AllDirectories))
                 if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file);
         }
         catch (IOException ex)
