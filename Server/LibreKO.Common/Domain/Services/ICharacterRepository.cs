@@ -6,6 +6,8 @@ namespace LibreKO.Common.Domain.Services;
 public interface ICharacterRepository
 {
     Task<Character?> GetById(int id);
+    Task<(short Warnings, DateTime? WarnedAt)> GetJuraidWarningsAsync(int characterId);
+    Task<short> AddJuraidWarningAsync(int characterId, DateTime now, TimeSpan lasts);
     Task<IEnumerable<Character>> GetCharactersByAccount(int accountId);
     Task<IReadOnlyList<Character>> GetByIds(IReadOnlyCollection<int> ids);
     Task CreateAsync(Character character);

@@ -310,7 +310,8 @@ public partial class World
     {
         if (code == Net.MiningSuccess)
         {
-            if (effect > 0 && Fx.NameForId(effect) is { } fxName)
+            if (effect > 0 && Fx.NameForId(effect) is { } fxName
+                && (charId == _myId || !_ents.TryGetValue(charId, out var gatherer) || RemoteGatherFxAllowed(gatherer)))
             {
                 SpawnFxOn(charId, fxName, GatherFxHeight);
                 AudioFxAt(effect, charId);

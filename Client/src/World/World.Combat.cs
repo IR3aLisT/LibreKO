@@ -88,8 +88,10 @@ public partial class World
     {
         if (!_selfDead && Vitals.Known && Vitals.Hp <= 0) EnterSelfDeath();
         TickSkillFxStops(now);
+        SweepSkillFx(now);
 
         AdvancedGenieTick(now);
+        BattleMusicTick(now);
         _launches.Clear();
         for (int i = _pendingCasts.Count - 1; i >= 0; i--)
         {
@@ -131,6 +133,7 @@ public partial class World
             if (SkillData.Get(launch.SkillId) is { } launched)
                 LaunchFlight(_myId, launch.TargetId, launched, launch.Data ?? new short[7], own: true);
 
+        SelfMoveAttackTick(now);
         if (_comboBuffered && !_selfDead && now >= _comboPlayingUntil) ComboHit(now);
         TickSwingCommit(now);
         TickAutoAttack(now);
@@ -196,6 +199,7 @@ public partial class World
     {
         if (SelfOnSoccerTeam && OnSoccerPitch()) return;
         _attackChain.Record(AttackChain.BasicAttack, Now());
+        EnterBattleMusic();
         _autoAttack = true;
         _autoTargetId = targetId;
         _hasMoveTarget = false;
@@ -357,7 +361,8 @@ public partial class World
         _comboStep = (_comboStep + 1) % 3;
         _comboStepLen = ComboLen;
 
-        AimAttack(now);
+        bool movingSwing = SelfMoveAttackReady();
+        if (!movingSwing) AimAttack(now);
 
         int target =
             _selectedId >= 0
@@ -368,9 +373,16 @@ public partial class World
                 ? _selectedId
                 : -1;
         _strikeTargetSelf = target;
-        SelfAction(BasicAttackClips, ActionRankBasic);
-        ArmSwing(target, now);
-        _nextSwing = Mathf.Max((float)_nextSwing, (float)now + LastStrikeTime(_selfAnim) + StrikeTailPad);
+        float lastStrike;
+        if (movingSwing && SelfMoveAttack(target, now, out float moveStrike))
+            lastStrike = moveStrike;
+        else
+        {
+            SelfAction(BasicAttackClips, ActionRankBasic);
+            ArmSwing(target, now);
+            lastStrike = LastStrikeTime(_selfAnim);
+        }
+        _nextSwing = Mathf.Max((float)_nextSwing, (float)now + lastStrike + StrikeTailPad);
         _comboPlayingUntil = now + _comboStepLen;
         _comboExpireAt = _comboPlayingUntil + ComboGrace;
         _comboBuffered = false;
@@ -383,6 +395,7 @@ public partial class World
         _ents.TryGetValue(id, out var e)
         && FlatDistance(e.Body.GlobalPosition, _self.GlobalPosition) <= BasicAttackRange(e);
 
+    private const int AttackResultMiss = 0;
     private const int AttackResultHit = 1;
     private const int AttackResultKill = 2;
 
@@ -397,6 +410,8 @@ public partial class World
             && Fx.NameForId(AttackChain.Effect(GD.Randi())) is { } chainFx)
             SpawnFxOn(attackerId, chainFx, 0f);
         if (result == AttackResultHit) PlayStruck(targetId);
+        if (result == AttackResultMiss && attackerId == _myId && targetId != _myId)
+            CombatLogAdd(SystemText(TextMissed, "%s Missed.", CombatEntityName(targetId)), CombatLogKind.Outgoing);
         if (result == AttackResultKill && _ents.TryGetValue(targetId, out var victim)) victim.KillStriker = attackerId;
         if (attackerId != _myId && _ents.TryGetValue(attackerId, out var a))
         {
@@ -406,7 +421,29 @@ public partial class World
         FaceToward(attackerId, targetId);
     }
 
+    private readonly RateBudget _strangerFxBudget = new();
+
     private void OnMagic(int sub, int skillId, int casterId, int targetId, short[] data)
+    {
+        bool suppress = !StrangerSkillFxAllowed(casterId, targetId);
+        Fx.SuppressOneShots = suppress;
+        try { HandleMagic(sub, skillId, casterId, targetId, data); }
+        finally { if (suppress) Fx.SuppressOneShots = false; }
+    }
+
+    private bool StrangerSkillFxAllowed(int casterId, int targetId)
+    {
+        if (casterId == _myId || targetId == _myId || casterId == _selectedId || targetId == _selectedId
+            || IsPartyMember(casterId) || IsPartyMember(targetId))
+            return true;
+        var limits = CrowdModes.Of(Config.Crowd);
+        if (limits.StrangerFxPerSecond == CrowdModes.Unlimited) return true;
+        if (!_ents.TryGetValue(casterId, out var caster) || !caster.OnScreen || _self == null) return false;
+        if (FlatDistance(caster.Body.GlobalPosition, _self.GlobalPosition) > limits.StrangerFxRange) return false;
+        return _strangerFxBudget.Take(limits.StrangerFxPerSecond, Now());
+    }
+
+    private void HandleMagic(int sub, int skillId, int casterId, int targetId, short[] data)
     {
         var s = SkillData.Get(skillId);
         switch (sub)
@@ -458,6 +495,8 @@ public partial class World
                                     restart: casterId != _myId && !castFollowUp);
                     LatchStrikeTarget(casterId, !miss && s.IsMelee ? targetId : -1);
                 }
+                else if (s != null && casterId != _myId && !castFollowUp && s.Cast <= 0 && !s.IsNonAction)
+                    PlaySkillAction(casterId, SkillAnim(casterId, s, false), ClipsForCast(s), ActionRankSkill, restart: true);
                 if (s?.SelfFx2 != null)
                 {
                     double buff = BuffSeconds(s, data);
@@ -526,7 +565,7 @@ public partial class World
         if (BasicRangedAttackSkill()?.Id == s.Id || !_castLogged.Add(s.Id)) return;
         CombatLogAdd(s.IsPotion
             ? $"You used {ItemData.DisplayName(s.UseItem)}."
-            : $"You used {s.Name}.", CombatLogKind.Status);
+            : SystemText(TextUsingSkill, "Using %s", s.Name), CombatLogKind.Status);
     }
 
     private void LogSkillOutcome(SkillData.Skill s, bool miss)
@@ -616,7 +655,8 @@ public partial class World
         Deselect();
         _pendingCasts.Clear();
         _selfFlinch?.Stop();
-        double len = PlayActionOn(_selfAnim, DeathPoses.PlayerKeepClip, DeathClips);
+        double len = PlayActionOn(_selfAnim,
+            WearsMonsterLook(_myId) ? DeathPoses.MonsterKeepClip : DeathPoses.PlayerKeepClip, DeathClips);
         _selfActionUntil = Now() + Mathf.Max((float)len, 2.5f);
         _selfActionRank = ActionRankDeath;
         if (!RoyaleDeath()) ShowDeathDialog();
@@ -632,11 +672,11 @@ public partial class World
             int shown = CombatLogLines.LoggedHp(_zone, dmg);
             CombatLogAdd(_ents.TryGetValue(attackerId, out var hitter) && !hitter.IsNpc && hitter.Name.Length > 0
                 ? TextTemplate.Fill(SystemText(CombatLogLines.PlayerDamageText, "%s is inflicted with %d HP damage."), ShownName(hitter), shown)
-                : TextTemplate.Fill(SystemText(CombatLogLines.HpDamageText, "%d HP Damage"), shown), CombatLogKind.Incoming);
+                : TextTemplate.Fill(SystemText(CombatLogLines.HpDamageText, "%d HP Damage"), shown), CombatLogKind.Incoming, tab: LogTab.State);
         }
         else if (recovered > 0)
             CombatLogAdd(TextTemplate.Fill(SystemText(CombatLogLines.HpRecoveredText, "%d HP Recovered"),
-                CombatLogLines.LoggedHp(_zone, recovered)), CombatLogKind.Recovery);
+                CombatLogLines.LoggedHp(_zone, recovered)), CombatLogKind.Recovery, tab: LogTab.State);
         if (dmg > 0 && _self != null)
         {
             Floaters?.Wound(dmg);
@@ -658,7 +698,7 @@ public partial class World
         int delta = Vitals.ApplySp(sp, maxSp);
         ShowVpBar(sp, maxSp);
         if (delta < 0)
-            CombatLogAdd(TextTemplate.Fill(SystemText(VpUsedText, "%d SP Used"), -delta), CombatLogKind.Spent);
+            CombatLogAdd(TextTemplate.Fill(SystemText(VpUsedText, "%d SP Used"), -delta), CombatLogKind.Spent, tab: LogTab.State);
     }
 
     private const int VpUsedText = 3014;
@@ -671,12 +711,12 @@ public partial class World
         if (delta > 0)
         {
             CombatLogAdd(TextTemplate.Fill(SystemText(CombatLogLines.ManaText(_selfClass, recovered: true), "%d MP Recovered"), delta),
-                CombatLogKind.Resource);
+                CombatLogKind.Resource, tab: LogTab.State);
             Floaters?.RegenMp(delta);
         }
         else if (delta < 0)
             CombatLogAdd(TextTemplate.Fill(SystemText(CombatLogLines.ManaText(_selfClass, recovered: false), "%d MP Used"), -delta),
-                CombatLogKind.Spent);
+                CombatLogKind.Spent, tab: LogTab.State);
     }
 
     private void OnItemStats(DerivedStats stats)

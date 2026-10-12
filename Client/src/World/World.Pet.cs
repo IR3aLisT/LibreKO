@@ -264,6 +264,12 @@ public partial class World
 
     private void OnPetFed(int bagSlot, int itemId, int countLeft, int increase)
     {
+        if (ItemData.Get(itemId) is not { Kind: PetFoodKind })
+        {
+            SetPetStatus($"{ItemData.DisplayName(itemId)} used on your familiar.", false);
+            RefreshPetUI();
+            return;
+        }
         SetPetStatus($"{increase / 100f:0.00}% satisfaction rate increase", false);
         RefreshPetUI();
     }

@@ -396,8 +396,13 @@ public class KnightsTests : GameTestBase
         var coordinator = provider.GetRequiredService<IKnightsPacketCoordinator>();
         await coordinator.HandleProcessAsync(client, packet);
 
-        sentPackets.Should().ContainSingle();
-        var sentPacket = sentPackets[0];
+        var replies = sentPackets.Where(p =>
+        {
+            p.ResetOffset();
+            return p.ReadByte() != (byte)KnightsSubOpcode.ClanBonus;
+        }).ToList();
+        replies.Should().ContainSingle();
+        var sentPacket = replies[0];
         sentPacket.ResetOffset();
         sentPacket.ReadByte().Should().Be(0x01);
         sentPacket.ReadByte().Should().Be(1);

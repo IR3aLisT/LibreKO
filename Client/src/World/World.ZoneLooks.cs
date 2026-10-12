@@ -88,7 +88,8 @@ public partial class World
     private int[] WornGear(Node3D worn, int[]? gear)
     {
         int fixedWeapon = worn.GetMeta(FixedWeaponMeta, 0).AsInt32();
-        if (fixedWeapon <= 0) return gear ?? System.Array.Empty<int>();
+        if (fixedWeapon <= 0)
+            return worn.GetMeta(WornAccessoriesMeta, false).AsBool() && gear != null ? gear : System.Array.Empty<int>();
         var armed = gear != null && gear.Length > InventoryConstants.VisLeftHand
             ? (int[])gear.Clone()
             : new int[InventoryConstants.VisualSlots.Length];

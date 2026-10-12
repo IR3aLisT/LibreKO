@@ -10,6 +10,7 @@ public partial class World
     private const float TopIconPadX = 9f;
 
     private CanvasLayer _topIconLayer = null!;
+    private Rect2 _topRightRow;
     private Button _powerUpStoreIcon = null!;
     private TextureRect _powerUpStoreImage = null!;
     private Button _lotteryIcon = null!;
@@ -124,6 +125,7 @@ public partial class World
         if (Platform.TouchUi || !IsInstanceValid(_premiumChip)) return;
 
         PinPremiumChip();
+        var row = _premiumChip.Visible ? _premiumChip.GetGlobalRect() : new Rect2();
         var size = new Vector2(TopIconSize + TopIconPadX * 2f, Mathf.Max(_premiumChip.Size.Y, TopIconSize));
         float right = MiniMapRightSpan() + StatusHudGap + _premiumChip.Size.X;
         float top = HudAnchor.Edge + (_premiumChip.Size.Y - size.Y) * 0.5f;
@@ -134,6 +136,10 @@ public partial class World
             icon.CustomMinimumSize = size;
             HudAnchor.Pin(icon, HudAnchor.Spot.TopRight, new Vector2(right, top));
             right += size.X;
+            row = row.HasArea() ? row.Merge(icon.GetGlobalRect()) : icon.GetGlobalRect();
         }
+        if (row.IsEqualApprox(_topRightRow)) return;
+        _topRightRow = row;
+        PluginHost.Game.RaiseTopRightRow();
     }
 }

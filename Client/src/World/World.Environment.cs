@@ -278,6 +278,24 @@ public partial class World
     private Vector3 GroundPosFor(bool npc, float koX, float koZ, float serverY, float lift) =>
         npc ? EntityGroundPos(koX, koZ, serverY, lift) : FloorGroundPos(koX, koZ, serverY, lift, login: false);
 
+    private const float NpcFloorReferenceUp = 1f;
+    private const float NpcFloorSearchUp = 20f;
+
+    private Vector3 InOutGroundPos(bool npc, float koX, float koZ, float serverY, float lift, CollisionObject3D? own = null) =>
+        npc ? NpcInOutGroundPos(koX, koZ, serverY, lift, own) : FloorGroundPos(koX, koZ, serverY, lift, login: false);
+
+    private Vector3 NpcInOutGroundPos(float koX, float koZ, float serverY, float lift, CollisionObject3D? own)
+    {
+        var onTerrain = GroundPos(koX, koZ, serverY, lift);
+        if (_terrain == null) return onTerrain;
+        float terrainFeetY = onTerrain.Y - lift;
+        float anchorY = serverY == NoServerHeight ? terrainFeetY : _terrain.KoToWorld(koX, serverY, koZ).Y;
+        float reference = anchorY + NpcFloorReferenceUp;
+        var floors = ObjectFloorsAt(onTerrain.X, onTerrain.Z,
+            Mathf.Max(terrainFeetY, reference) + NpcFloorSearchUp, terrainFeetY - EntityFloorProbeDown, own);
+        return new Vector3(onTerrain.X, FloorChoice.Login(terrainFeetY, floors, reference) + lift, onTerrain.Z);
+    }
+
     private Vector3 FloorGroundPos(float koX, float koZ, float serverY, float lift, bool login)
     {
         var onTerrain = GroundPos(koX, koZ, serverY, lift);
@@ -292,15 +310,21 @@ public partial class World
         return new Vector3(onTerrain.X, y + lift, onTerrain.Z);
     }
 
-    private List<float> ObjectFloorsAt(float x, float z, float top, float bottom)
+    private List<float> ObjectFloorsAt(float x, float z, float top, float bottom, CollisionObject3D? alsoExclude = null)
     {
         var floors = new List<float>();
         var space = GetWorld3D().DirectSpaceState;
+        var exclude = SelfProbeExclude();
+        if (alsoExclude != null && GodotObject.IsInstanceValid(alsoExclude))
+        {
+            exclude = exclude != null ? new Godot.Collections.Array<Rid>(exclude) : new Godot.Collections.Array<Rid>();
+            exclude.Add(alsoExclude.GetRid());
+        }
         float from = top;
         for (int i = 0; i < MaxFloorHits && from > bottom; i++)
         {
             var probe = PhysicsRayQueryParameters3D.Create(new Vector3(x, from, z), new Vector3(x, bottom, z), WorldCollisionLayer);
-            if (SelfProbeExclude() is { } exclude) probe.Exclude = exclude;
+            if (exclude != null) probe.Exclude = exclude;
             var hit = space.IntersectRay(probe);
             if (hit.Count == 0) break;
             var at = (Vector3)hit["position"];
@@ -323,7 +347,7 @@ public partial class World
         foreach (var e in _ents.Values)
         {
             if (e.HasTarget) continue;
-            e.Body.Position = GroundPosFor(e.IsNpc, e.KoX, e.KoZ, e.KoY, e.Lift);
+            e.Body.Position = InOutGroundPos(e.IsNpc, e.KoX, e.KoZ, e.KoY, e.Lift, e.BridgeFloor);
         }
     }
 

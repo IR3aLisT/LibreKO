@@ -199,6 +199,7 @@ public partial class World
         AddVanguardBlips();
         AddMonumentBlips();
         AddRoyalePings();
+        AddNpcFinderBlips();
         float heading = Coord.KoHeading(Mathf.Sin(_camYaw), -Mathf.Cos(_camYaw));
         _miniMap.UpdateView(_myKoX, _myKoZ, heading, _blipScratch);
         PluginNotifyMap(heading);

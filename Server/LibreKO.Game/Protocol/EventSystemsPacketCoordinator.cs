@@ -32,6 +32,7 @@ public class EventSystemsPacketCoordinator(
     ILoyaltyService loyaltyService,
     IMonsterStoneService monsterStoneService,
     INereidMonumentService nereidMonuments,
+    IPartyUserVoteService userVote,
     ILogger<EventSystemsPacketCoordinator> logger) : IEventSystemsPacketCoordinator
 {
     private const byte TempleEventMonsterStone = 6;
@@ -248,6 +249,12 @@ public class EventSystemsPacketCoordinator(
 
     private async Task HandleTempleEventJoinAsync(UserSession session)
     {
+        if (eventSchedulerService.CurrentTempleEvent == TempleEvent.JuraidMountain
+            && await userVote.JuraidBarAsync(session.CharacterId) is { } bar)
+        {
+            await session.Client.SendPacket(InstanceDashboardPacketWriter.JuraidWarning(bar.Warnings, bar.Limit));
+            return;
+        }
         var result = eventSchedulerService.TryJoinTempleEvent(session);
         await session.Client.SendPacket(EventPacketWriter.TempleEvent(
             TempleEventJoin, (byte)result,

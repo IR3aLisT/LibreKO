@@ -20,6 +20,13 @@ public class NestTimerTests
         Assert.Equal("Mission termination time.... 11 seconds", NestDungeon.TerminationLine(11, completed: true));
     }
 
+    [Fact]
+    public void TheLinesTakeTheGivenTexts()
+    {
+        Assert.Equal("Fin.... 11 seg", NestDungeon.TerminationLine(11, completed: true, "Fin....", "seg"));
+        Assert.Equal("Fin....00:00:59", NestDungeon.TerminationLine(59, completed: false, "Fin....", "seg"));
+    }
+
     [Theory]
     [InlineData(81, true)]
     [InlineData(83, true)]

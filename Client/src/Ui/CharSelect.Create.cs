@@ -139,7 +139,7 @@ public partial class CharSelect : Node3D
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             EditAlpha = false,
         };
-        _hairColour.ColorChanged += _ => RefreshCreatePreview();
+        _hairColour.ColorChanged += OnHairColourChanged;
         colourRow.AddChild(_hairColour);
         form.AddChild(colourRow);
 
@@ -344,11 +344,9 @@ public partial class CharSelect : Node3D
             b.SetMeta("job", cls);
             _jobBox.AddChild(b);
         }
-        PickClass(classes[0]);
         _createFace = Mathf.Clamp(_createFace, 0, Mathf.Max(0, CharacterPreview.FaceCount(race) - 1));
         _createHair = Mathf.Clamp(_createHair, 0, Mathf.Max(0, CharacterPreview.HairCount(race) - 1));
-        RefreshCreateState();
-        RefreshCreatePreview();
+        PickClass(classes[0]);
     }
 
     private void PickClass(int cls)
@@ -360,7 +358,9 @@ public partial class CharSelect : Node3D
                 Ui.MarkSelected(b, b.GetMeta("job").AsInt32() == cls);
 
         System.Array.Clear(_alloc, 0, _alloc.Length);
+        _createHelmetOff = false;
         RefreshCreateState();
+        RefreshCreatePreview();
     }
 
     private void StepStat(int index, int dir)
@@ -389,6 +389,7 @@ public partial class CharSelect : Node3D
     {
         int n = Mathf.Max(1, CharacterPreview.FaceCount(_createRace));
         _createFace = WrapRange(_createFace + dir, 0, n - 1);
+        _createHelmetOff = true;
         RefreshCreateState();
         RefreshCreatePreview();
     }
@@ -397,6 +398,7 @@ public partial class CharSelect : Node3D
     {
         int n = Mathf.Max(1, CharacterPreview.HairCount(_createRace));
         _createHair = WrapRange(_createHair + dir, 0, n - 1);
+        _createHelmetOff = true;
         RefreshCreateState();
         RefreshCreatePreview();
     }
@@ -430,11 +432,34 @@ public partial class CharSelect : Node3D
         _createConfirm.Disabled = _creating || !named || left != 0;
     }
 
+    private bool _createHelmetOff;
+    private System.Collections.Generic.Dictionary<(int Race, int Class), NewCharacterLook>? _newLooks;
+
+    private int[] CreatePreviewGear()
+    {
+        if (_newLooks == null)
+        {
+            using var f = Godot.FileAccess.Open(NewCharacterLooks.ResourcePath, Godot.FileAccess.ModeFlags.Read);
+            _newLooks = f != null ? NewCharacterLooks.Parse(f.GetAsText()) : new();
+        }
+        return _newLooks.TryGetValue((_createRace, _createClass), out var look)
+            ? NewCharacterLooks.Gear(look, helmet: !_createHelmetOff)
+            : System.Array.Empty<int>();
+    }
+
+    private void OnHairColourChanged(Color colour)
+    {
+        bool hairShown = _createHelmetOff;
+        _createHelmetOff = true;
+        if (hairShown && _characterModel != null && CharacterPreview.RetintHair(_characterModel, colour)) return;
+        RefreshCreatePreview();
+    }
+
     private void RefreshCreatePreview()
     {
         DetachCharacterModel();
         _characterModel = CharacterPreview.Build(_createRace, _createFace,
-            System.Array.Empty<int>(), _createHair, _hairColour.Color);
+            CreatePreviewGear(), _createHair, _hairColour.Color);
         if (_characterModel == null) return;
         _characterModel.Position = Vector3.Zero;
         _characterAnchor.RotationDegrees = new Vector3(0, _stageStandYaw, 0);
@@ -471,15 +496,9 @@ public partial class CharSelect : Node3D
             Net.I.RequestCharList();
             return;
         }
-        _createStatus.Text = code switch
-        {
-            3 => "That name is already taken.",
-            5 => "Invalid name.",
-            6 => "That name is not allowed.",
-            7 => "Invalid race for that nation.",
-            9 => "Invalid job for that race.",
-            _ => $"Create failed (code {code}).",
-        };
+        string message = ItemData.Text(CreateCharacterTexts.TextFor(code), $"Create failed (code {code}).");
+        _createStatus.Text = message;
+        Notice.Show(this, message, ItemData.Text(CreateCharacterTexts.TitleText, "Failed creating character"));
         RefreshCreateState();
     }
 }

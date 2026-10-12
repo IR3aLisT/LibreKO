@@ -17,7 +17,8 @@ public readonly record struct GamePartyMember(
     bool Picked,
     Color NameColour,
     Color HpColour,
-    string Tooltip);
+    string Tooltip,
+    PartyHpLook HpLook = PartyHpLook.Normal);
 
 public interface IGameWhispers
 {
@@ -33,10 +34,13 @@ public interface IGameWhispers
     void ToggleBlock();
     void SetLook(int size, float alpha);
     void ShowPlayerMenu(string name);
+    void OpenWith(string name);
 
     event Action<string, GameWhisperLine>? LineAdded;
     event Action? Changed;
 }
+
+public readonly record struct GameWarBoardRow(int Rank, string Name, int Class, int Share);
 
 public interface IGameParty
 {
@@ -50,6 +54,24 @@ public interface IGameParty
     void Kick(int id);
     void MakeCommander(int id);
     void ShowMemberMenu(int id);
+    bool CommanderBarHidden { get; }
+    void ShowCommanderBar();
+    byte RowMeterMode { get; }
+    int RowMeterShare(int id);
+    void CycleRowMeter();
+    bool WarBoardOpen { get; }
+    byte WarBoardMode { get; }
+    float WarBoardAlpha { get; }
+    IReadOnlyList<GameWarBoardRow> WarBoardRows { get; }
+    void ToggleWarBoard();
+    void SetWarBoardMode(byte mode);
+    void SetWarBoardAlpha(float alpha);
+    void MoveRow(int id, int step);
+    bool AutoRejoin { get; }
+    string AutoRejoinTip { get; }
+    void ToggleAutoRejoin();
+    bool UserVoteHere { get; }
+    void UserVote(int id);
 
     event Action? Changed;
 }
@@ -123,6 +145,7 @@ public sealed partial class PluginGame
         public int Size => Source?.Size ?? 0;
         public float Alpha => Source?.Alpha ?? 1f;
         public void Send(string name, string text) => Source?.Send(name, text);
+        public void OpenWith(string name) => Source?.OpenWith(name);
         public void Close(string name) => Source?.Close(name);
         public void ToggleBlock() => Source?.ToggleBlock();
         public void SetLook(int size, float alpha) => Source?.SetLook(size, alpha);
@@ -143,7 +166,25 @@ public sealed partial class PluginGame
         public void MakeLeader(int id) => Source?.MakeLeader(id);
         public void Kick(int id) => Source?.Kick(id);
         public void MakeCommander(int id) => Source?.MakeCommander(id);
+        public bool CommanderBarHidden => Source?.CommanderBarHidden ?? false;
+        public void ShowCommanderBar() => Source?.ShowCommanderBar();
         public void ShowMemberMenu(int id) => Source?.ShowMemberMenu(id);
+        public byte RowMeterMode => Source?.RowMeterMode ?? 0;
+        public int RowMeterShare(int id) => Source?.RowMeterShare(id) ?? -1;
+        public void CycleRowMeter() => Source?.CycleRowMeter();
+        public bool WarBoardOpen => Source?.WarBoardOpen ?? false;
+        public byte WarBoardMode => Source?.WarBoardMode ?? 0;
+        public float WarBoardAlpha => Source?.WarBoardAlpha ?? 1f;
+        public IReadOnlyList<GameWarBoardRow> WarBoardRows => Source?.WarBoardRows ?? Array.Empty<GameWarBoardRow>();
+        public void ToggleWarBoard() => Source?.ToggleWarBoard();
+        public void SetWarBoardMode(byte mode) => Source?.SetWarBoardMode(mode);
+        public void SetWarBoardAlpha(float alpha) => Source?.SetWarBoardAlpha(alpha);
+        public void MoveRow(int id, int step) => Source?.MoveRow(id, step);
+        public bool AutoRejoin => Source?.AutoRejoin ?? false;
+        public string AutoRejoinTip => Source?.AutoRejoinTip ?? "";
+        public void ToggleAutoRejoin() => Source?.ToggleAutoRejoin();
+        public bool UserVoteHere => Source?.UserVoteHere ?? false;
+        public void UserVote(int id) => Source?.UserVote(id);
     }
 
     private sealed class TradeProxy : IGameTrade

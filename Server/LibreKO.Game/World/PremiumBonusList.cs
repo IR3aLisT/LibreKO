@@ -46,7 +46,7 @@ public static class PremiumBonusList
         Add(bonuses, PremiumBonusKind.Coins, gameData.GetPremiumProperty(premiumType, PremiumPropertyType.Noah));
         Add(bonuses, PremiumBonusKind.Drops, gameData.GetPremiumProperty(premiumType, PremiumPropertyType.Drop));
         Add(bonuses, PremiumBonusKind.RepairDiscount, gameData.GetPremiumProperty(premiumType, PremiumPropertyType.RepairDiscount));
-        Add(bonuses, PremiumBonusKind.SellPrice, gameData.GetPremiumProperty(premiumType, PremiumPropertyType.ItemSell));
+        Add(bonuses, PremiumBonusKind.SellPrice, NpcSellRules.PremiumBonusPercent);
         if (gameData.PremiumItemTable?.TryGetValue(premiumType, out var premium) == true)
             Add(bonuses, PremiumBonusKind.DeathExpLoss, (int)Math.Round(premium.ExpRestorePercent));
         if (CharacterDevelopmentPacketCoordinator.PremiumResetsFree(premiumType))

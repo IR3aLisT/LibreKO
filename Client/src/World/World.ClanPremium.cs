@@ -79,7 +79,14 @@ public partial class World
         _clanPremiumDot.AddThemeStyleboxOverride("panel", sb);
     }
 
-    private void OnClanPremiumStatus(bool active) => RefreshClanPremiumChip();
+    private void OnClanPremiumStatus(bool active)
+    {
+        RefreshClanPremiumChip();
+        RefreshPremiumSeller();
+    }
+
+    private void RefreshPremiumSeller() =>
+        ItemData.PremiumSeller = (Net.I.PremiumAccountStatus != 0 && Net.I.PremiumHours > 0) || Net.I.ClanPremiumActive;
 
     private void OnClanPremiumClanInfo(MyClanInfo info)
     {

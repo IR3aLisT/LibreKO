@@ -65,4 +65,9 @@ public static class ClanRules
     public static bool MeetsCapeRank(byte flag, byte grade, byte capeRanking, byte capeGrade) =>
         flag >= capeRanking
         && (flag > (byte)ClanType.Promoted || capeGrade == 0 || grade <= capeGrade);
+
+    public const byte CastellanCapeType = 3;
+    public const byte VoucherTicket = 1;
+
+    public static bool VoucherCape(byte capeType, byte ticket) => capeType == CastellanCapeType && ticket == VoucherTicket;
 }

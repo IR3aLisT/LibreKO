@@ -86,11 +86,9 @@ public class KnightsCapePacketCoordinator(
                 return;
             }
 
-            // Ticket-only opcode requires that the cape's data flags it as a castellan/ticket cape.
-            // Our schema stores Grade/Ranking/BuyPrice/BuyLoyalty; if BuyPrice == 0 we treat it as ticket-eligible.
             if (opcode == OpcodeTicketPurchase)
             {
-                if (capeDef.BuyPrice != 0)
+                if (!ClanRules.VoucherCape(capeDef.Type, capeDef.Ticket))
                 {
                     await SendFailAsync(client, CapeResult.NotAllowed);
                     return;

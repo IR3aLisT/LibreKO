@@ -22,6 +22,29 @@ public partial class Net
     public event Action<int, byte, bool>? PartyMemberStatusEvent;
 
     public event Action? PartyDisbandEvent;
+    public event Action<int>? PartyRejoinForgetEvent;
+    public event Action<UserVoteAsk>? UserVoteAskEvent;
+    public event Action<short>? UserVoteRefusedEvent;
+    public event Action<UserVoteOutcome>? UserVoteResultEvent;
+    public (short Warnings, short Limit)? PendingVoteNotice { get; set; }
+
+    public void SendUserVote(int targetId, byte reason, string text)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.UserVote);
+        p.WriteInt(targetId);
+        p.WriteByte(reason);
+        if (reason == Domain.UserVote.ReasonOther) p.WriteString(text);
+        _conn.Send(p);
+    }
+
+    public void SendUserVoteAnswer(byte answer)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.UserVoteAnswer);
+        p.WriteByte(answer);
+        _conn.Send(p);
+    }
 
     public event Action<CommanderNamedReply>? PartyCommanderEvent;
 
@@ -101,13 +124,14 @@ public partial class Net
     public static class PartyRequest
     {
         public const byte Create = 1, Permit = 2, Insert = 3, Remove = 4, Delete = 5, Promote = 28,
-            CommanderAppoint = 30, CommanderMark = 31, CommanderOrder = 32;
+            CommanderAppoint = 30, CommanderMark = 31, CommanderOrder = 32, UserVote = 33, UserVoteAnswer = 34;
     }
 
     public const byte SubPartyInvite = 2, SubPartyMemberInfo = 3, SubPartyMemberLeft = 4,
                       SubPartyDisband = 5, SubPartyVitals = 6, SubPartyLevel = 7,
                       SubPartyClass = 8, SubPartyStatusEffect = 9, SubPartyCommander = 30,
-                      SubPartyCommanderMark = 31, SubPartyCommanderOrder = 32;
+                      SubPartyCommanderMark = 31, SubPartyCommanderOrder = 32, SubPartyRejoinForget = 39,
+                      SubPartyUserVote = 33, SubPartyUserVoteResult = 35;
 
     public const short PartyStatusMemberRecord = 1;
 
@@ -229,6 +253,23 @@ public partial class Net
             case SubPartyWarBoard:
                 HandlePartyWarBoard(p);
                 break;
+            case SubPartyRejoinForget:
+                if (p.RemainingBytes >= 4) PartyRejoinForgetEvent?.Invoke(p.ReadInt());
+                break;
+            case SubPartyUserVote:
+            {
+                var (result, ask) = UserVoteReply.ReadStart(p);
+                if (ask is { } started) UserVoteAskEvent?.Invoke(started);
+                else UserVoteRefusedEvent?.Invoke(result);
+                break;
+            }
+            case SubPartyUserVoteResult:
+            {
+                var outcome = UserVoteReply.ReadResult(p);
+                if (outcome.Counted) PendingVoteNotice = (outcome.Warnings, outcome.Limit);
+                UserVoteResultEvent?.Invoke(outcome);
+                break;
+            }
             case SubPartyCommander:
                 if (CommanderNamedReply.Read(p) is { } named)
                 {

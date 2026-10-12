@@ -16,7 +16,7 @@ public partial class World
 
     private GridContainer _capePatternRow = null!;
     private GridContainer _capeColourGrid = null!;
-    private Label _capeChosenLbl = null!, _capeReqLbl = null!, _capePriceLbl = null!;
+    private Label _capeChosenLbl = null!, _capeReqLbl = null!, _capePriceLbl = null!, _capeContLbl = null!, _capeNoteLbl = null!;
     private int _capePattern = -1;
     private int _capeChoice = NoCape;
     private HSlider _capeR = null!, _capeG = null!, _capeB = null!;
@@ -58,6 +58,7 @@ public partial class World
         { Visible = false };
         _capePanel.Closed += CloseCape;
         _capeLayer.AddChild(_capePanel);
+        PluginHost.Game.AttachCapeShop(new PluginCapeShopBridge(this));
 
         var r = _capePanel.Body;
         r.AddThemeConstantOverride("separation", 8);
@@ -100,6 +101,11 @@ public partial class World
         chosenCol.AddChild(_capeReqLbl);
         _capePriceLbl = UiTheme.Text("Dyeing the one you own costs clan points.", 12, UiTheme.TextLo);
         chosenCol.AddChild(_capePriceLbl);
+        _capeContLbl = UiTheme.Text("", 12, UiTheme.TextLo);
+        chosenCol.AddChild(_capeContLbl);
+        _capeNoteLbl = UiTheme.Text("", 12, UiTheme.TextHi);
+        _capeNoteLbl.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        chosenCol.AddChild(_capeNoteLbl);
         chosen.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
 
         r.AddChild(UiTheme.SectionTitle("Dye"));
@@ -169,6 +175,7 @@ public partial class World
 
         BuildCapeCatalogue();
         UpdateCapeGate();
+        PluginNotifyCapeShop();
     }
 
     private void CloseCape()
@@ -177,6 +184,7 @@ public partial class World
         _capeShown = false;
         _capePanel.Visible = false;
         RevertCapePreview();
+        PluginNotifyCapeShop();
     }
 
     private void OnCapeBuyPressed()
@@ -192,7 +200,38 @@ public partial class World
             return;
         }
 
-        byte op = _capeTicket.ButtonPressed ? Net.CapeOpTicket : Net.CapeOpBuy;
+        bool painting = rr != 0 || gg != 0 || bb != 0;
+        bool castle = Cape.TryGet(capeId, out var def) && def.Castle;
+        if (_capeTicket.ButtonPressed)
+        {
+            if (capeId < 0 || !Domain.CapeShop.VoucherAllowed(castle))
+            {
+                SetCapeStatus(ItemData.Text(Domain.CapeShop.VoucherRefusedText, "You cannot purchase this item using exchange voucher"), true);
+                return;
+            }
+            Notice.Confirm(this, ItemData.Text(Domain.CapeShop.VoucherConfirmText, "Do you wish to purchase with the exchange voucher?"),
+                "OK", "Cancel", () => SendCapeBuy(Net.CapeOpTicket, capeId, rr, gg, bb));
+            return;
+        }
+        string cont = CapeContLine(capeId < 0 ? Domain.CapeShop.PaintCont : Domain.CapeShop.ContCost(def.Points, painting));
+        string noah = CapeNoahLine(capeId < 0 ? 0 : def.Price);
+        int confirm = Domain.CapeShop.ConfirmText(castle);
+        string fallback = castle
+            ? "If you are not a member of current Castellan clan, \n%s\n%s will be used.\\Do you wish to continue with the purchase?"
+            : "Purchase price:\n%s\n%s\n Do you wish to purchase it?";
+        Notice.Confirm(this, Domain.CapeShop.Fill(ItemData.Text(confirm, fallback), cont, noah), "OK", "Cancel",
+            () => SendCapeBuy(Net.CapeOpBuy, capeId, rr, gg, bb));
+    }
+
+    private static string CapeContLine(int cont) =>
+        Domain.CapeShop.Fill(ItemData.Text(Domain.CapeShop.ContLineText, "%s Clan CONT"), Domain.CapeShop.Amount(cont));
+
+    private static string CapeNoahLine(int coins) =>
+        Domain.CapeShop.Fill(ItemData.Text(Domain.CapeShop.NoahLineText, "%s Noah"), Domain.CapeShop.Amount(coins));
+
+    private void SendCapeBuy(byte op, int capeId, byte rr, byte gg, byte bb)
+    {
+        if (_capeRequestInFlight) return;
         if (!Net.I.SendCapeBuy(op, capeId, rr, gg, bb))
         {
             SetCapeStatus(ItemData.Text(CapeBusyText, "Try again later"), true);
@@ -256,7 +295,9 @@ public partial class World
 
     private void OnCapeMyClan(MyClanInfo info)
     {
-        if (_capeShown) UpdateCapeGate();
+        if (!_capeShown) return;
+        UpdateCapeGate();
+        if (_capePattern >= 0) ShowCapePattern(_capePattern);
     }
 
     private bool CapeAllowed(Cape.CapeDef def) =>
@@ -394,8 +435,8 @@ public partial class World
 
     private string CapeCellTip(Cape.CapeDef def, bool locked)
     {
-        string cost = def.Points > 0 ? $"{def.Points:n0} clan points" : $"{def.Price:n0} gold";
-        string need = $"needs {CapeNeedName(def)}";
+        string cost = $"{CapeNoahLine(def.Price)}\n{CapeContLine(def.Points)}";
+        string need = Domain.CapeShop.Fill(ItemData.Text(Domain.CapeShop.GradeLineText, "Purchase Grade: %s and above"), CapeNeedName(def));
         return locked ? $"{def.Name}\n{cost}\n{need} — your clan is {ClanTypes.Standing(MyClan.Flag, MyClan.Grade)}"
                       : $"{def.Name}\n{cost}\n{need}";
     }
@@ -419,14 +460,16 @@ public partial class World
         }
 
         _capeChosenLbl.Text = def.M > 0 ? $"{def.Name} (pattern {def.M})" : def.Name;
-        _capeReqLbl.Text = $"Requires {CapeNeedName(def)}";
-        _capePriceLbl.Text = def.Points > 0
-            ? $"{def.Points:n0} clan points"
-            : $"{def.Price:n0} gold";
+        _capeReqLbl.Text = Domain.CapeShop.Fill(ItemData.Text(Domain.CapeShop.GradeLineText, "Purchase Grade: %s and above"), CapeNeedName(def));
+        bool worn = capeId == _capeCurrent;
+        _capePriceLbl.Text = worn ? "" : CapeNoahLine(def.Price);
+        _capeContLbl.Text = worn ? "" : CapeContLine(def.Points);
+        _capeNoteLbl.Text = worn ? ItemData.Text(Domain.CapeShop.NowEquippedText, "Now equipped") : def.Desc;
 
         bool locked = MyClan.InClan && !CapeAllowed(def);
         _capeReqLbl.AddThemeColorOverride("font_color", locked ? UiTheme.Bad : UiTheme.TextLo);
         RefreshCapePreview();
+        PluginNotifyCapeShop();
     }
 
     private void OnCapeDyeChanged()
@@ -478,6 +521,7 @@ public partial class World
     private void SetCapeStatus(string text, bool warn)
     {
         _capeStatus.Text = text;
+        PluginNotifyCapeShop();
         _capeStatus.AddThemeColorOverride("font_color", warn ? new Color("ff6a6a") : Colors.White);
     }
 

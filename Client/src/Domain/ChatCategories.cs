@@ -7,7 +7,7 @@ namespace LibreKO.Domain;
 public enum ChatCategory
 {
     None = 0, General = 1, Whisper = 2, Party = 4, Clan = 8, Alliance = 16, Shout = 32, Trade = 64,
-    Commander = 128, Notice = 256, System = 512, All = 1023,
+    Commander = 128, Notice = 256, System = 512, NoahKnights = 1024, ChatRoom = 2048, All = 4095,
 }
 
 public static class ChatCategories
@@ -16,6 +16,7 @@ public static class ChatCategories
     {
         ChatCategory.General, ChatCategory.Whisper, ChatCategory.Party, ChatCategory.Clan, ChatCategory.Alliance,
         ChatCategory.Shout, ChatCategory.Trade, ChatCategory.Commander, ChatCategory.Notice, ChatCategory.System,
+        ChatCategory.NoahKnights, ChatCategory.ChatRoom,
     };
 
     public static ChatCategory Of(byte type, bool serverNotice)
@@ -23,8 +24,9 @@ public static class ChatCategories
         if (serverNotice) return ChatCategory.Notice;
         return type switch
         {
-            ChatType.General or ChatType.GameMaster or ChatType.SeekingParty or ChatType.ChatRoom
-                or ChatType.NoahKnights => ChatCategory.General,
+            ChatType.General or ChatType.GameMaster or ChatType.SeekingParty => ChatCategory.General,
+            ChatType.ChatRoom => ChatCategory.ChatRoom,
+            ChatType.NoahKnights => ChatCategory.NoahKnights,
             ChatType.Private => ChatCategory.Whisper,
             ChatType.Party or ChatType.Forced => ChatCategory.Party,
             ChatType.Clan or ChatType.ClanOfficer or ChatType.ClanNotice => ChatCategory.Clan,
@@ -48,6 +50,8 @@ public static class ChatCategories
         ChatCategory.Commander => "Commander",
         ChatCategory.Notice => "Notices",
         ChatCategory.System => "System",
+        ChatCategory.NoahKnights => "Noah Knights",
+        ChatCategory.ChatRoom => "Chatroom",
         _ => "",
     };
 }
@@ -63,14 +67,23 @@ public static class ChatTabs
     public static IReadOnlyList<ChatTabSpec> All { get; } = new ChatTabSpec[]
     {
         new("all", "All", ChatCategory.All, NoSendChannel, ChatType.General),
-        new("general", "General", ChatCategory.General | ChatCategory.Shout | ChatCategory.Commander | ChatCategory.Notice, ChatType.General, ChatType.General),
+        new("general", "General", ChatCategory.General | ChatCategory.Shout | ChatCategory.Commander | ChatCategory.Notice
+            | ChatCategory.NoahKnights | ChatCategory.ChatRoom, ChatType.General, ChatType.General),
         new("whisper", "Whispers", ChatCategory.Whisper, ChatType.Private, ChatType.Private),
         new("party", "Party", ChatCategory.Party | ChatCategory.Notice, ChatType.Party, ChatType.Party),
         new("clan", "Clan", ChatCategory.Clan | ChatCategory.Alliance | ChatCategory.Notice, ChatType.Clan, ChatType.Clan),
         new("alliance", "Alliance", ChatCategory.Alliance | ChatCategory.Notice, ChatType.Alliance, ChatType.Alliance),
+        new("noah", "Noah Knights", ChatCategory.NoahKnights | ChatCategory.Notice, ChatType.NoahKnights, ChatType.NoahKnights),
         new("shout", "Shout", ChatCategory.Shout, ChatType.Shout, ChatType.Shout),
         new("trade", "Trade", ChatCategory.Trade, NoSendChannel, ChatType.Merchant),
         new("system", "System", ChatCategory.Notice | ChatCategory.System, NoSendChannel, ChatType.WarSystem),
+    };
+
+    public static bool Applies(ChatTabSpec tab, bool noahKnight) => tab.Id switch
+    {
+        "noah" => noahKnight,
+        "clan" or "alliance" => !noahKnight,
+        _ => true,
     };
 
     public static int IndexOf(string id)

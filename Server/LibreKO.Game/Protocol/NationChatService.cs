@@ -6,15 +6,21 @@ using Microsoft.Extensions.Logging;
 
 namespace LibreKO.Game.Protocol;
 
+public readonly record struct ChatRoomSeat(string Key, bool Public, ushort RoomId, int[] Members, int OwnerId = 0);
+
 public interface INationChatService
 {
     Task HandleAsync(IClient client, Packet packet);
     Task SayAsync(UserSession session, ushort roomId, string text);
     Task LeaveAllAsync(UserSession session);
+    bool TryGetSeat(int characterId, out ChatRoomSeat seat);
+    int[] MembersOf(string roomKey);
+    event Action<int, string>? SeatReleased;
 }
 
 public sealed class NationChatService(
     SessionManager sessionManager,
+    IChatRoomHistory history,
     ILogger<NationChatService> logger) : INationChatService
 {
     public const int PublicCapacity = 500;
@@ -33,11 +39,14 @@ public sealed class NationChatService(
 
         public HashSet<int> Of(AccountNation nation) =>
             Members.TryGetValue(nation, out var set) ? set : Members[nation] = [];
+
+        public string KeyOf(AccountNation nation) => $"pub:{(int)nation}:{Id}";
     }
 
     private sealed class PrivateRoom
     {
         public ushort Id { get; init; }
+        public string Key { get; } = $"room:{Guid.NewGuid():N}";
         public string Name { get; set; } = "";
         public AccountNation Nation { get; init; }
         public string Password { get; set; } = "";
@@ -56,6 +65,8 @@ public sealed class NationChatService(
     private readonly Dictionary<ushort, PrivateRoom> _rooms = [];
     private readonly Dictionary<int, Seat> _seats = [];
     private ushort _nextRoomId = PrivateRoomIdBase;
+
+    public event Action<int, string>? SeatReleased;
 
     public async Task HandleAsync(IClient client, Packet packet)
     {
@@ -86,16 +97,53 @@ public sealed class NationChatService(
 
     public async Task SayAsync(UserSession session, ushort roomId, string text)
     {
-        List<int> audience;
+        if (!TryGetSeat(session.CharacterId, out var seat) || seat.RoomId != roomId)
+            return;
+        await SendToAsync(seat.Members, NationChatPacketWriter.Say(session.CharacterId, session.Name, text, session.ZoneId));
+        if (session.IsBot) return;
+        try { await history.AppendTextAsync(seat.Key, session.CharacterId, session.Name, text); }
+        catch (Exception ex) { logger.LogWarning(ex, "Room line from {Name} was not stored", session.Name); }
+    }
+
+    public bool TryGetSeat(int characterId, out ChatRoomSeat seat)
+    {
         lock (_gate)
         {
-            if (!_seats.TryGetValue(session.CharacterId, out var seat) || seat.RoomId != roomId)
-                return;
-            audience = seat.Public
-                ? [.. _channels.First(c => c.Id == roomId).Of(session.Nation)]
-                : [.. _rooms[roomId].Members];
+            seat = default;
+            if (!_seats.TryGetValue(characterId, out var found))
+                return false;
+            if (found.Public)
+            {
+                var channel = _channels.First(c => c.Id == found.RoomId);
+                var nation = sessionManager.GetByCharacterId(characterId)?.Nation ?? AccountNation.None;
+                seat = new ChatRoomSeat(channel.KeyOf(nation), true, found.RoomId, [.. channel.Of(nation)]);
+                return true;
+            }
+            if (!_rooms.TryGetValue(found.RoomId, out var room))
+                return false;
+            seat = new ChatRoomSeat(room.Key, false, room.Id, [.. room.Members], room.OwnerId);
+            return true;
         }
-        await SendToAsync(audience, NationChatPacketWriter.Say(session.CharacterId, session.Name, text, session.ZoneId));
+    }
+
+    public int[] MembersOf(string roomKey)
+    {
+        lock (_gate)
+        {
+            if (_rooms.Values.FirstOrDefault(r => r.Key == roomKey) is { } room)
+                return [.. room.Members];
+            foreach (var channel in _channels)
+                foreach (var (nation, members) in channel.Members)
+                    if (channel.KeyOf(nation) == roomKey)
+                        return [.. members];
+            return [];
+        }
+    }
+
+    private void Released(int characterId, string key)
+    {
+        try { SeatReleased?.Invoke(characterId, key); }
+        catch (Exception ex) { logger.LogWarning(ex, "Room seat release handler failed for {Id}", characterId); }
     }
 
     public async Task LeaveAllAsync(UserSession session)
@@ -143,13 +191,17 @@ public sealed class NationChatService(
 
     private async Task LeavePublicAsync(UserSession session, bool reply)
     {
+        string key;
         lock (_gate)
         {
             if (!_seats.TryGetValue(session.CharacterId, out var seat) || !seat.Public)
                 return;
-            _channels.First(c => c.Id == seat.RoomId).Of(session.Nation).Remove(session.CharacterId);
+            var channel = _channels.First(c => c.Id == seat.RoomId);
+            channel.Of(session.Nation).Remove(session.CharacterId);
             _seats.Remove(session.CharacterId);
+            key = channel.KeyOf(session.Nation);
         }
+        Released(session.CharacterId, key);
         if (reply)
             await session.Client.SendPacket(NationChatPacketWriter.Result(NationChatPacketWriter.PublicLeave, NationChatResults.Ok));
     }
@@ -256,6 +308,7 @@ public sealed class NationChatService(
             rest = [.. room.Members];
             count = (ushort)rest.Count;
         }
+        Released(session.CharacterId, room.Key);
         if (reply)
             await session.Client.SendPacket(NationChatPacketWriter.Result(NationChatPacketWriter.PrivateLeave, NationChatResults.Ok));
         if (rest.Count == 0) return;
@@ -350,6 +403,7 @@ public sealed class NationChatService(
         byte result;
         UserSession? target = null;
         List<int> rest = [];
+        string key = "";
         lock (_gate)
         {
             if (!_rooms.TryGetValue(roomId, out var room)) result = NationChatResults.OptionsNoRoom;
@@ -361,11 +415,13 @@ public sealed class NationChatService(
                 _seats.Remove(targetId);
                 target = sessionManager.GetByCharacterId(targetId);
                 rest = [.. room.Members];
+                key = room.Key;
                 result = NationChatResults.Ok;
             }
         }
         await session.Client.SendPacket(NationChatPacketWriter.Result(NationChatPacketWriter.Kick, result));
         if (result != NationChatResults.Ok) return;
+        Released(targetId, key);
         if (target != null)
             await target.Client.SendPacket(NationChatPacketWriter.Result(NationChatPacketWriter.Kick, NationChatResults.YouWereKicked));
         string name = target?.Name ?? "";

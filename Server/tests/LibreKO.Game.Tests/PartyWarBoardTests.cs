@@ -57,6 +57,20 @@ public class PartyWarBoardTests
     }
 
     [Fact]
+    public async Task ModesSentWithPartyCreateDecideWhatTheLeaderIsPushed()
+    {
+        _board.SeedModes(_leader.PartyIndex, LeaderId, PartyWarBoardService.ModeHealing, PartyWarBoardService.ModeDamage);
+        _board.CountDamage(_member, 50);
+        _sent[LeaderId].Clear();
+
+        await _board.PushAsync();
+
+        var pushed = _sent[LeaderId].Select(Read).Select(r => (r.Target, r.Mode)).ToList();
+        pushed.Should().BeEquivalentTo([(PartyWarBoardService.TargetRows, PartyWarBoardService.ModeHealing),
+            (PartyWarBoardService.TargetBoard, PartyWarBoardService.ModeDamage)]);
+    }
+
+    [Fact]
     public void SharesAreThousandthsOfThePartyTotal()
     {
         var shares = PartyWarBoardService.ShareOf([(LeaderId, 300), (MemberId, 100)]);

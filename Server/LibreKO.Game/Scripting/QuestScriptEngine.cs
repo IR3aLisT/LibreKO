@@ -97,6 +97,18 @@ public sealed partial class QuestScriptEngine : IQuestDefinitionSource
     public QuestObjectives? ObjectivesFor(int questId) =>
         ObjectiveIndex().GetValueOrDefault(questId);
 
+    public IReadOnlyList<(int Item, int Count)> CollectsFor(int questId, int classGroup, int nation, int rebirthLevel)
+    {
+        if (!FlowIndex().TryGetValue(questId, out var program)
+            || program.RewardsFor(questId, classGroup, nation, rebirthLevel) is not { } rewards)
+            return [];
+        return rewards.Transfers
+            .Where(action => action.Kind == LibreKO.Quests.Binding.QuestActionKind.TakeItem)
+            .Select(action => (action.Arguments.GetInt("item"), action.Arguments.GetInt("amount", action.Arguments.GetInt("count", 1))))
+            .Where(collect => collect.Item1 > 0 && collect.Item2 > 0)
+            .ToList();
+    }
+
     public ObjectiveRule ObjectiveRuleFor(int questId) =>
         ObjectivesFor(questId)?.Rule ?? ObjectiveRule.All;
 

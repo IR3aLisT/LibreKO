@@ -168,6 +168,8 @@ public static class NamePlate
 
     private static int Scaled(int basePx) => Mathf.RoundToInt(basePx * Config.NamePlateScale);
 
+    public static event System.Action? RescaledEvent;
+
     public static void Rescale()
     {
         if (Engine.GetMainLoop() is not SceneTree tree)
@@ -180,5 +182,6 @@ public static class NamePlate
             if (label.HasMeta(TintMeta)) label.Modulate = Tone(label.GetMeta(TintMeta).AsColor());
             label.OutlineModulate = new Color(Outline, label.OutlineModulate.A);
         }
+        RescaledEvent?.Invoke();
     }
 }

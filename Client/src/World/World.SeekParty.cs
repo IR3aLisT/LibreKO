@@ -69,6 +69,7 @@ public partial class World
         root.AddChild(_fullMoonRow);
         SmallButton("Enter", _fullMoonRow).Pressed += EnterFullMoon;
         SmallButton("Party Board", _fullMoonRow).Pressed += ShoutFullMoonParty;
+        SmallButton("Auto Entry", _fullMoonRow).Pressed += StartFullMoonAutoEntry;
         var kind = new OptionButton { FocusMode = Control.FocusModeEnum.None };
         kind.AddThemeFontSizeOverride("font_size", 12);
         kind.AddItem("Everyone", (int)PartyBoardKind.All);

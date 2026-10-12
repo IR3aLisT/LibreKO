@@ -241,6 +241,13 @@ public partial class World
             return;
         }
 
+        if (dlg.Flag == NpcDialog.RepurchaseWindowFlag)
+        {
+            CloseNpcDialog();
+            OpenRepurchase(dlg.NpcId);
+            return;
+        }
+
         if (dlg.Flag == NpcDialog.FamiliarPanelFlag)
         {
             CloseNpcDialog();

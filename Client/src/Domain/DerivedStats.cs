@@ -5,6 +5,7 @@ public class DerivedStats
     public int TotalHit { get; set; }
     public int TotalAc { get; set; }
     public int MaxWeight { get; set; }
+    public bool HealStrikesEnemies { get; set; }
     public int MaxHp { get; set; }
     public int MaxMp { get; set; }
 

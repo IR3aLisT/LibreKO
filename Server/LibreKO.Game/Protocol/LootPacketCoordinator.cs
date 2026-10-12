@@ -21,7 +21,8 @@ public class LootPacketCoordinator(
     IUserNotificationService userNotificationService,
     ICollectionRaceService collectionRaceService,
     IKingEventState kingEventState,
-    ILogger<LootPacketCoordinator> logger) : ILootPacketCoordinator
+    ILogger<LootPacketCoordinator> logger,
+    Microsoft.Extensions.Options.IOptions<LibreKO.Game.Configuration.GameServerSettings>? settings = null) : ILootPacketCoordinator
 {
     private const byte LootSuccess = 1;
     private const int CoinMax = 2_100_000_000;
@@ -145,8 +146,15 @@ public class LootPacketCoordinator(
             var party = session.IsInParty ? sessionManager.Parties.GetParty(session.PartyIndex) : null;
             if (party == null)
             {
-                var newMoney = GainCoins(session, claimedGold.Count);
-                await session.Client.SendPacket(ItemGetPacketWriter.LootedGold(bundleId, itemId, claimedGold.Count, newMoney, slotId));
+                int coins = claimedGold.Count;
+                int times = JackpotRules.Roll(session, settings?.Value.Jackpot.CoinRates ?? []);
+                if (times > JackpotRules.None)
+                    coins = (int)Math.Min((long)coins * times, int.MaxValue);
+                var newMoney = GainCoins(session, coins);
+                if (times > JackpotRules.None)
+                    await sessionManager.Regions.SendToRegion(session,
+                        GoldChangePacketWriter.Multiplied(coins, newMoney, times, session.CharacterId), excludeSender: false);
+                await session.Client.SendPacket(ItemGetPacketWriter.LootedGold(bundleId, itemId, (ushort)Math.Min(coins, ushort.MaxValue), newMoney, slotId));
                 return;
             }
 

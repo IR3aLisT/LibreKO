@@ -14,6 +14,8 @@ public enum HudPart
     CombatLog,
     QuestTracker,
     Party,
+    WarBoard,
+    GenieSub,
 }
 
 public readonly record struct PlayerMenuRow(string Key, string Caption, Action Run);
@@ -254,15 +256,16 @@ public sealed class PluginUi
     public static readonly string[] KnownWindowIds =
     {
         "achievements", "admin_panel", "anvil", "attendance", "bounty", "cape", "changehair", "character_info",
-        "chatrooms", "clan", "clanwarehouse", "class_change", "collectionrace", "combinerecipes", "disguise",
+        "chat_room", "clan", "clanwarehouse", "class_change", "collectionrace", "combinerecipes", "disguise",
         "equipview", "exchange", "fishinghall", "forces", "fortune", "genie", "globalmap",
         "inventory", "itemcombine", "kingballot", "kingelection", "kingnominate", "kingplan", "kingvote", "lottery",
-        "mail", "mailcompose", "mailread", "marketprice", "merchantmenu", "messenger", "namechange", "nationintro",
+        "mail", "mailcompose", "mailread", "marketprice", "merchantmenu", "messenger", "namechange", "nation_chat",
+        "nation_chat_create", "nation_chat_members", "nation_chat_password", "nation_chat_search", "nationintro",
         "nationtax", "nationtaxrate", "npc_dialog", "party", "pet", "piecechange", "presets", "quest_available",
-        "quest_receipt", "quest_target", "quests", "rank", "rebirth", "repair", "report", "roulette", "seal",
+        "quest_receipt", "quest_target", "quests", "rank", "rebirth", "repair", "report", "repurchase", "roulette", "seal",
         "seek_party", "sellstall", "shop", "shoppingmall", "siegechallengers", "siegedefenders", "siegeguard",
         "siegeoffice", "siegeschedule", "siegetaxlist", "siegetaxrate", "skills", "specialauction", "titles",
-        "tournament", "userinfo", "vendor", "vipwarehouse", "wantedstall", "warehouse", "warp", "whisper_*",
+        "tournament", "user_vote", "user_vote_ask", "user_vote_notice", "userinfo", "vendor", "vipwarehouse", "wantedstall", "warehouse", "warp", "whisper_*",
         "wishfind", "wishlist",
     };
 

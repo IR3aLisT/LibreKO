@@ -97,6 +97,7 @@ public interface IQuestHost
     void OpenClanRenamePanel();
     void OpenRebirthPanel();
     void OpenRebirthResetPanel();
+    void OpenRepurchaseWindow();
     void OpenFamiliarPanel();
     void OpenFamiliarShop();
     void OpenGenderChangePanel();

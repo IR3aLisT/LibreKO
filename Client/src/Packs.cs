@@ -25,6 +25,7 @@ public partial class Packs : Node
     public static IReadOnlyList<string> Missing => _missing;
 
     private static readonly List<string> _missing = new();
+    private static bool _downloadedMounted;
 
     public override void _Ready()
     {
@@ -33,7 +34,12 @@ public partial class Packs : Node
         if (OS.HasFeature("editor")) return;
         Config.PinShippedDefaults();
         Build.Pin();
-        if (Platform.BundledContent) { MountDownloaded(); return; }
+        if (Platform.BundledContent)
+        {
+            ContentReady = PacksIn(DownloadedContentDir).Count > 0;
+            if (!ContentReady) GD.Print("[packs] no downloaded content — first run must fetch it");
+            return;
+        }
 
         string dir = OS.GetExecutablePath().GetBaseDir().PathJoin(ContentDir);
         foreach (var (pck, root) in Content)
@@ -48,23 +54,29 @@ public partial class Packs : Node
 
     public static void MountDownloaded()
     {
+        if (_downloadedMounted) return;
+        _downloadedMounted = true;
         int content = MountLooseDir(DownloadedContentDir, "content");
         MountLooseDir(DownloadedPatchDir, "patch");
         ContentReady = content > 0;
-        if (!ContentReady)
-            GD.Print("[packs] no downloaded content — first run must fetch it");
     }
 
-    private static int MountLooseDir(string dir, string label)
+    private static List<string> PacksIn(string dir)
     {
-        using var d = DirAccess.Open(dir);
-        if (d == null) return 0;
         var names = new List<string>();
+        using var d = DirAccess.Open(dir);
+        if (d == null) return names;
         d.ListDirBegin();
         for (string f = d.GetNext(); f.Length > 0; f = d.GetNext())
             if (!d.CurrentIsDir() && f.EndsWith(".pck"))
                 names.Add(f);
         names.Sort();
+        return names;
+    }
+
+    private static int MountLooseDir(string dir, string label)
+    {
+        var names = PacksIn(dir);
         foreach (var n in names)
             Mount(dir.PathJoin(n), required: false);
         if (names.Count > 0)

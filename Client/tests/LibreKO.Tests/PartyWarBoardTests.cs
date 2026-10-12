@@ -64,6 +64,22 @@ public class PartyWarBoardTests
         Assert.Equal(PartyWarBoard.ModeDamage, PartyWarBoard.DefaultBoardMode(201));
     }
 
+    [Theory]
+    [InlineData(0, PartyWarBoard.ModeOff)]
+    [InlineData(2, PartyWarBoard.ModeHealing)]
+    [InlineData(7, PartyWarBoard.ModeDamage)]
+    [InlineData(-1, PartyWarBoard.ModeDamage)]
+    public void ASavedModeOutsideTheThreeFallsBack(int saved, byte expected) =>
+        Assert.Equal(expected, PartyWarBoard.SavedMode(saved, PartyWarBoard.ModeDamage));
+
+    [Theory]
+    [InlineData(0.5f, 0.5f)]
+    [InlineData(0f, PartyWarBoard.MinAlpha)]
+    [InlineData(3f, 1f)]
+    [InlineData(float.NaN, 1f)]
+    public void ASavedAlphaStaysInTheSliderRange(float saved, float expected) =>
+        Assert.Equal(expected, PartyWarBoard.SavedAlpha(saved));
+
     [Fact]
     public void TheLimitCountsDownFromTheLastSend()
     {

@@ -26,7 +26,7 @@ public partial class World
         var me = _self.Position;
         foreach (var (id, box) in _boxes)
         {
-            if (_autoLootTried.Contains(id) || box.BasePos.DistanceSquaredTo(me) > AutoLootRangeSq) continue;
+            if (!box.Placed || _autoLootTried.Contains(id) || box.BasePos.DistanceSquaredTo(me) > AutoLootRangeSq) continue;
             _autoLootTried.Add(id);
             _autoLooting = true;
             _openBundleId = id;

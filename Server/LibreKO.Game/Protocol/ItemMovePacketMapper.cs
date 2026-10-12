@@ -46,6 +46,7 @@ internal static class ItemMovePacketMapper
             TotalHit = (short)(stats.TotalHit * attackAmount / AttackAmountScale),
             TotalAc = stats.TotalAc,
             MaxWeight = stats.MaxWeight,
+            HealStrikesEnemies = session.HealStrikesEnemies,
             MaxHp = stats.MaxHp,
             MaxMp = stats.MaxMp,
             StrengthBonus = stats.StrBonus,

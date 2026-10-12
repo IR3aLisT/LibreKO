@@ -368,7 +368,8 @@ public partial class World
         args[0] = now.Hour;
         args[1] = now.Minute;
         extra.CopyTo(args, 2);
-        CombatLogAdd(TextTemplate.Fill(ItemData.Text(textId, fallback), args), CombatLogKind.Resource, StallLogTint);
+        CombatLogAdd(TextTemplate.Fill(ItemData.Text(textId, fallback), args), CombatLogKind.Resource, StallLogTint,
+            tab: textId == StallSoldText ? LogTab.Item : LogTab.System);
     }
 
     private void OnMerchantSold(int itemId, string buyerName) =>

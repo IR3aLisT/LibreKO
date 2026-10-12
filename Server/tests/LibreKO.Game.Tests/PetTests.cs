@@ -20,6 +20,9 @@ public class PetTests : GameTestBase
     private const int KaulId = PetService.HatchedPetItem;
     private const int LeafId = 389_570_000;
     private const short LeafSatisfaction = 200;
+    private const int PotionId = 389_010_000;
+    private const int PotionSkill = 490_010;
+    private const short PotionHeal = 45;
     private const byte KaulClass = 101;
     private const byte KaulItemSlot = 20;
     private const int KateNpcId = 13016;
@@ -784,6 +787,54 @@ public class PetTests : GameTestBase
     }
 
     [Fact]
+    public async Task AnHpPotionGivenToTheFamiliarHealsItAndIsUsedUp()
+    {
+        using var provider = Provider();
+        var sessions = provider.GetRequiredService<SessionManager>();
+        var (owner, sent) = Player(sessions, 700);
+        await EquipPet(provider, owner);
+        var pets = provider.GetRequiredService<IPetService>();
+        await pets.SummonAsync(owner);
+        var npc = owner.Pet!.Npc!;
+        npc.Hp = npc.MaxHp / 4;
+        int before = npc.Hp;
+        owner.Inventory[InventoryConstants.SlotMax + 4].ItemId = PotionId;
+        owner.Inventory[InventoryConstants.SlotMax + 4].Count = 3;
+        sent.Clear();
+
+        await pets.FeedAsync(owner, 4, PotionId);
+
+        npc.Hp.Should().Be(Math.Min(npc.MaxHp, before + PotionHeal));
+        owner.Pet.Record.Satisfaction.Should().Be(Pet.HatchedSatisfaction);
+        owner.Inventory[InventoryConstants.SlotMax + 4].Count.Should().Be(2);
+        sent.Should().Contain(p => Function(p) == PetFunction.Food);
+        sent.Should().Contain(p => Function(p) == PetFunction.Hp);
+    }
+
+    [Fact]
+    public async Task AFamiliarAtFullHealthRefusesThePotion()
+    {
+        using var provider = Provider();
+        var sessions = provider.GetRequiredService<SessionManager>();
+        var (owner, sent) = Player(sessions, 700);
+        await EquipPet(provider, owner);
+        var pets = provider.GetRequiredService<IPetService>();
+        await pets.SummonAsync(owner);
+        owner.Inventory[InventoryConstants.SlotMax + 4].ItemId = PotionId;
+        owner.Inventory[InventoryConstants.SlotMax + 4].Count = 3;
+        sent.Clear();
+
+        await pets.FeedAsync(owner, 4, PotionId);
+
+        owner.Inventory[InventoryConstants.SlotMax + 4].Count.Should().Be(3);
+        var refused = sent.First(p => Function(p) == PetFunction.Food);
+        refused.ResetOffset();
+        refused.ReadByte();
+        refused.ReadByte();
+        refused.ReadByte().Should().NotBe(PetPacketWriter.FoodSucceeded);
+    }
+
+    [Fact]
     public async Task SatisfactionDropsEachMinuteAndAStarvedFamiliarLeaves()
     {
         using var provider = Provider();
@@ -938,6 +989,19 @@ public class PetTests : GameTestBase
         gameData.GetItem(KaulId).Returns(new ItemData
         {
             Num = KaulId, Kind = (byte)ItemKind.PetItem, Slot = KaulItemSlot, Damage = KaulClass, Duration = 1,
+        });
+        gameData.GetItem(PotionId).Returns(new ItemData
+        {
+            Num = PotionId, Kind = 255, Slot = 15, Countable = 1, Effect1 = PotionSkill,
+        });
+        gameData.GetMagic(PotionSkill).Returns(new MagicData
+        {
+            Id = PotionSkill, Type1 = (byte)MagicSkillType.OverTime, Moral = FamiliarPotion.SelfMoral, UseItem = PotionId,
+            ReCastTime = 20,
+        });
+        gameData.MagicType3Table.Returns(new Dictionary<int, MagicType3Data>
+        {
+            [PotionSkill] = new() { Id = PotionSkill, DirectType = FamiliarPotion.HpDirect, FirstDamage = PotionHeal },
         });
         gameData.GetItem(LeafId).Returns(new ItemData
         {

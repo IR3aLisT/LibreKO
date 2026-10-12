@@ -18,7 +18,7 @@ public class NationChatTests
 
     public NationChatTests()
     {
-        _service = new NationChatService(_sessions, Substitute.For<ILogger<NationChatService>>());
+        _service = new NationChatService(_sessions, Substitute.For<IChatRoomHistory>(), Substitute.For<ILogger<NationChatService>>());
     }
 
     private UserSession Player(int id, AccountNation nation)

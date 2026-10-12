@@ -79,6 +79,8 @@ public static partial class CharacterPreview
         return ResourceLoader.Exists(path) ? ResourceLoader.Load<PackedScene>(path) : null;
     }
 
+    private const int HairPartNode = 5;
+
     private static void Graft(Node3D body, int race, int face, int[]? gear, int hair, Color? hairColour, bool enableShine)
     {
         LoadParts();
@@ -99,8 +101,8 @@ public static partial class CharacterPreview
         bool helmet = costume?.Contains(Domain.CostumeLook.HeadPart) == true
                       || gear != null && gear.Length > 2 && gear[2] > 0;
         if (!helmet && HairPartStem(race, hair) is { } hairStem
-            && GraftPart(parts, 5, hairStem, "characters") && hairColour is { } tint)
-            TintHair(parts[5], tint);
+            && GraftPart(parts, HairPartNode, hairStem, "characters") && hairColour is { } tint)
+            TintHair(parts[HairPartNode], tint);
 
         if (gear != null)
             foreach (var (gi, pn) in ArmorSlotToPart)
@@ -172,6 +174,17 @@ public static partial class CharacterPreview
     {
         string stem = $"{racePrefix}{style:D2}";
         return ResourceLoader.Exists($"res://assets/characters/{stem}.glb") ? stem : $"{racePrefix}00";
+    }
+
+    public static bool RetintHair(Node3D body, Color tint)
+    {
+        foreach (var mi in PartMeshes(body))
+        {
+            if (PartNodeIndex(mi.Name) != HairPartNode || !mi.Visible) continue;
+            TintHair(mi, tint);
+            return true;
+        }
+        return false;
     }
 
     internal static void TintHair(MeshInstance3D part, Color tint)

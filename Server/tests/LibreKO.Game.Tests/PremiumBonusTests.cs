@@ -32,7 +32,6 @@ public class PremiumBonusTests
         data.GetPremiumProperty(GoldPremium, PremiumPropertyType.Noah).Returns(5);
         data.GetPremiumProperty(GoldPremium, PremiumPropertyType.Drop).Returns(1);
         data.GetPremiumProperty(GoldPremium, PremiumPropertyType.RepairDiscount).Returns(50);
-        data.GetPremiumProperty(GoldPremium, PremiumPropertyType.ItemSell).Returns(30);
         return data;
     }
 
@@ -58,7 +57,7 @@ public class PremiumBonusTests
             new PremiumBonus(PremiumBonusKind.Coins, 5),
             new PremiumBonus(PremiumBonusKind.Drops, 1),
             new PremiumBonus(PremiumBonusKind.RepairDiscount, 50),
-            new PremiumBonus(PremiumBonusKind.SellPrice, 30),
+            new PremiumBonus(PremiumBonusKind.SellPrice, NpcSellRules.PremiumBonusPercent),
             new PremiumBonus(PremiumBonusKind.DeathExpLoss, 2),
             new PremiumBonus(PremiumBonusKind.PriceHistory, 0));
     }
@@ -77,7 +76,7 @@ public class PremiumBonusTests
         var bonuses = PremiumBonusList.For(Player(FreeResetPremium, HighLevel), GameData());
 
         bonuses.Select(b => b.Kind).Should().Equal(
-            PremiumBonusKind.FreeReset, PremiumBonusKind.FreeRebirthReset, PremiumBonusKind.PriceHistory);
+            PremiumBonusKind.SellPrice, PremiumBonusKind.FreeReset, PremiumBonusKind.FreeRebirthReset, PremiumBonusKind.PriceHistory);
     }
 
     [Fact]

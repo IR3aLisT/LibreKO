@@ -11,7 +11,8 @@ public partial class Net
 
     public event Action<WarBoardReply>? PartyWarBoardEvent;
 
-    public byte PartyRowMeterMode { get; private set; } = PartyWarBoard.ModeDamage;
+    public byte PartyRowMeterMode => Config.PartyRowMeter;
+    public byte PartyBoardMeterMode { get; private set; } = PartyWarBoard.ModeOff;
 
     private void HandlePartyWarBoard(Packet p)
     {
@@ -32,7 +33,8 @@ public partial class Net
 
     public void SendPartyWarBoard(byte target, byte mode)
     {
-        if (target == PartyWarBoard.TargetRows) PartyRowMeterMode = mode;
+        if (target == PartyWarBoard.TargetRows) Config.SetPartyRowMeter(mode);
+        else PartyBoardMeterMode = mode;
         var p = new Packet(GameOpcodes.GS_PARTY);
         p.WriteByte(SubPartyWarBoard);
         p.WriteByte(target);

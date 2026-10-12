@@ -25,7 +25,7 @@ public sealed class GenieSystemPacketWriter
     public const byte Inactive = 0;
     public const byte Active = 1;
 
-    public const int OptionBytes = 128;
+    public const int OptionBytes = 256;
 
     public static Packet HammerResult(bool repaired)
     {

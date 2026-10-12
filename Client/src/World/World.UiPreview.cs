@@ -102,6 +102,14 @@ public partial class World
         return DetachPreviewControl(_targetBox);
     }
 
+    internal Control BuildTargetDropsUiPreview()
+    {
+        var target = BuildTargetUiPreview();
+        _targetDrops = new[] { new TargetQuestDrop(379273000, 2, 3), new TargetQuestDrop(379274000, 0, 3) };
+        RebuildTargetDropRows();
+        return target;
+    }
+
     internal Control BuildZoneAbilityUiPreview(byte zoneType)
     {
         BuildZoneAbilityChip();
@@ -207,10 +215,11 @@ public partial class World
         BuildCombatLog();
         _combatLogFrame.Visible = true;
         for (int i = 0; i < 6; i++)
-            CombatLogAdd($"{i + 2} MP Recovered", CombatLogKind.Resource);
-        CombatLogAdd("42 HP Recovered", CombatLogKind.Recovery);
+            CombatLogAdd($"{i + 2} MP Recovered", CombatLogKind.Resource, tab: LogTab.State);
+        CombatLogAdd("42 HP Recovered", CombatLogKind.Recovery, tab: LogTab.State);
         CombatLogAdd("Worm received 14 damage", CombatLogKind.Damage);
-        CombatLogAdd("3 HP Damage", CombatLogKind.Incoming);
+        CombatLogAdd("3 HP Damage", CombatLogKind.Incoming, tab: LogTab.State);
+        CombatLogAdd("Picked up 1,250 Coins.", CombatLogKind.Resource, tab: LogTab.Item);
         CombatLogAdd("Worm received 21 damage", CombatLogKind.Damage);
         return DetachPreviewControl(_combatLogFrame);
     }
@@ -294,6 +303,16 @@ public partial class World
         BuildPremiumChip();
         OnPremiumStatus(1, 1, 52);
         return DetachPreviewControl(_premiumChip);
+    }
+
+    private const int PreviewClanOnline = 24;
+
+    internal Control BuildClanBonusUiPreview()
+    {
+        Net.I.SeedPreviewClan(PreviewClan(asChief: false));
+        BuildClanBonusChip();
+        OnClanBonus(PreviewClanOnline);
+        return DetachPreviewControl(_clanBonusChip);
     }
 
     internal Control BuildEventTitlesUiPreview(int count, bool expanded)
@@ -646,6 +665,19 @@ public partial class World
     }
 
     internal (float X, float Z) KoPositionForSmoke() => (_myKoX, _myKoZ);
+
+    internal (int Players, int Npcs, int Monsters, int Shown) CensusForSmoke()
+    {
+        int players = 0, npcs = 0, monsters = 0, shown = 0;
+        foreach (var e in _ents.Values)
+        {
+            if (!e.IsNpc) players++;
+            else if (e.Attackable) monsters++;
+            else npcs++;
+            if (e.OnScreen) shown++;
+        }
+        return (players, npcs, monsters, shown);
+    }
 
     internal void CastSkillForSmoke(int skillId) => CastSkill(skillId);
 
@@ -1179,9 +1211,9 @@ public partial class World
 
     private static System.Collections.Generic.List<ClanMember> PreviewClanMembers() => new()
     {
-        new() { Name = "Zeus", Fame = ClanRanks.Chief, Level = 61, Class = 207, IsOnline = true, Memo = "" },
+        new() { Name = "Zeus", Fame = ClanRanks.Chief, Level = 61, Class = 207, IsOnline = true, Memo = "Siege at 21:00" },
         new() { Name = "Hera", Fame = ClanRanks.ViceChief, Level = 72, Class = 202, IsOnline = true, Memo = "" },
-        new() { Name = "Ares", Fame = ClanRanks.Trainee, Level = 72, Class = 201, IsOnline = false, Memo = "", HoursSinceLogin = 187 * 24 },
+        new() { Name = "Ares", Fame = ClanRanks.Trainee, Level = 72, Class = 201, IsOnline = false, Memo = "Back next week", HoursSinceLogin = 187 * 24 },
         new() { Name = "Athena", Fame = ClanRanks.Trainee, Level = 72, Class = 204, IsOnline = true, Memo = "" },
         new() { Name = "Tester10", Fame = ClanRanks.Trainee, Level = 31, Class = 205, IsOnline = false, Memo = "", HoursSinceLogin = 5 },
     };
@@ -1397,6 +1429,24 @@ public partial class World
         return _itemTipPanel.Visible ? DetachPreviewControl(_itemTipPanel) : null;
     }
 
+    private const int PreviewNpcFinderZone = 21;
+    private const int PreviewNpcFinderKind = 2;
+    private static readonly Vector2 PreviewNpcFinderSpot = new(700f, 520f);
+
+    internal Control BuildNpcFinderUiPreview()
+    {
+        _zone = PreviewNpcFinderZone;
+        _miniMap = new MiniMap();
+        _miniMap.SetZone("moradon", "Moradon");
+        _npcFinderKind = PreviewNpcFinderKind;
+        _blipScratch.Clear();
+        AddNpcFinderBlips();
+        _miniMap.UpdateView(PreviewNpcFinderSpot.X, PreviewNpcFinderSpot.Y, 0f, _blipScratch);
+        _miniMap.SetNpcKinds(NpcFinder.KindsPresent(NpcSpots, _zone, Net.I.LastEnter.Nation), _npcFinderKind);
+        _miniMap.ShowNpcList();
+        return _miniMap;
+    }
+
     internal Control BuildQuestMapUiPreview()
     {
         _zone = 21;
@@ -1448,14 +1498,24 @@ public partial class World
 
     private const int PreviewGeniePoints = 87;
 
-    internal Control BuildGenieMiscUiPreview()
+    internal Control BuildGenieMiscUiPreview() => BuildGenieTabUiPreview(PreviewGenieMiscTab);
+
+    internal Control BuildGenieMainUiPreview() => BuildGenieTabUiPreview(PreviewGenieMainTab);
+
+    internal Control BuildUserVoteSelectUiPreview() => BuildUserVoteSelect(2, "Rikka");
+
+    internal Control BuildUserVoteAskUiPreview() =>
+        BuildUserVoteAsk(new UserVoteAsk("Rikka", UserVote.ReasonOther, "left the bridge to the enemy"));
+
+    private Control BuildGenieTabUiPreview(int tab)
     {
         GenieInit();
-        if (_geniePanel.Body.GetChildOrNull<TabContainer>(0) is { } tabs) tabs.CurrentTab = PreviewGenieMiscTab;
+        if (_geniePanel.Body.GetChildOrNull<TabContainer>(0) is { } tabs) tabs.CurrentTab = tab;
         _geniePanel.Visible = true;
         return DetachPreviewControl(_geniePanel);
     }
 
+    private const int PreviewGenieMainTab = 0;
     private const int PreviewGenieMiscTab = 1;
 
     internal Control BuildGenieSubUiPreview()
@@ -1525,6 +1585,172 @@ public partial class World
                 ]);
                 return DetachPreviewControl(_ncList);
         }
+    }
+
+    private const int PreviewRoomSelf = 9006;
+    private const int PreviewRoomRikka = 9001;
+    private const int PreviewRoomBorin = 9003;
+    private const int PreviewRoomArwen = 9004;
+    private const int PreviewRoomKaito = 9005;
+    private const int PreviewRoomMembers = 6;
+    private const int PreviewRoomCrowdBase = 9100;
+    private const int PreviewRoomCrowdInCall = 3;
+    private static readonly string[] PreviewRoomCrowd =
+    [
+        "Nightwalker", "Mira", "Rin", "Aldric", "Selene", "Gorr", "Thorvald", "Isolde", "Kasimir",
+        "Liora", "Brannoch", "Maelis", "Oskar",
+    ];
+    private const int PreviewRoomSize = 30;
+    private const int PreviewPublicMembers = 212;
+    private const float PreviewRecordingLevel = 0.55f;
+    private const double PreviewRoomRepostSeconds = 0.3;
+    private const float PreviewRoomPlayed = 0.38f;
+    private const int PreviewRoomNotesScroll = 150;
+    private const float PreviewRoomLoaded = 0.6f;
+
+    private static byte[] PreviewWaveform(int seed)
+    {
+        var levels = new List<float>();
+        for (int i = 0; i < 300; i++)
+            levels.Add((float)(0.02 + 0.3 * Math.Abs(Math.Sin(i * 0.21 * seed) * Math.Sin(i * 0.047 + seed))));
+        return VoiceWaveform.FromLevels(levels);
+    }
+    private const float PreviewRoomSettingsLevel = 0.62f;
+    private static readonly Vector2I PreviewRoomSettingsAt = new(1010, 420);
+
+    internal Control BuildChatRoomUiPreview(string page)
+    {
+        _myId = PreviewRoomSelf;
+        var me = Net.I.LastEnter;
+        me.Name = "Tester10";
+        me.Nation = Nations.Karus;
+        Net.I.SeedPreviewEnter(me);
+        ChatRoomInit();
+        var room = Net.I.NationChat;
+        room.Left();
+        var now = DateTime.Now;
+        var evening = now.Date.AddDays(-1).AddHours(21);
+        if (page == "public")
+        {
+            room.EnteredPublic(1);
+            room.Describe("General", false, PreviewPublicMembers, NationChatRules.PublicCapacity);
+        }
+        else
+        {
+            if (page is "voice" or "settings" or "config") room.OwnRoom(PreviewNationRoom, "Siege at nine", true, "1234", PreviewRoomSize);
+            else room.EnteredPrivate(PreviewNationRoom);
+            room.Describe("Siege at nine", true, PreviewRoomMembers, PreviewRoomSize);
+            var members = new List<NationRoomMember>
+            {
+                new(_myId, "Tester10"), new(PreviewRoomRikka, "Rikka"), new(PreviewRoomBorin, "Borin"),
+                new(PreviewRoomArwen, "Arwen"), new(PreviewRoomKaito, "Kaito"),
+            };
+            foreach (var (name, i) in PreviewRoomCrowd.Select((name, i) => (name, i)))
+                members.Add(new NationRoomMember(PreviewRoomCrowdBase + i, name));
+            _ncMemberList = new NationRoomMembers(PreviewNationRoom, "Siege at nine", _myId, PreviewRoomSize, members);
+        }
+        Net.I.RoomTimeline.Clear();
+        Net.I.RoomTimeline.MergeHistory(
+        [
+            new RoomPost(101, RoomPostKind.Text, PreviewRoomBorin, "Borin", evening.AddMinutes(4), "Gate at nine tomorrow, bring Ascetic potions", 0, 0),
+            new RoomPost(102, RoomPostKind.Text, _myId, "Tester10", evening.AddMinutes(6), "I'll be there (Thumbs up)", 0, 0),
+            new RoomPost(103, RoomPostKind.Text, PreviewRoomRikka, "Rikka", now.AddMinutes(-14), "Morning! Who has a spare scroll?", 0, 0),
+            new RoomPost(104, RoomPostKind.Text, PreviewRoomRikka, "Rikka", now.AddMinutes(-13), "the 30-minute one 🙏", 0, 0),
+            new RoomPost(105, RoomPostKind.VoiceNote, PreviewRoomArwen, "Arwen", now.AddMinutes(-11), "", 124, 31000) { Waveform = PreviewWaveform(1) },
+            new RoomPost(110, RoomPostKind.VoiceNote, PreviewRoomRikka, "Rikka", now.AddMinutes(-10), "", 386, 96000) { Waveform = PreviewWaveform(2) },
+            new RoomPost(106, RoomPostKind.Text, PreviewRoomKaito, "Kaito", now.AddMinutes(-9),
+                $"Selling {ChatItemLink.Token(PreviewUpgradedWeapon)} for the siege, whisper me before we leave tonight so I can hold it for you", 0, 0),
+            new RoomPost(107, RoomPostKind.VoiceNote, _myId, "Tester10", now.AddMinutes(-4), "", 47, 12000) { Waveform = PreviewWaveform(3) },
+            new RoomPost(108, RoomPostKind.Text, _myId, "Tester10", now.AddMinutes(-4), "listen to that (Laughing)", 0, 0),
+        ], more: true);
+        Net.I.RoomTimeline.Add(RoomPost.Notice("Borin has entered. (Current players: 6)", now.AddMinutes(-2)));
+        Net.I.RoomTimeline.Add(RoomPost.Line(PreviewRoomBorin, "Borin", "here", now.AddMinutes(-1)));
+        if (page == "voice")
+            Net.I.RoomTimeline.Add(RoomPost.Notice(new RoomMediaReplies.SilenceNotice(PreviewRoomBorin, true, "Tester10", "Borin").Text, now));
+        var inCall = new List<VoicePeer>
+        {
+            new(PreviewRoomRikka, 0), new(PreviewRoomBorin, (byte)(page == "voice" ? VoiceFlags.Silenced : VoiceFlags.MicMuted)),
+            new(PreviewRoomArwen, 0), new(PreviewRoomKaito, VoiceFlags.Deafened),
+        };
+        if (page is "voice" or "settings" or "config")
+        {
+            inCall.AddRange(PreviewRoomCrowd.Take(PreviewRoomCrowdInCall).Select((_, i) => new VoicePeer(PreviewRoomCrowdBase + i, 0)));
+            Net.I.PreviewVoice(new VoiceSession(0, 1, new byte[VoiceSeal.KeyLength], 0, inCall));
+            VoiceChat.I?.PreviewSpeaking(PreviewRoomRikka, self: false);
+            VoiceChat.I?.PreviewSpeaking(_myId, self: true);
+        }
+        else if (page is "public" or "recording") Net.I.PreviewVoice(null);
+        else Net.I.PreviewVoice(null, inCall.Take(2).ToList());
+        if (page is "voice" or "text" or "notes") VoiceChat.I?.PreviewNote(105, PreviewRoomPlayed, 110, PreviewRoomLoaded);
+        else VoiceChat.I?.PreviewNote(0, 0f, 0, 0f);
+        ShowChatRoom();
+        if (page == "voice") SelectChatRoomMember(PreviewRoomBorin);
+        if (page == "older")
+        {
+            Net.I.RoomTimeline.MergeHistory(
+            [
+                new RoomPost(91, RoomPostKind.Text, PreviewRoomArwen, "Arwen", evening.AddMinutes(-40), "Who is coming to the siege tomorrow?", 0, 0),
+                new RoomPost(92, RoomPostKind.Text, PreviewRoomKaito, "Kaito", evening.AddMinutes(-38), "me, with two clan mates", 0, 0),
+            ], more: true);
+            RenderChatRoom();
+            var repost = new Godot.Timer { WaitTime = PreviewRoomRepostSeconds, OneShot = true, Autostart = true };
+            repost.Timeout += () =>
+            {
+                Net.I.RoomTimeline.Add(new RoomPost(109, RoomPostKind.VoiceNote, PreviewRoomRikka, "Rikka", DateTime.Now, "", 63, 16000));
+                RenderChatRoom();
+                _roomStickBottom = false;
+                _roomScroll.ScrollVertical = 0;
+            };
+            _roomWindow.AddChild(repost);
+        }
+        if (page == "minimized") _roomWindow.SetMinimized(true);
+        if (page == "notes")
+        {
+            var scroll = new Godot.Timer { WaitTime = PreviewRoomRepostSeconds, OneShot = true, Autostart = true };
+            scroll.Timeout += () =>
+            {
+                _roomStickBottom = false;
+                _roomScroll.ScrollVertical = PreviewRoomNotesScroll;
+                RefreshChatRoomNote(_roomNotes[105]);
+                RefreshChatRoomNote(_roomNotes[110]);
+            };
+            _roomWindow.AddChild(scroll);
+        }
+        if (page == "settings")
+        {
+            FillChatRoomVoiceSettings();
+            var card = _roomVoiceSettings!;
+            card.GetParent().RemoveChild(card);
+            _roomWindow.AddChild(card);
+            _roomSettingsLevel.Value = PreviewRoomSettingsLevel;
+            card.TreeEntered += () => Callable.From(() =>
+            {
+                card.Position = PreviewRoomSettingsAt;
+                card.Popup();
+            }).CallDeferred();
+            _roomTick.Stop();
+        }
+        if (page == "config")
+        {
+            FillChatRoomConfig();
+            var card = _roomConfig!;
+            card.GetParent().RemoveChild(card);
+            _roomWindow.AddChild(card);
+            card.TreeEntered += () => Callable.From(() =>
+            {
+                card.Position = PreviewRoomSettingsAt;
+                card.Popup();
+            }).CallDeferred();
+            _roomTick.Stop();
+        }
+        if (page == "recording")
+        {
+            _roomTick.Stop();
+            RefreshChatRoomRecording(true);
+            _roomRecordClock.Text = $"{VoiceNoteRules.Clock(7)} / {VoiceNoteRules.Clock(VoiceNoteRules.MaxSeconds)}";
+            _roomRecordLevel.Value = PreviewRecordingLevel;
+        }
+        return DetachPreviewControl(_roomWindow);
     }
 
     private const int PreviewWarEndSeconds = 1342;
@@ -1825,6 +2051,24 @@ public partial class World
         _escLayer.Visible = true;
         RefreshExitMenu();
         return _escLayer;
+    }
+
+    internal Control BuildRepurchaseUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        _rbLayer = new CanvasLayer();
+        AddChild(_rbLayer);
+        long deletes = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 2 * 24 * 3600;
+        _rbRows.Clear();
+        _rbRows.Add(new RepurchaseRow(0, PreviewBagSword, 180_000, (uint)deletes));
+        _rbRows.Add(new RepurchaseRow(1, PreviewWornSword, 2_400_000, (uint)(deletes - 3600)));
+        _rbRows.Add(new RepurchaseRow(2, PreviewHpPotion, 1_350, (uint)(deletes - 3 * 24 * 3600)));
+        _rbWindow = BuildRepurchase();
+        _rbScroll.MaxValue = 0;
+        _rbScroll.Visible = false;
+        RenderRepurchase();
+        _rbWindow.Visible = true;
+        return DetachPreviewControl(_rbWindow);
     }
 
     internal Control BuildTimedItemsUiPreview()
@@ -2429,12 +2673,13 @@ public partial class World
 
     internal Control BuildUserInfoUiPreview()
     {
+        LoadDailyRankBoards();
         UserInfoInit();
-        RequestUserInformation("Tester10");
-        OnUserInformation(true, new Net.UserInformation(
-            "Tester10", 61, 202, 2_450, 380,
-            17, 3, 1, 1, "Noah Knights", "Ardream", 2, 1,
-            [208003000, 208001000, 208002000, 208004000, 208005000, 136710000, 127410000]));
+        OnUserInformation(new UserInfoReply(
+            "Tester10", 61, 202, 1_245_000, 38_200,
+            17, 3, 1, 4, "Noah Knights", "Ardream", 2, 1, 3,
+            new[] { 4, 255, 37, 0, 120, 0, 1 },
+            new[] { new RankMark(0, 2, 1, 0), new RankMark(1, 3, 0, 0), new RankMark(2, 0, 0, 1), new RankMark(51, 0, 0, 2) }));
         return DetachPreviewControl(_userInfoPanel);
     }
 

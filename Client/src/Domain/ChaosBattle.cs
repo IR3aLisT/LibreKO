@@ -53,8 +53,6 @@ public static class ChaosBattle
 
     public static bool IsPickaxe(int kind) => kind is PickaxeKindA or PickaxeKindB;
 
-    public static bool SkillAllowed(int zone, short skillTree) => zone != Zone || skillTree == SkillTree;
-
     public static bool ItemUsable(int zone, int kind) => zone != Zone || kind == ChaosItemKind;
 
     public static int WinnerCut(int count) => Math.Max(1, (int)Math.Floor(count * WinnerShare + WinnerRounding));

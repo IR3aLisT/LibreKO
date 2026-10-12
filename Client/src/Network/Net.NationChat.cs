@@ -124,6 +124,8 @@ public partial class Net
     public event Action<byte, int, string>? RoomChatNoticeEvent;
 
     private int _pendingPublicChannel = NationChatRules.NoRoom;
+    private (string Name, bool Locked, int Members, int Max) _pendingRoom = ("", false, 0, 0);
+    private (string Name, bool Private, string Password, int Max)? _pendingOptions;
 
     private void HandleNationChat(Packet p)
     {
@@ -151,19 +153,23 @@ public partial class Net
         switch (sub)
         {
             case NationChatReplies.PublicEnter:
-                if (code == 0) NationChat.EnteredPublic(_pendingPublicChannel);
+                if (code == 0) EnterChatRoom(() => NationChat.EnteredPublic(_pendingPublicChannel));
                 _pendingPublicChannel = NationChatRules.NoRoom;
                 break;
             case NationChatReplies.PublicLeave:
             case NationChatReplies.PrivateLeave:
-                if (code == 0) NationChat.Left();
+                if (code == 0) LeaveChatRoom();
                 break;
             case NationChatReplies.Create:
                 if (code == NationChatReplies.Created && NationChatReplies.ReadRoomInfo(p) is { } created)
-                    NationChat.OwnRoom(created.Id, created.Name, created.Private, created.Password, created.MaxMembers);
+                    EnterChatRoom(() => NationChat.OwnRoom(created.Id, created.Name, created.Private, created.Password, created.MaxMembers));
                 break;
             case NationChatReplies.PrivateEnter:
-                if (code == 0) NationChat.EnteredPrivate(p.RemainingBytes >= 2 ? p.ReadUShort() : 0);
+                if (code == 0)
+                {
+                    int roomId = p.RemainingBytes >= 2 ? p.ReadUShort() : 0;
+                    EnterChatRoom(() => NationChat.EnteredPrivate(roomId));
+                }
                 break;
             case NationChatReplies.Search:
                 if (code == 0) NationSearchEvent?.Invoke(NationChatReplies.ReadRooms(p));
@@ -174,7 +180,12 @@ public partial class Net
                     NationChat.OwnRoom(owned.Id, owned.Name, owned.Private, owned.Password, owned.MaxMembers);
                 break;
             case NationChatReplies.Kick:
-                if (code == NationChatRules.KickedCode) NationChat.Left();
+                if (code == NationChatRules.KickedCode) LeaveChatRoom();
+                break;
+            case NationChatReplies.Options:
+                if (code == 0 && _pendingOptions is { } options && NationChat.InPrivate)
+                    NationChat.Configured(options.Name, options.Private, options.Password, options.Max);
+                _pendingOptions = null;
                 break;
         }
         NationChatResultEvent?.Invoke(sub, code);
@@ -182,6 +193,26 @@ public partial class Net
     }
 
     private static byte ReadResult(Packet p) => p.RemainingBytes >= 1 ? p.ReadByte() : (byte)0;
+
+    private void EnterChatRoom(Action enter)
+    {
+        RoomTimeline.Clear();
+        DropVoice();
+        enter();
+        if (!NationChat.Owner && _pendingRoom.Name.Length > 0)
+            NationChat.Describe(_pendingRoom.Name, _pendingRoom.Locked, _pendingRoom.Members + 1, _pendingRoom.Max);
+        _pendingRoom = ("", false, 0, 0);
+        ChatRoomPanelShown = true;
+        VoicePeers.Clear();
+        SendRoomHistory(0);
+        SendVoiceRoster();
+    }
+
+    private void LeaveChatRoom()
+    {
+        NationChat.Left();
+        LeftChatRoom();
+    }
 
     private void HandleRoomChat(Packet p)
     {
@@ -197,7 +228,9 @@ public partial class Net
                 if (p.RemainingBytes < 2) return;
                 string text = p.ReadString();
                 int zone = p.RemainingBytes >= 2 ? p.ReadUShort() : 0;
-                if (text.Length > 0) RoomChatEvent?.Invoke(new RoomChatLine(sender, name, text, zone));
+                if (text.Length == 0) return;
+                RoomTimeline.Add(RoomPost.Line(sender, name, text, DateTime.Now));
+                RoomChatEvent?.Invoke(new RoomChatLine(sender, name, text, zone));
                 return;
             }
             case RoomChatEntered:
@@ -205,6 +238,7 @@ public partial class Net
             {
                 if (p.RemainingBytes < 4) return;
                 int members = p.ReadUShort();
+                NationChat.Counted(members);
                 RoomChatNoticeEvent?.Invoke(kind, members, p.ReadString());
                 return;
             }
@@ -218,6 +252,9 @@ public partial class Net
     public void SendNationChannels() => SendNationChat(NationChatReplies.PublicList);
 
     public void SendNationRooms() => SendNationChat(NationChatReplies.PrivateList);
+
+    public void NameNextRoom(string name, bool locked, int members, int maxMembers) =>
+        _pendingRoom = (name, locked, members, maxMembers);
 
     public void SendNationPublicEnter(int channelId)
     {
@@ -239,6 +276,7 @@ public partial class Net
 
     public void SendNationOptions(string name, bool isPrivate, string password, int maxMembers)
     {
+        _pendingOptions = (name, isPrivate, password, maxMembers);
         var p = NationChatPacket(NationChatReplies.Options);
         p.WriteUShort((ushort)Math.Max(0, NationChat.RoomId));
         _conn.Send(RoomSettings(p, name, isPrivate, password, maxMembers));
@@ -281,7 +319,7 @@ public partial class Net
     public void SendRoomChat(string text)
     {
         if (string.IsNullOrEmpty(text) || !NationChat.InRoom) return;
-        if (text.Length > ChatMessageMaxLength) text = text.Substring(0, ChatMessageMaxLength);
+        text = TextRunes.Truncate(text, ChatMessageMaxLength);
         var p = new Packet(GameOpcodes.GS_CHAT);
         p.WriteByte(ChatType.ChatRoom);
         p.WriteString(text);

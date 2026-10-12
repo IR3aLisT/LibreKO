@@ -24,7 +24,6 @@ public class ItemTradeService(
     private const int LoyaltyMerchantSellingGroup = 249000;
     private const int SaleTypeFull = 1;
     private const int SaleTypeNoRepair = 2;
-    private const int SellPriceDivisor = 6;
     private const int ItemBaseIdStep = 1000;
     private static readonly HashSet<int> UnsellableRaces = [12, 20, 50, 70, 71, 73, 74, 76];
 
@@ -124,6 +123,12 @@ public class ItemTradeService(
 
         var type = packet.ReadByte();
 
+        if (type == (byte)ItemTradeResult.Repurchase)
+        {
+            await HandleRepurchaseAsync(session, client, packet);
+            return;
+        }
+
         if (type == 1 || type == 2)
         {
             var sellingGroup = packet.ReadInt();
@@ -204,6 +209,96 @@ public class ItemTradeService(
         }
     }
 
+    private const short RepurchaseGenericError = -1;
+    private const short RepurchaseNoRoom = -4;
+    private const short RepurchaseExpired = -6;
+    private const short RepurchaseNoCoins = -8;
+
+    private async Task HandleRepurchaseAsync(UserSession session, IClient client, Packet packet)
+    {
+        var op = packet.ReadByte();
+        if (op is ItemTradePacketWriter.RepurchaseOpen or ItemTradePacketWriter.RepurchaseRefresh)
+        {
+            await client.SendPacket(ItemTradePacketWriter.RepurchaseList(op, RepurchaseRows(session)));
+            return;
+        }
+        if (op != ItemTradePacketWriter.RepurchaseBuy)
+            return;
+
+        var row = packet.ReadByte();
+        var itemId = packet.ReadInt();
+        var npcId = packet.ReadInt();
+        var npc = sessionManager.Regions.GetNpc(npcId);
+        var itemData = gameDataService.GetItem(itemId);
+        if (npc == null || !npc.IsAlive || !IsInNpcRange(session, npc) || itemData == null || session.Trade.IsTrading)
+        {
+            await client.SendPacket(ItemTradePacketWriter.RepurchaseRefused(itemId, RepurchaseGenericError));
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var outcome = session.WithLock(s =>
+        {
+            if (row >= s.Repurchases.Count || s.Repurchases[row].ItemId != itemId)
+                return (Error: RepurchaseGenericError, Slot: 0, Count: (ushort)0, Durability: (short)0, Flag: (byte)0, Price: 0, IsNew: false);
+            var entry = s.Repurchases[row];
+            if (entry.DeletesAt <= now)
+                return (Error: RepurchaseExpired, Slot: 0, Count: (ushort)0, Durability: (short)0, Flag: (byte)0, Price: 0, IsNew: false);
+            var price = RepurchaseRules.Price(itemData.BuyPrice, entry.Count);
+            if (s.Money < price)
+                return (Error: RepurchaseNoCoins, Slot: 0, Count: (ushort)0, Durability: (short)0, Flag: (byte)0, Price: 0, IsNew: false);
+            var slotIndex = s.FindSlotForItem(itemId, gameDataService, entry.Count);
+            if (slotIndex < 0)
+                return (Error: RepurchaseNoRoom, Slot: 0, Count: (ushort)0, Durability: (short)0, Flag: (byte)0, Price: 0, IsNew: false);
+
+            var slot = s.Inventory[slotIndex];
+            var isNew = slot.IsEmpty;
+            if (isNew)
+            {
+                slot.ItemId = itemId;
+                slot.Durability = entry.Durability;
+                slot.Flag = entry.Flag;
+                slot.Count = entry.Count;
+            }
+            else
+                slot.Count = (ushort)Math.Min(InventoryConstants.MaxStackCount, slot.Count + entry.Count);
+            s.Money -= price;
+            s.Repurchases.RemoveAt(row);
+            s.RecalculateStatsWithBuffs(gameDataService);
+            return (Error: (short)0, Slot: slotIndex, Count: slot.Count, Durability: slot.Durability, Flag: slot.Flag, Price: price, IsNew: isNew);
+        });
+
+        if (outcome.Error != 0)
+        {
+            await client.SendPacket(ItemTradePacketWriter.RepurchaseRefused(itemId, outcome.Error));
+            return;
+        }
+
+        await userNotificationService.SendStackChangeAsync(session, (byte)outcome.Slot, itemId, outcome.Count, outcome.Durability, outcome.IsNew);
+        await userNotificationService.SendGoldLossAsync(session, outcome.Price);
+        await userNotificationService.SendWeightChangeAsync(session);
+        await client.SendPacket(ItemTradePacketWriter.RepurchaseBought(
+            (byte)(outcome.Slot - InventoryConstants.InventoryStart), itemId, outcome.Flag));
+    }
+
+    private List<ItemTradePacketWriter.RepurchaseRow> RepurchaseRows(UserSession session)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        return session.WithLock(s =>
+        {
+            RepurchaseRules.Prune(s.Repurchases, now);
+            var rows = new List<ItemTradePacketWriter.RepurchaseRow>(s.Repurchases.Count);
+            for (var i = 0; i < s.Repurchases.Count; i++)
+            {
+                var entry = s.Repurchases[i];
+                var buyPrice = gameDataService.GetItem(entry.ItemId)?.BuyPrice ?? 0;
+                rows.Add(new ItemTradePacketWriter.RepurchaseRow(
+                    (byte)i, entry.ItemId, RepurchaseRules.Price(buyPrice, entry.Count), (uint)entry.DeletesAt));
+            }
+            return rows;
+        });
+    }
+
     private async Task<Packet?> HandleNpcTradeAsync(
         UserSession session,
         IClient client,
@@ -215,6 +310,9 @@ public class ItemTradeService(
         var kingData = kingSystemRuntimeService.GetKingData(session.Nation);
         var tariff = type == 1 && !loyaltyShop ? kingData?.TerritoryTariff ?? 0 : 0;
         var tax = 0;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var premiumSeller = NpcSellRules.SellsAtPremium(session,
+            session.KnightsId > 0 && sessionManager.Knights.GetClan(session.KnightsId)?.HasPremium == true);
         var outcome = session.WithLock(s =>
         {
             if (type == 2 && loyaltyShop)
@@ -273,12 +371,10 @@ public class ItemTradeService(
                     if (inventoryItem.ItemId != entry.ItemId || inventoryItem.Count < entry.Count || !inventoryItem.IsTradable)
                         return (Error: ItemTradeRefusal.CannotTrade, Price: 0, Money: 0, Loyalty: 0, SellingGroup: (byte)0, HasItems: false);
 
-                    var entryPrice = SellUnitPrice(itemData) * entry.Count;
-                    var sellBonus = gameDataService.GetPremiumProperty(s.PremiumType, PremiumPropertyType.ItemSell);
-                    if (sellBonus > 0)
-                        entryPrice = entryPrice * (100 + sellBonus) / 100;
+                    var entryPrice = SellUnitPrice(itemData, premiumSeller) * entry.Count;
 
                     totalPrice += entryPrice;
+                    RepurchaseRules.Record(s.Repurchases, inventoryItem, Math.Min(entry.Count, inventoryItem.Count), now);
 
                     if (entry.Count >= inventoryItem.Count)
                         inventoryItem.Clear();
@@ -347,12 +443,11 @@ public class ItemTradeService(
         await kingSystemRuntimeService.PersistKingPropertyAsync(kingData, entry => entry.TerritoryTax);
     }
 
-    private int SellUnitPrice(ItemData itemData)
+    private int SellUnitPrice(ItemData itemData, bool premium)
     {
         var baseItem = gameDataService.GetItem(itemData.Num / ItemBaseIdStep * ItemBaseIdStep);
         var saleType = baseItem?.SellPrice ?? itemData.SellPrice;
-        var price = saleType == SaleTypeFull ? itemData.BuyPrice : itemData.BuyPrice / SellPriceDivisor;
-        return price < 1 ? 0 : price;
+        return NpcSellRules.Unit(itemData.BuyPrice, saleType == SaleTypeFull, premium);
     }
 
     private static bool RepairsItems(NpcInstance npc) =>

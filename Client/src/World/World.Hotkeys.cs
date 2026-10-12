@@ -9,9 +9,16 @@ public partial class World : Node3D
     private readonly Dictionary<KeyChord, Action> _hotkeys = new();
     private readonly Dictionary<PadChord, Action> _padHotkeys = new();
     private readonly Dictionary<KeyChord, Action> _commanderHotkeys = new();
+    private readonly Dictionary<KeyAction, Action> _keyActions = new();
+
+    private void RunKeyAction(KeyAction action)
+    {
+        if (_keyActions.TryGetValue(action, out var handler)) handler();
+    }
 
     private void Bound(KeyAction action, Action handler)
     {
+        _keyActions[action] = handler;
         var chord = KeyBinds.Get(action);
         if (chord.Assigned) _hotkeys[chord] = handler;
         var pad = KeyBinds.GetPad(action);
@@ -45,6 +52,7 @@ public partial class World : Node3D
         _hotkeys.Clear();
         _padHotkeys.Clear();
         _commanderHotkeys.Clear();
+        _keyActions.Clear();
 
         WorldBound(KeyAction.AutoRun, ToggleAutoRun);
         WorldBound(KeyAction.ToggleRun, ToggleRunMode);

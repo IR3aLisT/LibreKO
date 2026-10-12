@@ -83,6 +83,8 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
 
         session.GenieTime.Load(character.GenieRemainingSeconds);
         session.GenieOptions = character.GenieOptions;
+        session.Repurchases.Clear();
+        session.Repurchases.AddRange(RepurchaseRules.Decode(character.RepurchaseItems));
         session.DrakiStage = character.DrakiStage;
         session.DrakiSubStage = character.DrakiSubStage;
         session.AttendanceDays = character.AttendanceDays;
@@ -159,6 +161,7 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
 
         character.GenieRemainingSeconds = session.GenieTime.RemainingSeconds;
         character.GenieOptions = session.GenieOptions;
+        character.RepurchaseItems = RepurchaseRules.Encode(session.Repurchases);
         character.DrakiStage = session.DrakiStage;
         character.DrakiSubStage = session.DrakiSubStage;
         character.AttendanceDays = session.AttendanceDays;

@@ -49,11 +49,7 @@ public sealed class PlateStack
     {
         if (_name.Text == text) return;
         _name.Text = text;
-        if (_mark != null && GodotObject.IsInstanceValid(_mark)) NamePlate.PlaceMark(_mark, _name);
-        PlaceLeader();
-        var kind = _nameMarkKind;
-        _nameMarkKind = LibreKO.Domain.NameMarkKind.None;
-        if (kind != LibreKO.Domain.NameMarkKind.None) SetNameMark(kind);
+        Rescaled();
     }
 
     public void SetTitle(string text)
@@ -141,6 +137,15 @@ public sealed class PlateStack
         if (_nameMark == null) return;
         _nameMark.Visible = _name.Visible;
         _parent.AddChild(_nameMark);
+    }
+
+    public void Rescaled()
+    {
+        if (_mark != null && GodotObject.IsInstanceValid(_mark)) NamePlate.PlaceMark(_mark, _name);
+        PlaceLeader();
+        var kind = _nameMarkKind;
+        _nameMarkKind = LibreKO.Domain.NameMarkKind.None;
+        if (kind != LibreKO.Domain.NameMarkKind.None) SetNameMark(kind);
     }
 
     private void PlaceLeader()

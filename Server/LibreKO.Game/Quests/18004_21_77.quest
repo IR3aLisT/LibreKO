@@ -1,0 +1,5 @@
+Bind Npc 18004 Zone 21
+
+On topics
+    Topic "Repurchase Sold or Destroyed items" do
+        Open repurchase window

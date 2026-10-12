@@ -18,6 +18,22 @@ public static class PartyHud
         (StatusSlow, PartyHpLook.Slow),
     };
 
+    private const int ElMoradClassBase = 200;
+    private const int ElMoradIconOffset = 5;
+
+    public static int ClassIconIndex(int classCode)
+    {
+        int index = CharacterClassCatalog.Family(classCode) switch
+        {
+            CharacterClassCatalog.FamilyWarrior => 0,
+            CharacterClassCatalog.FamilyRogue => 1,
+            CharacterClassCatalog.FamilyMage => 2,
+            CharacterClassCatalog.FamilyKurian => 4,
+            _ => 3,
+        };
+        return classCode >= ElMoradClassBase ? index + ElMoradIconOffset : index;
+    }
+
     public static float Fill(int current, int max) =>
         max > 0 ? System.Math.Clamp((float)current / max, 0f, 1f) : 0f;
 

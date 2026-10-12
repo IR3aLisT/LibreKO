@@ -14,6 +14,11 @@ public static class PartyWarBoard
     public const byte ModeOff = 0;
     public const byte ModeDamage = 1;
     public const byte ModeHealing = 2;
+    public const float MinAlpha = 0.25f;
+
+    public static byte SavedMode(int value, byte fallback) => value is ModeOff or ModeDamage or ModeHealing ? (byte)value : fallback;
+
+    public static float SavedAlpha(float value) => float.IsFinite(value) ? System.Math.Clamp(value, MinAlpha, 1f) : 1f;
     public const int ShareScale = 1000;
     public const int MaxRows = 8;
     public const double RowToggleSeconds = 1.0;

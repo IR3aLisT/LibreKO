@@ -54,6 +54,8 @@ public static class Fx
         return desc != null && desc.ContainsKey("velocity") ? (float)desc["velocity"].AsDouble() : 0f;
     }
 
+    public static bool SuppressOneShots { get; set; }
+
     public static bool LoopsForever(string name)
     {
         var desc = LoadDescriptor(name);
@@ -73,6 +75,7 @@ public static class Fx
         float sizeScale = 1f, bool forceAdditive = false, bool deferParts = false)
     {
         if (ShuttingDown || Perf.SkipFx) return null;
+        if (SuppressOneShots && !LoopsForever(name)) return null;
         using var scope = Perf.Measure(Perf.Section.FxSpawn);
         Perf.Tally(Perf.Counter.FxSpawned);
         return FxRegistry.Track(

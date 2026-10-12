@@ -39,6 +39,10 @@ Source: [phosphor-icons/core](https://github.com/phosphor-icons/core), `assets`
 License: MIT. Copyright © Phosphor Icons. The SVG `currentColor` fill was changed to white so Godot can
 tint the imported texture consistently.
 
+The chat room voice controls use the regular weight of `microphone`, `microphone-slash`, `speaker-high`,
+`speaker-slash`, `phone`, `phone-x`, `play`, `pause`, `smiley`, `waveform`, `gear`, `paper-plane-right` (saved as
+`system/send.svg`) and `sliders-horizontal` (saved as `system/sliders.svg`).
+
 See `licenses/PHOSPHOR-MIT.txt` for the license text.
 
 ## Project-original icons

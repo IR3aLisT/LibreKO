@@ -354,7 +354,17 @@ public partial class Net
         _conn.Send(p);
     }
 
-    public void SendPartyCreate(string targetName, byte boardType = 0) => SendPartyInviteName(PartyRequest.Create, targetName, boardType);
+    public void SendPartyCreate(string targetName, byte boardType = 0)
+    {
+        if (string.IsNullOrEmpty(targetName)) return;
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.Create);
+        p.WriteString(targetName);
+        p.WriteByte(boardType);
+        p.WriteByte(PartyRowMeterMode);
+        p.WriteByte(PartyBoardMeterMode);
+        _conn.Send(p);
+    }
 
     public void SendPartyInvite(string targetName, byte boardType = 0) => SendPartyInviteName(PartyRequest.Insert, targetName, boardType);
 

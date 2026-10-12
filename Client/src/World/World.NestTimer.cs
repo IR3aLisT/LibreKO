@@ -103,8 +103,10 @@ public partial class World
     private void ShowNestTimer(int stoneItemId, int secondsLeft, bool completed)
     {
         string title = stoneItemId != 0 ? ItemData.DisplayName(stoneItemId) : NestTimerFallbackTitle;
-        ShowTimerPlate(title, completed ? NestDungeon.CompletedLine : null,
-                       NestDungeon.TerminationLine(secondsLeft, completed));
+        ShowTimerPlate(title, completed ? ItemData.Text(NestDungeon.CompletedText, NestDungeon.CompletedFallback) : null,
+                       NestDungeon.TerminationLine(secondsLeft, completed,
+                           ItemData.Text(NestDungeon.TerminationText, NestDungeon.TerminationFallback),
+                           ItemData.Text(NestDungeon.SecondsText, NestDungeon.SecondsFallback)));
     }
 
     private void ShowTimerPlate(string title, string? middle, string line)
@@ -115,7 +117,7 @@ public partial class World
         if (key != _nestTimerText)
         {
             _nestTimerText = key;
-            _nestTimerTitle!.Text = $"<< {title} >>";
+            _nestTimerTitle!.Text = ItemData.Text(NestDungeon.TitleText, NestDungeon.TitleFallback).Replace("%s", title);
             _nestTimerDone!.Text = middle ?? "";
             _nestTimerDone.Visible = showMiddle;
             _nestTimerLine!.Text = line;

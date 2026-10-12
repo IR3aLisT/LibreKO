@@ -118,6 +118,21 @@ public sealed class KnightsPacketWriter
 
     public static Packet MemberOffline(string name) => MemberPresence(KnightsSubOpcode.MemberOffline, name);
 
+    public static Packet ClanBonus(int online)
+    {
+        var packet = Sub(KnightsSubOpcode.ClanBonus);
+        packet.WriteByte(Succeeded);
+        packet.WriteByte((byte)Math.Clamp(online, 0, byte.MaxValue));
+        return packet;
+    }
+
+    public static Packet ClanBonusCleared()
+    {
+        var packet = Sub(KnightsSubOpcode.ClanBonus);
+        packet.WriteByte(Failed);
+        return packet;
+    }
+
     private static Packet MemberPresence(KnightsSubOpcode sub, string name)
     {
         var packet = Sub(sub);

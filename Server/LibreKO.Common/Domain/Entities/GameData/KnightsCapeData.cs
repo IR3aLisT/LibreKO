@@ -12,6 +12,8 @@ public class KnightsCapeData
     public byte Grade { get; set; }
     public int BuyLoyalty { get; set; }
     public byte Ranking { get; set; }
+    public byte Type { get; set; }
+    public byte Ticket { get; set; }
 
     internal class EntityConfiguration : IEntityTypeConfiguration<KnightsCapeData>
     {

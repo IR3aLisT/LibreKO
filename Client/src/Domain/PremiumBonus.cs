@@ -32,9 +32,9 @@ public readonly record struct PremiumBonus(PremiumBonusKind Kind, int Value)
         _ => null,
     };
 
-    public static string Tooltip(string name, string timeLeft, IReadOnlyList<PremiumBonus> bonuses)
+    public static string Tooltip(string name, string timeLine, IReadOnlyList<PremiumBonus> bonuses)
     {
-        var text = new StringBuilder($"{name} — {timeLeft} left");
+        var text = new StringBuilder(name).Append('\n').Append(timeLine);
         foreach (var bonus in bonuses)
             if (bonus.Text is { } line) text.Append('\n').Append(line);
         return text.ToString();

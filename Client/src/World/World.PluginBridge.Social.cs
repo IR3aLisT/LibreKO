@@ -101,6 +101,7 @@ public partial class World
         }
 
         void IGameWhispers.Close(string name) => w.CloseWhisper(name);
+        void IGameWhispers.OpenWith(string name) => w.OpenWhisperWith(name);
         void IGameWhispers.ToggleBlock() => w.ToggleWhisperBlock();
         void IGameWhispers.SetLook(int size, float alpha) => Config.SetWhisperLook((WhisperSize)size, alpha);
         void IGameWhispers.ShowPlayerMenu(string name) => w.ShowPlayerMenuByName(name, w.GetViewport().GetMousePosition());
@@ -112,15 +113,16 @@ public partial class World
         {
             get
             {
-                var members = PartyMembers;
-                int leader = members.Count > 0 ? members[0].CharId : -1;
+                int leader = PartyMembers.Count > 0 ? PartyMembers[0].CharId : -1;
+                var members = w.PartyRows;
                 long second = (long)Now();
                 var rows = new List<GamePartyMember>(members.Count);
                 foreach (var m in members)
                 {
                     var view = w.PartyRowOf(m, m.CharId == leader, second);
                     rows.Add(new GamePartyMember(m.CharId, m.Name, view.Level, view.Class, view.Hp, view.MaxHp, view.Mp,
-                        view.MaxMp, m.CharId == leader, m.CharId == w._partyPick, view.NameColour, view.HpColour, view.Tooltip));
+                        view.MaxMp, m.CharId == leader, m.CharId == w._partyPick, view.NameColour, view.HpColour, view.Tooltip,
+                        view.HpLook));
                 }
                 return rows;
             }
@@ -132,6 +134,24 @@ public partial class World
         void IGameParty.Kick(int id) => w.RunPartyMemberMenu(id, PartyMenuKick);
         void IGameParty.MakeCommander(int id) => w.RunPartyMemberMenu(id, PartyMenuCommander);
         void IGameParty.ShowMemberMenu(int id) => w.ShowPartyMemberMenu(id);
+        bool IGameParty.CommanderBarHidden => w.CommanderBarHidden;
+        void IGameParty.ShowCommanderBar() => w.ShowCommanderBarAgain();
+        byte IGameParty.RowMeterMode => Net.I.PartyRowMeterMode;
+        int IGameParty.RowMeterShare(int id) => w._warBoardRowShares.TryGetValue(id, out int share) ? share : -1;
+        void IGameParty.CycleRowMeter() => w.ToggleRowMeter();
+        bool IGameParty.WarBoardOpen => w._warBoard is { Visible: true };
+        byte IGameParty.WarBoardMode => w._warBoardMode;
+        float IGameParty.WarBoardAlpha => Config.PartyBoardAlpha;
+        IReadOnlyList<GameWarBoardRow> IGameParty.WarBoardRows => w._warBoardLines;
+        void IGameParty.ToggleWarBoard() => w.ToggleWarBoard();
+        void IGameParty.SetWarBoardMode(byte mode) => w.RequestWarBoardMode(mode);
+        void IGameParty.SetWarBoardAlpha(float alpha) => w.SetWarBoardAlpha(alpha);
+        void IGameParty.MoveRow(int id, int step) => w.MovePartyRow(id, step);
+        bool IGameParty.AutoRejoin => w._partyRejoin.On;
+        string IGameParty.AutoRejoinTip => w.PartyRejoinTip;
+        void IGameParty.ToggleAutoRejoin() => w.TogglePartyRejoin();
+        bool IGameParty.UserVoteHere => w._zone == Domain.UserVote.JuraidZone;
+        void IGameParty.UserVote(int id) => w.OpenUserVote(id);
 
         bool IGameTrade.IsOpen => w._exShown;
         string IGameTrade.Partner => w._exPartnerName;

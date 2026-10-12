@@ -158,6 +158,10 @@ public class PlayerProgressionService(
         if (premiumExpPercent > 0)
             expGain = expGain * (100 + premiumExpPercent) / 100;
 
+        var clanExpPercent = session.KnightsId > 0 ? ClanOnlineBonus.ExpPercent(session.ClanOnlineCount) : 0;
+        if (clanExpPercent > 0)
+            expGain = expGain * (100 + clanExpPercent) / 100;
+
         var kingExpBonus = kingEventState.GetExpBonus(session.Nation);
         if (kingExpBonus > 0)
             expGain = expGain * (100 + kingExpBonus) / 100;

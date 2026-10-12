@@ -5,6 +5,7 @@ namespace LibreKO.Network;
 public partial class Net
 {
     public CharacterSheet Sheet { get; } = new();
+    public bool HealStrikesEnemies { get; private set; }
 
     public Vitals Vitals { get; } = new();
 
@@ -62,6 +63,8 @@ public partial class Net
         SelfTransformSkill = 0;
         SelfAbnormal = 0;
         SelfExpeditionSide = NoExpeditionSide;
+        HealStrikesEnemies = false;
+        ClanOnlineCount = NoClanBonus;
         SelfDevilForm = false;
         ResetChaosBattle();
         ChaosHotbar = null;
@@ -71,6 +74,8 @@ public partial class Net
         WhispersBlocked = false;
         TimedItemsOffered = false;
         SoccerTeam = 0;
+        NationChat.Left();
+        ResetRoomMedia();
         _ownStatus.Clear();
         ClearParty("a fresh GS_MYINFO (character select or reconnect)");
         _openWindows.Clear();

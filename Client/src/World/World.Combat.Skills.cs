@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -10,6 +11,7 @@ public partial class World
         if (_selfDead) return;
         var s = SkillData.Get(id);
         if (s == null) return;
+        if (!ZoneSkillTrees.Allowed(_zone, s.Tree, s.Id)) return;
         if (BeginContinuance(s)) return;
         if (SkillsLocked())
         {
@@ -27,6 +29,7 @@ public partial class World
             CombatNotice($"You cannot use {s.Name}.");
             return;
         }
+        if (!SiegeSkillAllowed(s)) return;
 
         if (HasActiveFragmentOfManes() && (IsSpeedBuff(s) || s.IsBlink))
         {
@@ -54,6 +57,11 @@ public partial class World
         if (!Vitals.HasStamina(s.Sp))
         {
             CombatNotice(SystemText(SkillCost.TextNotEnoughVp, "Skill Failed - Insufficient VP"));
+            return;
+        }
+        if (!SkillUsable.AngerAllows(s.Id, Net.I.AngerFull))
+        {
+            CombatNotice(SystemText(TextRageModeOnly, "This can only be used when rage mode has been activated."), RageRefusalColour);
             return;
         }
         if (SkillCost.HpShort(Vitals.Hp, s.Hp))
@@ -126,7 +134,8 @@ public partial class World
         }
 
         bool skipCooldown = SpendInstantMagic(s);
-        Net.I.SendMagic(1, id, target);
+        if (BattleMusic.Starts(s.Moral)) EnterBattleMusic();
+        SendCastingStage(s, target);
         if (s.Cast <= 0) _attackChain.Record(AttackChain.InstantSkill, Now());
         QueuePendingStage(id, target, s.HasFlyingStage ? PendingFlying : PendingEffecting, CastDelay(s));
         BeginLocalCast(s, skipCooldown);
@@ -154,6 +163,17 @@ public partial class World
             if (slot < Inv.Length && !Inv[slot].IsEmpty && Inv[slot].Durability <= 0 && Inv[slot].Flag == HammerRepairableFlag)
                 return true;
         return false;
+    }
+
+    private void SendCastingStage(SkillData.Skill s, int target, short[]? data = null)
+    {
+        if (s.Cast > 0)
+        {
+            Net.I.SendMagic(MagicSub.Casting, s.Id, target, data);
+            return;
+        }
+        _instantCasts.Remove(s.Id);
+        LogSkillUse(s);
     }
 
     private const int InstantMagicBuffType = 23;
@@ -212,6 +232,12 @@ public partial class World
     private int FriendlyCastTarget(SkillData.Skill s)
     {
         if (!s.IsFriendly) return _myId;
+        if (s.Moral == SkillTarget.FriendWithMe && Net.I.HealStrikesEnemies
+            && _ents.TryGetValue(_selectedId, out var foe) && foe.Attackable && !foe.Dead)
+        {
+            if (!AnnounceReach(SkillReachTo(_selectedId, s))) return -1;
+            return HealStrike.StrikesWith(s.Type1, s.DirectType, s.FirstDamage, s.TimeDamage) ? _selectedId : _myId;
+        }
         bool self = _selectedId == _myId;
         bool hasSelection = self || (_selectedId >= 0 && _ents.ContainsKey(_selectedId));
         bool valid = self || (_ents.TryGetValue(_selectedId, out var e) && !e.IsNpc && !e.Dead && !e.Attackable);
@@ -506,6 +532,8 @@ public partial class World
     }
 
     private static readonly Color CooldownRefusalColour = new("ff3b3b");
+    private static readonly Color RageRefusalColour = new(1f, 1f, 0f);
+    private const int TextRageModeOnly = 18601;
 
     private string GroupCooldownNotice(SkillData.Skill pressed, SkillData.Skill blocker, double now) =>
         TextTemplate.Fill(SystemText(CooldownGroups.RefusalText, "%s is available in %d seconds"),

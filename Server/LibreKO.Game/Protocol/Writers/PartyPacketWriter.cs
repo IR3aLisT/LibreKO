@@ -59,6 +59,31 @@ public sealed class PartyPacketWriter
             p.WriteString(inviterName);
         }).Build();
     public static Packet MemberLeft(int characterId) => new PartyPacketWriter(PartySubOpcode.MemberLeft, p => p.WriteInt(characterId)).Build();
+    public static Packet RejoinForget(int characterId) => new PartyPacketWriter(PartySubOpcode.RejoinForget, p => p.WriteInt(characterId)).Build();
+    public static Packet UserVoteRefused(short result) => new PartyPacketWriter(PartySubOpcode.UserVote, p => p.WriteShort(result)).Build();
+    public static Packet UserVoteAsk(string targetName, byte reason, string text) => new PartyPacketWriter(PartySubOpcode.UserVote, p =>
+    {
+        p.WriteShort(World.PartyUserVoteRules.Started);
+        p.WriteString(targetName);
+        p.WriteByte(reason);
+        if (reason == World.PartyUserVoteRules.ReasonOther) p.WriteString(text);
+    }).Build();
+    public static Packet UserVoteResult(bool warned) => new PartyPacketWriter(PartySubOpcode.UserVoteResult, p =>
+    {
+        p.WriteShort(warned ? UserVoteDone : UserVoteVoided);
+        p.WriteByte(warned ? UserVoteWarningGiven : UserVoteVoided);
+    }).Build();
+    public static Packet UserVoteWarnings(short warnings, short limit) => new PartyPacketWriter(PartySubOpcode.UserVoteResult, p =>
+    {
+        p.WriteShort(UserVoteDone);
+        p.WriteByte(UserVoteWarningCount);
+        p.WriteShort(warnings);
+        p.WriteShort(limit);
+    }).Build();
+    private const short UserVoteDone = 1;
+    private const byte UserVoteVoided = 0;
+    private const byte UserVoteWarningGiven = 1;
+    private const byte UserVoteWarningCount = 2;
     public static Packet Disband() => new PartyPacketWriter(PartySubOpcode.Disband, static _ => { }).Build();
     public static Packet VitalsChange(
         int characterId, short maxHp, short hp, short maxMp, short mp) => new PartyPacketWriter(PartySubOpcode.VitalsChange, p =>

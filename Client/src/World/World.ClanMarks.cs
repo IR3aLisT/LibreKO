@@ -58,6 +58,7 @@ public partial class World
             RefreshClanCardMark();
         }
         RefreshRankBoardMarks();
+        RefreshUserInfoMark(clanId);
     }
 
     private void RefreshSelfClanMark()

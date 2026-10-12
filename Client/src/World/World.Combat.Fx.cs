@@ -294,18 +294,38 @@ public partial class World
         list.Add(node);
     }
 
+    private static readonly int[] SkillFxPhases = { 1, 2, 3 };
+    private const double SkillFxSweepSeconds = 10.0;
+    private double _skillFxSweepAt;
+
     private void StopSkillFx(int casterId, int skillId, int? phase = null)
     {
-        var keys = new List<(int Caster, int Skill, int Phase)>();
-        foreach (var key in _skillFx.Keys)
-            if (key.Caster == casterId && key.Skill == skillId && (!phase.HasValue || key.Phase == phase.Value))
-                keys.Add(key);
-        foreach (var key in keys)
+        if (phase is int one)
         {
-            foreach (var node in _skillFx[key])
-                Fx.Free(node);
-            _skillFx.Remove(key);
+            StopSkillFxKey((casterId, skillId, one));
+            return;
         }
+        foreach (int each in SkillFxPhases) StopSkillFxKey((casterId, skillId, each));
+    }
+
+    private void StopSkillFxKey((int Caster, int Skill, int Phase) key)
+    {
+        if (!_skillFx.Remove(key, out var list)) return;
+        foreach (var node in list) Fx.Free(node);
+    }
+
+    private void SweepSkillFx(double now)
+    {
+        if (now < _skillFxSweepAt) return;
+        _skillFxSweepAt = now + SkillFxSweepSeconds;
+        List<(int Caster, int Skill, int Phase)>? empty = null;
+        foreach (var (key, list) in _skillFx)
+        {
+            list.RemoveAll(node => !GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion());
+            if (list.Count == 0) (empty ??= new()).Add(key);
+        }
+        if (empty == null) return;
+        foreach (var key in empty) _skillFx.Remove(key);
     }
 
     private void ForgetSkillFx(int casterId)

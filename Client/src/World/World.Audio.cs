@@ -21,6 +21,38 @@ public partial class World
         StartZoneBgm();
     }
 
+    private bool _battleMusic;
+    private double _battleMusicCheckAt;
+
+    private void EnterBattleMusic()
+    {
+        if (_battleMusic || SoundCatalog.Zone(_zone) is not { } bgm) return;
+        int id = BattleMusic.Track(bgm.KaBattle, bgm.ElBattle, Net.I.LastEnter.Nation == Nations.Karus);
+        if (id == 0) return;
+        _battleMusic = true;
+        _battleMusicCheckAt = Now() + BattleMusic.CheckSeconds;
+        Audio.Bgm(id);
+    }
+
+    private void BattleMusicTick(double now)
+    {
+        if (!_battleMusic || now < _battleMusicCheckAt || _self == null) return;
+        _battleMusicCheckAt = now + BattleMusic.CheckSeconds;
+        if (!BattleMusic.Ends(_battleMusic, NearestHostile())) return;
+        _battleMusic = false;
+        StartZoneBgm();
+    }
+
+    private float NearestHostile()
+    {
+        float nearest = float.MaxValue;
+        var at = _self.GlobalPosition;
+        foreach (var e in _ents.Values)
+            if (e.Attackable && !e.Dead && IsInstanceValid(e.Body))
+                nearest = Mathf.Min(nearest, e.Body.GlobalPosition.DistanceTo(at));
+        return nearest;
+    }
+
     private void StartZoneBgm()
     {
         bool karus = Net.I.LastEnter.Nation == Nations.Karus;
@@ -84,7 +116,7 @@ public partial class World
     private void PlayEntitySound(Ent e, int soundId, SoundOwnerKind kind)
     {
         if (soundId == 0 || !GodotObject.IsInstanceValid(e.Body) || MutedPlayer(e)) return;
-        Audio.PlayOwned(soundId, e.Body.GlobalPosition, e.Body.GetInstanceId(), kind);
+        Audio.PlayOwned(soundId, e.Body.GlobalPosition, e.Body.GetInstanceId(), kind, single: e.IsMonster);
     }
 
     private static int Pick(int a, int b) => b != 0 && GD.Randf() < 0.5f ? b : a != 0 ? a : b;
@@ -118,6 +150,16 @@ public partial class World
     {
         if (actorId == _myId) _strikeTargetSelf = targetId;
         else if (_ents.TryGetValue(actorId, out var a)) a.StrikeTarget = targetId;
+    }
+
+    private readonly RateBudget _gatherFxBudget = new();
+
+    private bool RemoteGatherFxAllowed(Ent e)
+    {
+        var limits = CrowdModes.Of(Config.Crowd);
+        if (!e.OnScreen || _self == null) return false;
+        if (FlatDistance(e.Body.GlobalPosition, _self.GlobalPosition) > limits.GatherFxRange) return false;
+        return _gatherFxBudget.Take(limits.GatherFxPerSecond, Now());
     }
 
     private void MiningStrike(Node3D body, bool audible = true)
@@ -279,7 +321,8 @@ public partial class World
 
         if (e.Gathering && !e.GatherFishing)
         {
-            for (int i = 0; i < beats.Strikes; i++) MiningStrike(e.Body, !MutedPlayer(e));
+            for (int i = 0; i < beats.Strikes; i++)
+                if (RemoteGatherFxAllowed(e)) MiningStrike(e.Body, !MutedPlayer(e));
             return;
         }
 

@@ -73,6 +73,15 @@ public class Character : Entity
 
     public byte[] GenieOptions { get; set; } = [];
 
+    public byte[] RepurchaseItems { get; set; } = [];
+
+    public const int ClanMemoMaxLength = 20;
+
+    public string ClanMemo { get; set; } = "";
+
+    public short JuraidWarnings { get; set; }
+    public DateTime? JuraidWarnedAt { get; set; }
+
     public ushort GenieMinutes => (ushort)Math.Min(Math.Ceiling(Math.Max(0, GenieRemainingSeconds) / 60), ushort.MaxValue);
 
     public byte DrakiStage { get; set; }
@@ -109,6 +118,7 @@ public class Character : Entity
             builder.Property(p => p.AccountId).IsRequired();
             builder.Property(p => p.Slot).IsRequired();
             builder.Property(p => p.Name).IsRequired().HasMaxLength(50);
+            builder.Property(p => p.ClanMemo).IsRequired().HasMaxLength(ClanMemoMaxLength).HasDefaultValue("");
             builder.Property(p => p.Race).IsRequired();
             builder.Property(p => p.Class).IsRequired();
             builder.Property(p => p.Hair).IsRequired();

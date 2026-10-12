@@ -58,6 +58,11 @@ public class ScriptDialogService(
         queuedPackets.Add(NpcDialogPacketWriter.RebirthResetPanel(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));
     }
 
+    public void SendRepurchaseWindow()
+    {
+        queuedPackets.Add(NpcDialogPacketWriter.RepurchaseWindow(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));
+    }
+
     public void SendGenderChangePanel()
     {
         queuedPackets.Add(NpcDialogPacketWriter.GenderChangePanel(session.Quest.EventNpcId, session.Quest.ActiveQuestScript));

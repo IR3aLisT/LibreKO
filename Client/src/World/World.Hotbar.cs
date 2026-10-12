@@ -328,7 +328,8 @@ public partial class World
         if (id == 0) return false;
         if (SkillData.IsSkill(id))
         {
-            if (!ChaosBattle.SkillAllowed(_zone, (short)SkillData.Get(id)!.Tree)) return false;
+            var skill = SkillData.Get(id)!;
+            if (!ZoneSkillTrees.Allowed(_zone, skill.Tree, skill.Id)) return false;
             CastSkill(id);
         }
         else

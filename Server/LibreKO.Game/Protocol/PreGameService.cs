@@ -114,7 +114,7 @@ public class PreGameService(
             return CreateCharacterPacket(CreateCharacterResult.SlotFull);
 
         if (!CharacterRaceNations.BelongsTo(race, account.Nation))
-            return CreateCharacterPacket(CreateCharacterResult.InvalidRace);
+            return CreateCharacterPacket(CreateCharacterResult.NationRaceMismatch);
 
         if (!IsValidStarterClass(@class, account.Nation) || gameData.GetCoefficient(@class) == null)
             return CreateCharacterPacket(CreateCharacterResult.InvalidClass);
@@ -124,14 +124,18 @@ public class PreGameService(
 
         var totalStatPoints = strength + stamina + dexterity + intelligence + magic;
         if (totalStatPoints > 300)
-            return CreateCharacterPacket(CreateCharacterResult.StatError);
+            return CreateCharacterPacket(CreateCharacterResult.InvalidStats);
         if (totalStatPoints < 300)
             return CreateCharacterPacket(CreateCharacterResult.PointsRemaining);
         if (strength < 50 || stamina < 50 || dexterity < 50 || intelligence < 50 || magic < 50)
-            return CreateCharacterPacket(CreateCharacterResult.StatTooLow);
+            return CreateCharacterPacket(CreateCharacterResult.InvalidStats);
 
-        if (string.IsNullOrWhiteSpace(name) || name.Length > 20 || !NameRules.IsPlain(name))
+        if (string.IsNullOrWhiteSpace(name))
+            return CreateCharacterPacket(CreateCharacterResult.NameMissing);
+        if (name.Length > 20)
             return CreateCharacterPacket(CreateCharacterResult.InvalidName);
+        if (!NameRules.IsPlain(name))
+            return CreateCharacterPacket(CreateCharacterResult.InvalidCharacters);
 
         if (await characterRepository.IsNameTaken(name))
             return CreateCharacterPacket(CreateCharacterResult.NameAlreadyExists);

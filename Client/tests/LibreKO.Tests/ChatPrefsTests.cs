@@ -6,6 +6,27 @@ namespace LibreKO.Tests;
 public class ChatPrefsTests
 {
     [Fact]
+    public void AnOlderSaveKeepsShowingChatRoomAndNoahKnightsWhereGeneralWasShown()
+    {
+        var loaded = ChatPrefs.Parse("tab=all;f.party=" + (int)(ChatCategory.Party | ChatCategory.General) + ";f.clan=" + (int)ChatCategory.Clan);
+
+        var party = ChatTabs.All[ChatTabs.IndexOf("party")];
+        var clan = ChatTabs.All[ChatTabs.IndexOf("clan")];
+        Assert.Equal(ChatCategory.Party | ChatCategory.General | ChatCategory.NoahKnights | ChatCategory.ChatRoom, loaded.Filter(party));
+        Assert.Equal(ChatCategory.Clan, loaded.Filter(clan));
+    }
+
+    [Fact]
+    public void ACurrentSaveKeepsItsFiltersAsTheyWere()
+    {
+        var prefs = new ChatPrefs();
+        var party = ChatTabs.All[ChatTabs.IndexOf("party")];
+        prefs.SetFilter(party, ChatCategory.Party | ChatCategory.General);
+
+        Assert.Equal(ChatCategory.Party | ChatCategory.General, ChatPrefs.Parse(prefs.Format()).Filter(party));
+    }
+
+    [Fact]
     public void EverySettingSurvivesSaving()
     {
         var prefs = new ChatPrefs { Tab = "clan", Timestamps = true, FontSize = 2, Background = 3, Locked = true, NearbyShown = false };

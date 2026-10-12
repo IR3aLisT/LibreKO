@@ -3,6 +3,7 @@ using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol.Writers;
+using LibreKO.Game.Scripting;
 using LibreKO.Game.World;
 using Microsoft.Extensions.Logging;
 
@@ -23,6 +24,7 @@ public class CombatPacketCoordinator(
     ICombatLifecycleService combatLifecycleService,
     IStealthService stealthService,
     IResurrectionOfferService resurrectionOfferService,
+    IQuestDefinitionSource questDefinitions,
     ILogger<CombatPacketCoordinator> logger) : ICombatPacketCoordinator
 {
     private const short MaxSwingInterval = 500;
@@ -248,8 +250,8 @@ public class CombatPacketCoordinator(
         if (npc == null || !npc.IsAlive || npc.ZoneId != session.ZoneId)
             return;
 
-        var npcResult = BuildTargetHpPacket(targetId, echo, npc.MaxHp, npc.Hp, 0);
-        await client.SendPacket(npcResult);
+        var drops = TargetQuestDrops.For(session, npc, gameDataService, questDefinitions);
+        await client.SendPacket(TargetHpPacketWriter.Polled(targetId, echo, npc.MaxHp, npc.Hp, 0, drops));
     }
 
     private static Packet BuildTargetHpPacket(int targetId, byte echo, int maxHp, int hp, int damage)

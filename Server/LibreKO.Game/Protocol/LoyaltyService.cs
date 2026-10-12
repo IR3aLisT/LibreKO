@@ -30,7 +30,8 @@ public class LoyaltyService(
 
         var premium = gameData.GetPremiumProperty(session.PremiumType, PremiumPropertyType.Loyalty);
         session.DailyPremiumLoyalty += premium;
-        return ApplyAsync(session, timeWeather.ApplyNpBonus(amount) + premium);
+        var clanNp = session.KnightsId > 0 ? ClanOnlineBonus.Np(session.ClanOnlineCount) : 0;
+        return ApplyAsync(session, timeWeather.ApplyNpBonus(amount) + premium + clanNp);
     }
 
     private async Task ApplyAsync(UserSession session, int changeAmount)

@@ -285,6 +285,8 @@ public class GamePacketHandler(
             await shoppingMallPacketCoordinator.SendBalanceAsync(session);
             await shoppingMallPacketCoordinator.SendUnreadAsync(session);
             await savedMagicService.RecastAsync(session);
+            if (session.HealStrikesEnemies)
+                await client.SendPacket(ItemMovePacketMapper.BuildResponse(session, (byte)ItemMoveSubOpcode.Move));
             await clanBattleService.RestoreAsync(session);
             await collectionRaceService.SyncPlayerAsync(session);
             await mailService.SendUnreadAsync(session);

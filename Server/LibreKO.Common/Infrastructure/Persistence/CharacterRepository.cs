@@ -12,6 +12,24 @@ public class CharacterRepository(AppDbContext context) : ICharacterRepository
         return await context.Characters.FindAsync(id);
     }
 
+    public async Task<(short Warnings, DateTime? WarnedAt)> GetJuraidWarningsAsync(int characterId)
+    {
+        var row = await context.Characters.Where(c => c.Id == characterId)
+            .Select(c => new { c.JuraidWarnings, c.JuraidWarnedAt }).FirstOrDefaultAsync();
+        return row == null ? ((short)0, null) : (row.JuraidWarnings, row.JuraidWarnedAt);
+    }
+
+    public async Task<short> AddJuraidWarningAsync(int characterId, DateTime now, TimeSpan lasts)
+    {
+        var character = await context.Characters.FindAsync(characterId);
+        if (character == null) return 0;
+        if (character.JuraidWarnedAt is { } warnedAt && now - warnedAt >= lasts) character.JuraidWarnings = 0;
+        character.JuraidWarnings++;
+        character.JuraidWarnedAt = now;
+        await context.SaveChangesAsync();
+        return character.JuraidWarnings;
+    }
+
     public async Task<IEnumerable<Character>> GetCharactersByAccount(int accountId)
     {
         return await context.Characters

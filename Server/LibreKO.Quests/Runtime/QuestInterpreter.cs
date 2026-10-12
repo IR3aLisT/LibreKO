@@ -682,6 +682,10 @@ public sealed class QuestInterpreter
                 _host.OpenRebirthResetPanel();
                 break;
 
+            case QuestActionKind.OpenRepurchaseWindow:
+                _host.OpenRepurchaseWindow();
+                break;
+
             case QuestActionKind.OpenFamiliarPanel:
                 _host.OpenFamiliarPanel();
                 break;

@@ -9,7 +9,7 @@ namespace LibreKO.Game.Protocol;
 public interface IPartyPacketCoordinator
 {
     Task HandleAsync(IClient client, Packet packet);
-    Task RemoveMemberAsync(UserSession session, short memberId);
+    Task RemoveMemberAsync(UserSession session, short memberId, bool deliberate = true);
     Task LeaveGameAsync(UserSession session);
     Task BoardInviteAsync(UserSession inviter, string targetName, byte boardType);
     Task BoardAcceptAsync(UserSession target, string inviterName, byte boardType);
@@ -19,6 +19,7 @@ public class PartyPacketCoordinator(
     SessionManager sessionManager,
     ICombatNotificationService combatNotificationService,
     IPartyWarBoardService partyWarBoard,
+    IPartyUserVoteService userVote,
     ILogger<PartyPacketCoordinator> logger) : IPartyPacketCoordinator
 {
     public async Task HandleAsync(IClient client, Packet packet)
@@ -67,6 +68,21 @@ public class PartyPacketCoordinator(
 
             case PartyRequest.CommanderMark:
                 await HandleCommanderMarkAsync(session, packet);
+                break;
+
+            case PartyRequest.UserVote:
+                if (packet.RemainingBytes >= 5)
+                {
+                    int target = packet.ReadInt();
+                    byte reason = packet.ReadByte();
+                    string text = reason == PartyUserVoteRules.ReasonOther && packet.RemainingBytes >= 2 ? packet.ReadString() : "";
+                    await userVote.StartAsync(session, target, reason, text);
+                }
+                break;
+
+            case PartyRequest.UserVoteAnswer:
+                if (packet.RemainingBytes >= 1)
+                    await userVote.AnswerAsync(session, packet.ReadByte());
                 break;
 
             case PartyRequest.CommanderOrder:
@@ -164,7 +180,7 @@ public class PartyPacketCoordinator(
             && NextLeader(party, (short)session.CharacterId) is { } heir)
             await PromoteAsync(session, (short)heir.CharacterId);
 
-        await RemoveMemberAsync(session, (short)session.CharacterId);
+        await RemoveMemberAsync(session, (short)session.CharacterId, deliberate: false);
     }
 
     private UserSession? NextLeader(PartyGroup party, short leavingId)
@@ -181,7 +197,7 @@ public class PartyPacketCoordinator(
         return null;
     }
 
-    public async Task RemoveMemberAsync(UserSession session, short memberId)
+    public async Task RemoveMemberAsync(UserSession session, short memberId, bool deliberate = true)
     {
         if (!session.IsInParty)
             return;
@@ -218,6 +234,8 @@ public class PartyPacketCoordinator(
 
         var removePkt = PartyPacketWriter.MemberLeft(memberId);
         await combatNotificationService.SendToPartyAsync(party, removePkt);
+        if (deliberate && sessionManager.GetByCharacterId(party.LeaderId) is { } partyLeader)
+            await partyLeader.Client.SendPacket(PartyPacketWriter.RejoinForget(memberId));
 
         party.MemberIds[memberPos] = -1;
         partyWarBoard.MemberLeft(party.Index, memberId);
@@ -241,6 +259,8 @@ public class PartyPacketCoordinator(
         if (string.IsNullOrEmpty(targetName))
             return;
         var boardType = packet.RemainingBytes >= 1 ? packet.ReadByte() : FullMoonRules.NormalBoard;
+        var rowMeterMode = packet.RemainingBytes >= 1 ? packet.ReadByte() : PartyWarBoardService.ModeDamage;
+        var boardMeterMode = packet.RemainingBytes >= 1 ? packet.ReadByte() : PartyWarBoardService.ModeOff;
 
         var target = sessionManager.GetByName(targetName);
         if (!await InviteAllowedAsync(session, target, boardType))
@@ -255,6 +275,7 @@ public class PartyPacketCoordinator(
             }
 
             CreatePartyLedBy(session, boardType);
+            partyWarBoard.SeedModes(session.PartyIndex, session.CharacterId, rowMeterMode, boardMeterMode);
         }
         else
         {

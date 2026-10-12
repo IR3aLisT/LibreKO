@@ -1,25 +1,29 @@
-﻿namespace LibreKO.Domain;
+﻿using System.Collections.Generic;
+
+namespace LibreKO.Domain;
 
 public static class PremiumNames
 {
-    public const int Bronze = 3;
-    public const int Gold = 5;
-    public const int Platinum = 7;
-    public const int Dc = 10;
-    public const int Exp = 11;
-    public const int War = 12;
-    public const int Switching = 13;
-    public const string Fallback = "Premium";
+    public const int PremiumText = 1490;
+    public const string PremiumFallback = "PREMIUM";
+    public const int HoursText = 7630;
+    public const string HoursFallback = "Premium Service : %d hours remaining.";
+    public const int DaysText = 43550;
+    public const string DaysFallback = "Premium Service : %d day(s) remaining.";
+    public const int LastDayText = 7631;
+    public const string LastDayFallback = "Today is the last day of premium service.";
+    private const int HoursPerDay = 24;
 
-    public static string Of(int type) => type switch
+    private static readonly Dictionary<int, (int Text, string Fallback)> Names = new()
     {
-        Bronze => "Bronze Premium",
-        Gold => "Gold Premium",
-        Platinum => "Platinum Premium",
-        Dc => "DC Premium",
-        Exp => "EXP Premium",
-        War => "WAR Premium",
-        Switching => "Switching Premium",
-        _ => Fallback,
+        [1] = (1479, "NORMAL"), [2] = (1480, "ULTRA"), [3] = (1481, "BRONZE"), [5] = (1483, "GOLD"),
+        [7] = (1485, "PLATINUM"), [8] = (1486, "ROYAL"), [10] = (1487, "DC"), [11] = (1488, "EXP"), [12] = (1489, "WAR"),
     };
+
+    public static (int Text, string Fallback)? Name(int type) => Names.TryGetValue(type, out var name) ? name : null;
+
+    public static (int Text, string Fallback, int Value) TimeLeft(int hours) =>
+        hours <= 0 ? (LastDayText, LastDayFallback, 0)
+        : hours < HoursPerDay ? (HoursText, HoursFallback, hours)
+        : (DaysText, DaysFallback, hours / HoursPerDay);
 }

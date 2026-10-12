@@ -325,6 +325,7 @@ public partial class SettingsPanel : CanvasLayer
     private OptionButton _shadowLevel = null!, _ssaoLevel = null!;
     private OptionButton _renderer = null!;
     private CheckButton _showTitles = null!;
+    private CheckButton _questNotices = null!;
     private Button _applyButton = null!;
     private bool _dirty;
     private bool _presetApplying;
@@ -338,6 +339,8 @@ public partial class SettingsPanel : CanvasLayer
     private OptionButton _res = null!;
     private CheckButton _volFog = null!, _bloom = null!, _clouds = null!;
     private CheckButton _fxLayer = null!;
+    private OptionButton _crowdMode = null!;
+    private OptionButton _itemShine = null!;
     private CheckButton _capes = null!;
     private OptionButton _aa = null!;
     private OptionButton _upscale = null!;
@@ -481,6 +484,7 @@ public partial class SettingsPanel : CanvasLayer
                                (Config.AaMode)_aa.Selected, (Config.UpscaleMode)_upscale.Selected,
                                (Config.UpscaleLevel)_upscaleQuality.Selected, (Config.FpsCap)_fps.Selected);
             Config.SetShowTitles(_showTitles.ButtonPressed);
+            Config.SetQuestNotices(_questNotices.ButtonPressed);
             var hidden = CospreKinds.None;
             foreach (var (kind, check) in _cospreShown)
                 if (!check.ButtonPressed) hidden |= kind;
@@ -488,6 +492,8 @@ public partial class SettingsPanel : CanvasLayer
             Config.SetEffects(_fxAmbient.ButtonPressed, (int)_fxDistance.Value, _fxNumbers.ButtonPressed,
                               _fxCombatLog.ButtonPressed);
             Config.SetFxLayer(_fxLayer.ButtonPressed);
+            Config.SetCrowdMode((LibreKO.Domain.CrowdMode)_crowdMode.Selected);
+            Config.SetShineStyle((LibreKO.Domain.ShineStyle)_itemShine.Selected);
             Config.SetControls((float)_camTurnSpeed.Value, _camEdgePan.ButtonPressed, (float)_camEdgeSpeed.Value);
             Config.SetCameraShake(_cameraShake.ButtonPressed);
             if (_moveStick != null && _lookStick != null)
@@ -720,6 +726,10 @@ public partial class SettingsPanel : CanvasLayer
         titlesRow.TooltipText = "Achievement titles under the names of characters.";
         vb.AddChild(titlesRow);
 
+        var questRow = Row("Quest Notifications", _questNotices = new CheckButton { ButtonPressed = Config.QuestNotices });
+        questRow.TooltipText = "The quest progress notice in the middle of the screen when you kill or collect for a quest.";
+        vb.AddChild(questRow);
+
         RestoreButton(vb, () =>
         {
             _screen.Selected = 0;
@@ -731,6 +741,7 @@ public partial class SettingsPanel : CanvasLayer
             _vsync.ButtonPressed = Config.DefaultOf<bool>(nameof(Config.VSync), "video", "vsync");
             _fps.Selected = (int)Config.DefaultOf<Config.FpsCap>(nameof(Config.FpsLimit), "graphics", "fps_limit");
             _showTitles.ButtonPressed = Config.DefaultOf<bool>(nameof(Config.ShowTitles), "hud", "show_titles");
+            _questNotices.ButtonPressed = Config.DefaultOf<bool>(nameof(Config.QuestNotices), "hud", "quest_notices");
         });
     }
 
@@ -771,6 +782,13 @@ public partial class SettingsPanel : CanvasLayer
         var fxLayerRow = Row("Accurate Effect Blending", _fxLayer = new CheckButton { ButtonPressed = Config.FxLayer });
         fxLayerRow.TooltipText = "Blends spells and effects the way the original client does, outside bloom and tone mapping.";
         vb.AddChild(fxLayerRow);
+        var crowdRow = Row("Crowd Mode", _crowdMode = new OptionButton());
+        foreach (LibreKO.Domain.CrowdMode mode in System.Enum.GetValues<LibreKO.Domain.CrowdMode>())
+            _crowdMode.AddItem(LibreKO.Domain.CrowdModes.Label(mode), (int)mode);
+        _crowdMode.Selected = (int)Config.Crowd;
+        crowdRow.TooltipText = "How many effects other players' skills and gathering may show in a crowd. "
+            + "Your own, your target's and your party's effects always show.";
+        vb.AddChild(crowdRow);
         vb.AddChild(Row("Clouds", _clouds = new CheckButton { ButtonPressed = Config.Clouds }));
         var capeRow = Row("Clan Capes", _capes = new CheckButton { ButtonPressed = Config.Capes });
         capeRow.TooltipText = "Simulated cloth on every player in range. Costs a lot of frame time.";
@@ -841,6 +859,7 @@ public partial class SettingsPanel : CanvasLayer
         {
             ApplyPreset(GraphicsPreset.High);
             _fxLayer.ButtonPressed = Config.DefaultOf<bool>(nameof(Config.FxLayer), "graphics", "fx_layer");
+            _crowdMode.Selected = (int)Config.DefaultOf<LibreKO.Domain.CrowdMode>(nameof(Config.Crowd), "graphics", "crowd_mode");
             _capes.ButtonPressed = Config.DefaultOf<bool>(nameof(Config.Capes), "graphics", "capes");
             _upscale.Selected = (int)Config.DefaultOf<Config.UpscaleMode>(nameof(Config.Upscale), "graphics", "upscale");
             _upscaleQuality.Selected = (int)Config.DefaultOf<Config.UpscaleLevel>(nameof(Config.UpscaleQuality), "graphics", "upscale_quality");
@@ -867,6 +886,12 @@ public partial class SettingsPanel : CanvasLayer
         vb.AddChild(distRow);
         vb.AddChild(Row("Damage Numbers", _fxNumbers = new CheckButton { ButtonPressed = Config.DamageNumbers }));
         vb.AddChild(Row("Combat Log", _fxCombatLog = new CheckButton { ButtonPressed = Config.CombatLog }));
+        var shineRow = Row("Item Shine", _itemShine = new OptionButton());
+        foreach (LibreKO.Domain.ShineStyle style in System.Enum.GetValues<LibreKO.Domain.ShineStyle>())
+            _itemShine.AddItem(LibreKO.Domain.ShineStyles.Label(style), (int)style);
+        _itemShine.Selected = (int)Config.Shine;
+        shineRow.TooltipText = "How upgraded gear glows: our gold glow, or the classic look that brightens the item's own colours.";
+        vb.AddChild(shineRow);
 
         vb.AddChild(new HSeparator());
         vb.AddChild(new Label { Text = "Other players" });
@@ -885,6 +910,7 @@ public partial class SettingsPanel : CanvasLayer
             _fxDistance.Value = Config.DefaultOf<int>(nameof(Config.FxDistance), "effects", "distance");
             _fxNumbers.ButtonPressed = Config.DefaultOf<bool>(nameof(Config.DamageNumbers), "effects", "damage_numbers");
             _fxCombatLog.ButtonPressed = Config.DefaultOf<bool>(nameof(Config.CombatLog), "hud", "combat_log");
+            _itemShine.Selected = (int)Config.DefaultOf<LibreKO.Domain.ShineStyle>(nameof(Config.Shine), "effects", "item_shine");
             foreach (var check in _cospreShown.Values) check.ButtonPressed = true;
         });
     }

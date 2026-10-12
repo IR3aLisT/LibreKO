@@ -28,6 +28,8 @@ public partial class World
 
     private void RefreshSelfClanLine()
     {
+        Chat?.NoahStatusChanged();
+        _pluginBridge?.RaiseCharacter();
         var plate = SelfPlate();
         ApplyClanLine(plate, MyClan.InClan ? MyClan.Name : "", Sheet.Level,
             MyClan.InClan ? MyClan.Fame : ClanRanks.None, _stalls.ContainsKey(_myId));

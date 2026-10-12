@@ -87,6 +87,7 @@ public enum KeyAction
     CommanderSlot6,
     CommanderHold,
     PkLadder,
+    VoicePushToTalk,
 }
 
 public enum BindGroup
@@ -233,6 +234,7 @@ public static partial class KeyBinds
         new(KeyAction.CommanderSlot6, BindGroup.Combat, "Commander: Left", Chord(Key.Key6)),
         new(KeyAction.CompareItems, BindGroup.Windows, "Compare Items (hold)", Chord(Key.Ctrl)),
         new(KeyAction.PkLadder, BindGroup.Windows, "PK Zone Ladder (hold)", Chord(Key.Alt)),
+        new(KeyAction.VoicePushToTalk, BindGroup.Windows, "Voice: Push to Talk (hold)", Chord(Key.V)),
 
         new(KeyAction.PerformanceOverlay, BindGroup.System, "Performance Overlay", Shift(Key.F3)),
         new(KeyAction.PerfSkipPoses, BindGroup.System, "Perf bisect: crowd poses", Shift(Key.F5)),
@@ -296,6 +298,7 @@ public static partial class KeyBinds
     private static readonly HashSet<KeyAction> HoldActions = new()
     {
         KeyAction.CommanderHold, KeyAction.CompareItems, KeyAction.PkLadder, KeyAction.GmSpeed,
+        KeyAction.VoicePushToTalk,
     };
 
     public static bool IsHold(KeyAction action) => HoldActions.Contains(action);

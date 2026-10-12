@@ -319,6 +319,12 @@ public partial class Login : Control
     public override void _UnhandledKeyInput(InputEvent e)
     {
         if (e is not InputEventKey { Pressed: true, Echo: false } key || key.Keycode is not (Key.Enter or Key.KpEnter)) return;
+        if (_session.Visible && !_continue.Disabled && _busy == null)
+        {
+            GetViewport().SetInputAsHandled();
+            OnContinue();
+            return;
+        }
         if (_onlyServer is not { } only || !_serverPanel.Visible || _busy != null) return;
         GetViewport().SetInputAsHandled();
         Pick(only);

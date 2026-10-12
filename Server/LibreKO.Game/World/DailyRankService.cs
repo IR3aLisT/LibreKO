@@ -15,6 +15,7 @@ public interface IDailyRankService
     Task CountMerchantSaleAsync(UserSession seller, long gold);
     Task CountBlessedUpgradeAsync(UserSession session);
     Task RecomputeAsync();
+    int PlaceOf(DailyRankBoard board, int subjectId);
 }
 
 public sealed class DailyRankService(
@@ -96,6 +97,11 @@ public sealed class DailyRankService(
     }
 
     public Task RecomputeAsync() => RollOverAsync(Today);
+
+    public int PlaceOf(DailyRankBoard board, int subjectId) =>
+        subjectId != 0 && _boards.TryGetValue(board, out var ranking) && ranking.Places.TryGetValue(subjectId, out var place)
+            ? place.Place
+            : 0;
 
     private async Task RankAsync(DateOnly today, IDailyRankRepository repository, IReadOnlyList<DailyRankPlace> stored)
     {

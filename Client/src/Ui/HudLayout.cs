@@ -168,7 +168,7 @@ public sealed partial class HudLayout : Node
             Config.SaveWindowPos(_id, _target.Position);
     }
 
-    internal void ReapplyDefault() => FollowDefaultOnScreen();
+    public void ReapplyDefault() => FollowDefaultOnScreen();
 
     public static void ResetAll()
     {
@@ -181,6 +181,8 @@ public sealed partial class HudLayout : Node
             layout.Placed?.Invoke();
         }
     }
+
+    public Vector2 MaximumViewportShare { get; set; }
 
     internal Vector2 MinimumSize
     {
@@ -446,6 +448,8 @@ public sealed partial class HudLayout : Node
         var limit = HudResize.Limit(vp, _target.Position, new Rect2(_resizeOriginPosition, _resizeOriginSize), fromLeft, fromTop);
         float maxX = Mathf.Max(minX, limit.X);
         float maxY = Mathf.Max(minY, limit.Y);
+        if (MaximumViewportShare.X > 0f) maxX = Mathf.Max(minX, Mathf.Min(maxX, vp.X * MaximumViewportShare.X));
+        if (MaximumViewportShare.Y > 0f) maxY = Mathf.Max(minY, Mathf.Min(maxY, vp.Y * MaximumViewportShare.Y));
         return new Vector2(
             Mathf.Clamp(requested.X, minX, maxX),
             Mathf.Clamp(requested.Y, minY, maxY));

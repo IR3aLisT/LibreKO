@@ -14,6 +14,7 @@ public partial class World
     private const float WhisperBlinkStep = 0.32f;
     private const float WhisperBottomSlack = 8f;
     private const int WhisperFontSize = 12;
+    private const int WhisperNoticeFontSize = 11;
     private const float WhisperAlphaStep = 0.05f;
     private static int WhisperBubbleWrapWidth => WhisperLook.BoxOf(Config.WhisperSize).Wrap;
     private PopupPanel? _whisperOptions;
@@ -198,7 +199,7 @@ public partial class World
 
         _whispers[name] = chat;
         foreach (var line in Net.I.WhisperHistory(name))
-            chat.Log.AddChild(BuildWhisperRow(line.Mine, line.Notice, line.Text));
+            chat.Log.AddChild(BuildWhisperRow(name, line.Mine, line.Notice, line.Text));
         ScrollWhisperToEnd(chat);
         if (minimized) chat.Window.SetMinimized(true);
         chat.Window.Modulate = WhisperRestModulate();
@@ -223,7 +224,7 @@ public partial class World
             chat.Scroll.CustomMinimumSize = size;
             foreach (var child in chat.Log.GetChildren()) child.QueueFree();
             foreach (var line in Net.I.WhisperHistory(chat.Name))
-                chat.Log.AddChild(BuildWhisperRow(line.Mine, line.Notice, line.Text));
+                chat.Log.AddChild(BuildWhisperRow(chat.Name, line.Mine, line.Notice, line.Text));
             chat.Window.ResetSize();
             if (chat.Blink == null) chat.Window.Modulate = WhisperRestModulate();
             chat.StickBottom = true;
@@ -420,7 +421,7 @@ public partial class World
         PluginNotifyWhisperLine(chat.Name, mine, notice, text);
         chat.StickBottom = mine || WhisperAtBottom(chat);
 
-        chat.Log.AddChild(BuildWhisperRow(mine, notice, text));
+        chat.Log.AddChild(BuildWhisperRow(chat.Name, mine, notice, text));
         while (chat.Log.GetChildCount() > Net.WhisperLogMax)
         {
             var first = chat.Log.GetChild(0);
@@ -472,43 +473,41 @@ public partial class World
         chat.Input.CaretColumn = caret;
     }
 
-    private Control BuildWhisperRow(bool mine, bool notice, string text)
+    private Control BuildWhisperRow(string partner, bool mine, bool notice, string text)
     {
         var row = new HBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         row.Alignment = notice
             ? BoxContainer.AlignmentMode.Center
             : mine ? BoxContainer.AlignmentMode.End : BoxContainer.AlignmentMode.Begin;
-
-        if (notice)
-        {
-            row.AddChild(UiTheme.Text(text, 11, UiTheme.Warning));
-            return row;
-        }
-
-        var bubble = new PanelContainer();
-        bubble.AddThemeStyleboxOverride("panel", WhisperBubbleStyle(mine));
-
-        bubble.AddChild(WhisperBubbleText(mine, text));
-        row.AddChild(bubble);
+        row.AddChild(notice ? WhisperNoticeText(text) : WhisperLineText((mine ? Net.I.LastEnter.Name : partner) ?? "", mine, text));
         return row;
     }
 
-    private Control WhisperBubbleText(bool mine, string text)
+    private static Control WhisperNoticeText(string text)
+    {
+        var rich = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent = true,
+            ScrollActive = false,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            CustomMinimumSize = new Vector2(WhisperBubbleWrapWidth, 0),
+            Text = $"[center][color=#{UiTheme.Warning.ToHtml(false)}]{WhisperLinks.Linkify(text)}[/color][/center]",
+        };
+        rich.AddThemeFontSizeOverride("normal_font_size", WhisperNoticeFontSize);
+        rich.MetaClicked += meta =>
+        {
+            string link = meta.AsString();
+            if (WhisperLinks.IsWebLink(link)) OS.ShellOpen(link);
+        };
+        return rich;
+    }
+
+    private Control WhisperLineText(string speaker, bool mine, string text)
     {
         var colour = mine ? WhisperMineText : UiTheme.TextHi;
         string plain = ChatSystem.PlainText(text);
-        bool wraps = plain.Length > WhisperWrapThreshold;
-        if (!ChatItemLink.Split(text).Exists(segment => segment.ItemId > 0) && !Emoticons.Contains(text))
-        {
-            var label = UiTheme.Text(plain, WhisperFontSize, colour);
-            if (wraps)
-            {
-                label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-                label.CustomMinimumSize = new Vector2(WhisperBubbleWrapWidth, 0);
-            }
-            return label;
-        }
-
+        bool wraps = speaker.Length + plain.Length > WhisperWrapThreshold;
         var rich = new RichTextLabel
         {
             BbcodeEnabled = true,
@@ -517,8 +516,9 @@ public partial class World
             MetaUnderlined = false,
             AutowrapMode = wraps ? TextServer.AutowrapMode.WordSmart : TextServer.AutowrapMode.Off,
             CustomMinimumSize = wraps ? new Vector2(WhisperBubbleWrapWidth, 0) : Vector2.Zero,
-            Text = ChatSystem.RenderText(text, colour.ToHtml(false)),
+            Text = $"[color=#{colour.ToHtml(false)}]{BbCode.Esc(speaker)} : [/color]" + ChatSystem.RenderText(text, colour.ToHtml(false)),
         };
+        if (mine) rich.HorizontalAlignment = HorizontalAlignment.Right;
         rich.AddThemeFontSizeOverride("normal_font_size", WhisperFontSize);
         rich.MetaClicked += meta =>
         {
@@ -526,24 +526,6 @@ public partial class World
         };
         rich.MetaHoverEnded += _ => HideItemTooltip();
         return rich;
-    }
-
-    private static StyleBoxFlat WhisperBubbleStyle(bool mine)
-    {
-        var sb = new StyleBoxFlat
-        {
-            BgColor = mine
-                ? new Color(0.42f, 0.20f, 0.36f, 0.60f)
-                : new Color(0.17f, 0.18f, 0.21f, 0.66f),
-            BorderColor = mine
-                ? new Color(0.72f, 0.42f, 0.66f, 0.50f)
-                : new Color(0.48f, 0.48f, 0.52f, 0.45f),
-        };
-        sb.SetBorderWidthAll(1);
-        sb.SetCornerRadiusAll(5);
-        sb.ContentMarginLeft = sb.ContentMarginRight = 8;
-        sb.ContentMarginTop = sb.ContentMarginBottom = 4;
-        return sb;
     }
 
     private void StartWhisperBlink(WhisperChat chat)

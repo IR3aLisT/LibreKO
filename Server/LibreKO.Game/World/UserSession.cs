@@ -150,6 +150,7 @@ public class UserSession
 
     // Clan/Knights
     public short KnightsId { get; set; }
+    public int ClanOnlineCount { get; set; }
     public SiegeSide SiegeSide { get; set; }
     public int TowerHostId { get; set; }
     public byte PartyBoardType { get; set; }
@@ -198,6 +199,8 @@ public class UserSession
     }
 
     public byte[] GenieOptions { get; set; } = [];
+
+    public List<RepurchaseEntry> Repurchases { get; } = [];
 
     public byte DrakiStage { get; set; }
     public byte DrakiSubStage { get; set; }
@@ -309,6 +312,7 @@ public class UserSession
     public bool IsKaul { get; set; }
     public bool BlockPhysical { get; set; }
     public bool BlockMagic { get; set; }
+    public bool HealStrikesEnemies { get; private set; }
     public bool MirrorDamage { get; set; }
     public byte MirrorDamageAmount { get; set; }
     public byte SpeedAmount { get; set; } = 100;
@@ -406,6 +410,7 @@ public class UserSession
             UserSessionMagicState.WeaponDamageBonus(this));
         UserSessionMagicState.ApplyBuffBonuses(this);
         ApplyFamiliarScrolls(coefficient, gameData);
+        HealStrikesEnemies = HealStrike.Armed(Inventory, gameData.GetItemOps);
         if (ZoneId == ChaosRules.Zone)
             Stats.MaxHp = ChaosRules.MaxHp;
         MaxHp = Stats.MaxHp;

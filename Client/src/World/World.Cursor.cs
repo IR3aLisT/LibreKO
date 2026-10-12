@@ -6,8 +6,6 @@ public partial class World
 {
     private const float CursorHoverRadius = 48f;
 
-    private const double CursorHoverInterval = 1.0 / 30.0;
-
     private double _cursorHoverAccum;
     private bool _cursorHoverAttackable;
 
@@ -26,7 +24,7 @@ public partial class World
         if (_continuanceSkill != 0 && Input.IsMouseButtonPressed(MouseButton.Right)) CancelContinuance();
 
         _cursorHoverAccum += delta;
-        if (_cursorHoverAccum >= CursorHoverInterval)
+        if (_cursorHoverAccum >= 1.0 / CrowdModes.Of(Config.Crowd).HoverHz)
         {
             _cursorHoverAccum = 0;
             _cursorHoverAttackable = PointerOverAttackable();

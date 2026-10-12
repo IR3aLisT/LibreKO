@@ -691,7 +691,7 @@ public class MagicStatusEffectService(
 
         var use = (TransformationUse)type6Data.UserSkillUse;
         if (SiegeRules.IsSiegeTransformation(use)
-            && !SiegeRules.SiegeTransformationAllowed(caster.ZoneId, sessionManager.Battle.CastleSiegeOpen))
+            && !SiegeRules.SiegeTransformationAllowed(skillId, caster.ZoneId, sessionManager.Battle.CastleSiegeOpen))
         {
             await SendMagicFailAsync(caster, skillId);
             return;

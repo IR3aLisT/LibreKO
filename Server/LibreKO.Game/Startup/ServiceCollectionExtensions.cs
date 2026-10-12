@@ -82,6 +82,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMessengerPacketCoordinator, MessengerPacketCoordinator>();
         services.AddSingleton<IForcesPacketCoordinator, ForcesPacketCoordinator>();
         services.AddSingleton<INationChatService, NationChatService>();
+        services.AddSingleton<IChatRoomHistory, ChatRoomHistory>();
+        services.AddSingleton<VoiceRoster>();
+        services.AddSingleton<VoiceRelayService>();
+        services.AddSingleton<IVoiceRelay>(sp => sp.GetRequiredService<VoiceRelayService>());
+        services.AddSingleton<IRoomMediaService, RoomMediaService>();
         services.AddSingleton<IKillStreakService, KillStreakService>();
         services.AddSingleton<INationTaxPacketCoordinator, NationTaxPacketCoordinator>();
         services.AddSingleton<IFishingHallPacketCoordinator, FishingHallPacketCoordinator>();
@@ -96,6 +101,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRankBoardService, RankBoardService>();
         services.AddSingleton<ClanBattleService>();
         services.AddSingleton<IClanBattleService>(sp => sp.GetRequiredService<ClanBattleService>());
+        services.AddSingleton<PartyUserVoteService>();
+        services.AddSingleton<IPartyUserVoteService>(sp => sp.GetRequiredService<PartyUserVoteService>());
         services.AddSingleton<IClanBoardService, ClanBoardService>();
         services.AddSingleton<PartyWarBoardService>();
         services.AddSingleton<IPartyWarBoardService>(sp => sp.GetRequiredService<PartyWarBoardService>());
@@ -284,6 +291,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<MovementBroadcastService>();
         services.AddHostedService<BuffExpiryService>();
         services.AddHostedService(sp => sp.GetRequiredService<ClanBattleService>());
+        services.AddHostedService(sp => sp.GetRequiredService<PartyUserVoteService>());
         services.AddHostedService(sp => sp.GetRequiredService<PartyWarBoardService>());
         services.AddHostedService<ItemExpiryService>();
         services.AddHostedService<QuestAvailabilityService>();
@@ -293,6 +301,8 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<KingElectionTimerService>();
         services.AddHostedService<MonthlyLoyaltyResetService>();
         services.AddHostedService<MarketPricePruneService>();
+        services.AddHostedService<ChatRoomHistoryPruneService>();
+        services.AddHostedService(sp => sp.GetRequiredService<VoiceRelayService>());
         services.AddHostedService<SpecialAuctionTickService>();
         services.AddHostedService(sp => sp.GetRequiredService<TimeWeatherBroadcastService>());
         services.AddHostedService(sp => sp.GetRequiredService<CastleSiegeService>());

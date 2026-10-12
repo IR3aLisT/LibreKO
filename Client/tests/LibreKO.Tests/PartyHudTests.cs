@@ -5,6 +5,20 @@ namespace LibreKO.Tests;
 
 public class PartyHudTests
 {
+    [Theory]
+    [InlineData(101, 0)]
+    [InlineData(107, 1)]
+    [InlineData(110, 2)]
+    [InlineData(112, 3)]
+    [InlineData(115, 4)]
+    [InlineData(205, 5)]
+    [InlineData(202, 6)]
+    [InlineData(209, 7)]
+    [InlineData(204, 8)]
+    [InlineData(213, 9)]
+    public void EachClassGetsTheRetailPartyIcon(int classCode, int icon) =>
+        Assert.Equal(icon, PartyHud.ClassIconIndex(classCode));
+
     private const int WarriorMaster = 206;
     private const int RogueMaster = 208;
     private const int UnknownClass = 0;

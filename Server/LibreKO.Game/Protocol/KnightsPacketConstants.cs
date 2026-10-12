@@ -11,5 +11,7 @@ public static class KnightsPacketConstants
 
     public const int ClanListPageSize = 10;
     public const int MaxNoticeLength = 200;
-    public const int MaxMemoLength = 20;
+    public const int MaxMemoLength = Common.Domain.Entities.Character.ClanMemoMaxLength;
+    public const byte MemoLengthRefused = 2;
+    public const byte MemoNotInClan = 5;
 }

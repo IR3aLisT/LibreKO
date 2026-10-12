@@ -18,6 +18,8 @@ public partial class World
     private CanvasLayer? _fullMoonCaptionLayer;
     private Control? _fullMoonCaption;
     private double _fullMoonShoutAt = double.NegativeInfinity;
+    private bool _fullMoonAutoEntry;
+    private double _fullMoonAutoAt = double.NegativeInfinity;
 
     private void FullMoonInit()
     {
@@ -59,6 +61,39 @@ public partial class World
             || Net.I.PartyType != FullMoon.FullMoonBoard || Array.IndexOf(FullMoonNoAutoBoardZones, _zone) >= 0)
             return;
         OpenFullMoonBoard();
+    }
+
+    private int FullMoonAutoPick() =>
+        PartyAutoEntry.Pick(_seekEntries, _zone, Net.I.LastEnter.Class, Sheet.Level);
+
+    private void StartFullMoonAutoEntry()
+    {
+        if (InParty || _fullMoonAutoEntry) return;
+        if (FullMoonAutoPick() < 0)
+        {
+            CombatNotice(ItemData.Text(PartyAutoEntry.NoneText, "There are no parties you can enter automatically."), FullMoonLineColour);
+            return;
+        }
+        _fullMoonAutoEntry = true;
+        _fullMoonAutoAt = double.NegativeInfinity;
+    }
+
+    private void FullMoonAutoTick(double now)
+    {
+        if (!_fullMoonAutoEntry) return;
+        if (InParty || !_seekShown)
+        {
+            _fullMoonAutoEntry = false;
+            return;
+        }
+        if (now - _fullMoonAutoAt < PartyAutoEntry.RetrySeconds) return;
+        _fullMoonAutoAt = now;
+        CombatNotice(ItemData.Text(PartyAutoEntry.SearchingText, "Searching for a party"), FullMoonLineColour);
+        int pick = FullMoonAutoPick();
+        if (pick < 0) return;
+        string leader = _seekEntries[pick].Name;
+        Net.I.SendPartyBbsInvite(leader, SeekBoard);
+        CombatNotice(ItemData.Text(PartyAutoEntry.AppliedText, "Sent invitation to join the party to %s.").Replace("%s", leader), FullMoonLineColour);
     }
 
     private void EnterFullMoon()

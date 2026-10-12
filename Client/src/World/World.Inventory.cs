@@ -1174,7 +1174,8 @@ public partial class World : Node3D
         public override void _GuiInput(InputEvent ev)
         {
             if (Locked) return;
-            if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right })
+            if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right }
+                || (Platform.TouchUi && ev is InputEventMouseButton { Pressed: true, DoubleClick: true, ButtonIndex: MouseButton.Left }))
             {
                 OnContext?.Invoke(Slot);
                 AcceptEvent();

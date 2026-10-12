@@ -13,7 +13,10 @@ public enum PartySubOpcode : byte
     Commander = 30,
     CommanderMark = 31,
     CommanderOrder = 32,
+    UserVote = 33,
+    UserVoteResult = 35,
     WarBoard = 38,
+    RejoinForget = 39,
 }
 
 public enum PartyRequest : byte
@@ -27,5 +30,7 @@ public enum PartyRequest : byte
     CommandPromote = 30,
     CommanderMark = 31,
     CommanderOrder = 32,
+    UserVote = 33,
+    UserVoteAnswer = 34,
     WarBoard = 38,
 }

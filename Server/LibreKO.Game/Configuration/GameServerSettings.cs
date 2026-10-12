@@ -30,6 +30,9 @@ public class GameServerSettings
     public MonsterSettings Monsters { get; set; } = new();
     public GlobalSettings Global { get; set; } = new();
     public EventSettings Events { get; set; } = new();
+    public PartyVoteSettings PartyVote { get; set; } = new();
+    public JackpotSettings Jackpot { get; set; } = new();
+    public ChatRoomSettings ChatRooms { get; set; } = new();
 
     public PublicDemoSettings PublicDemo { get; set; } = new();
 
@@ -108,6 +111,55 @@ public class AnvilSettings
     public double MaxRateSwingPercent { get; set; } = 10;
     public double SuccessStepPercent { get; set; } = 0.1;
     public double FailureStepPercent { get; set; } = 0.1;
+}
+
+public class JackpotSettings
+{
+    public int[] ExpRates { get; set; } = [1100, 200, 50, 25, 10, 5];
+    public int[] CoinRates { get; set; } = [1100, 200, 50, 25, 10, 5];
+}
+
+public class ChatRoomSettings
+{
+    [Range(1, int.MaxValue)]
+    public int HistoryDays { get; set; } = 90;
+
+    public string NotesPath { get; set; } = "voicenotes";
+
+    [Range(1, int.MaxValue)]
+    public int NoteMaxSeconds { get; set; } = 60;
+
+    [Range(1, int.MaxValue)]
+    public int NoteMaxBytes { get; set; } = 320 * 1024;
+
+    [Range(1, int.MaxValue)]
+    public int NoteMinIntervalSeconds { get; set; } = 5;
+
+    [Range(1, int.MaxValue)]
+    public int NotesPerDay { get; set; } = 200;
+
+    public VoiceSettings Voice { get; set; } = new();
+}
+
+public class VoiceSettings
+{
+    public bool Enabled { get; set; } = true;
+    public string BindHost { get; set; } = "*";
+
+    [Range(1, 65535)]
+    public int UdpPort { get; set; } = 15002;
+
+    [Range(0, int.MaxValue)]
+    public int MaxVoicePerRoom { get; set; }
+}
+
+public class PartyVoteSettings
+{
+    [Range(1, short.MaxValue)]
+    public int WarningLimit { get; set; } = 3;
+
+    [Range(1, int.MaxValue)]
+    public int WarningDays { get; set; } = 7;
 }
 
 public class EventSettings

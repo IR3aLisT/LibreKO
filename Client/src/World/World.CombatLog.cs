@@ -23,11 +23,19 @@ public partial class World
     private static readonly Color CombatLogEdgeColour = new(UiTheme.Edge, 0.46f);
     private HudLogText _combatLogText = null!;
     private StyleBoxFlat _combatLogPanelStyle = null!;
-    private readonly Queue<string> _combatLogLines = new();
     private const int CombatLogMaxLines = 120;
+    private readonly TabbedLog _combatLog = new(CombatLogMaxLines);
+    private readonly List<string> _combatLogDropped = new();
+    private const int CombatLogTabMargin = 7;
+    private const int CombatLogTabGap = 3;
+    private static readonly (LogTab Tab, string Caption)[] CombatLogTabCaptions =
+    {
+        (LogTab.All, "All"), (LogTab.State, "Status"), (LogTab.Item, "Item"), (LogTab.System, "System"),
+    };
     private const int TextBeginAttack = 3002;
     private const int TextStopAttack = 3003;
     private const int TextMissed = 3015;
+    private const int TextUsingSkill = 4402;
     private const int TextNotEnoughMp = 3004;
     private const int TextOverweight = 2601;
 
@@ -47,11 +55,22 @@ public partial class World
 
         var tools = new HBoxContainer
         {
-            Alignment = BoxContainer.AlignmentMode.End,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             CustomMinimumSize = new Vector2(0, CombatLogToolRow),
         };
         tools.AddThemeConstantOverride("separation", 3);
+        var tabs = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        tabs.AddThemeConstantOverride("separation", CombatLogTabGap);
+        var tabGroup = new ButtonGroup();
+        foreach (var (tab, caption) in CombatLogTabCaptions)
+        {
+            var button = new Button { Text = caption, ToggleMode = true, ButtonGroup = tabGroup, ButtonPressed = tab == _combatLog.Shown };
+            HudToolButton.Style(button, CombatLogTabMargin);
+            button.Pressed += () => ShowCombatLogTab(tab);
+            tabs.AddChild(button);
+        }
+        tools.AddChild(tabs);
+        tools.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Ignore });
         var background = HudToolButton.Create("◐", null, "Background opacity");
         background.Pressed += CycleCombatLogBackground;
         tools.AddChild(background);
@@ -194,7 +213,14 @@ public partial class World
         ApplyCombatLogLock();
     }
 
-    private void CombatLogAdd(string message, CombatLogKind kind, Color? tint = null, string? markup = null)
+    private void ShowCombatLogTab(LogTab tab)
+    {
+        if (!_combatLog.Show(tab) || _combatLogText == null) return;
+        _combatLogText.Text = string.Join("\n", _combatLog.ShownLines);
+    }
+
+    private void CombatLogAdd(string message, CombatLogKind kind, Color? tint = null, string? markup = null,
+        LogTab tab = LogTab.System)
     {
         if (string.IsNullOrWhiteSpace(message)) return;
         string color = tint?.ToHtml(false) ?? kind switch
@@ -206,27 +232,26 @@ public partial class World
             _ => "ffff00",
         };
         string line = $"[color=#{color}]{markup ?? BbCode.Esc(message)}[/color]";
-        _combatLogLines.Enqueue(line);
-        bool rebuild = false;
-        while (_combatLogLines.Count > CombatLogMaxLines)
+        bool shown = _combatLog.Add(line, tab, _combatLogDropped);
+        if (_combatLogText != null && shown)
         {
-            string dropped = _combatLogLines.Dequeue();
-            if (_combatLogText == null || rebuild) continue;
-            for (int n = dropped.Split('\n').Length; n > 0 && !rebuild; n--)
-                rebuild = !_combatLogText.RemoveParagraph(0, true);
-        }
-        if (_combatLogText != null)
-        {
-            if (rebuild) _combatLogText.Text = string.Join("\n", _combatLogLines);
+            bool rebuild = false;
+            foreach (string dropped in _combatLogDropped)
+                for (int n = dropped.Split('\n').Length; n > 0 && !rebuild; n--)
+                    rebuild = !_combatLogText.RemoveParagraph(0, true);
+            if (rebuild) _combatLogText.Text = string.Join("\n", _combatLog.ShownLines);
             else
             {
-                if (_combatLogLines.Count > 1) _combatLogText.AppendText("\n");
+                if (_combatLog.ShownLines.Count > 1) _combatLogText.AppendText("\n");
                 _combatLogText.AppendText(line);
             }
         }
-        PluginLogAdd(kind is CombatLogKind.Resource or CombatLogKind.Spent or CombatLogKind.Experience or CombatLogKind.National
-                ? LibreKO.Plugins.GameLogKind.Item : LibreKO.Plugins.GameLogKind.Status,
-            message, new Color("#" + color));
+        PluginLogAdd(tab switch
+        {
+            LogTab.State => LibreKO.Plugins.GameLogKind.Status,
+            LogTab.Item => LibreKO.Plugins.GameLogKind.Item,
+            _ => LibreKO.Plugins.GameLogKind.System,
+        }, message, new Color("#" + color));
     }
 
     private void CombatNotice(string message) => CombatNotice(message, null);

@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO.Plugins;
 
@@ -94,6 +95,8 @@ public interface IGameCharacter
     int Ac { get; }
     int Np { get; }
     int Manner { get; }
+    bool NoahKnight { get; }
+    int MailUnread { get; }
 
     int Resist(int index);
     void AllocateStat(int statRow);
@@ -142,6 +145,8 @@ public enum TargetHpLook
     Undead,
 }
 
+public readonly record struct GameTargetDrop(Texture2D? Icon, string Line);
+
 public interface IGameTarget
 {
     bool Has { get; }
@@ -159,6 +164,7 @@ public interface IGameTarget
     int ClanId => 0;
     string ClanName => "";
     GameDropTable? Drops => null;
+    IReadOnlyList<GameTargetDrop> QuestDrops => Array.Empty<GameTargetDrop>();
 
     void Clear();
     void RequestDrops()
@@ -174,16 +180,24 @@ public interface IGameWindows
     void Open(string id);
     void Close(string id);
     void Toggle(string id);
+    Rect2 TopRightRow { get; }
+    event Action? TopRightRowMoved;
+    int UiAlpha => Config.UiAlpha;
+    void SetUiAlpha(int alpha) => Config.SetUiAlpha(alpha);
 }
+
+public readonly record struct GameChatLine(string BbCode, ChatCategory Category);
 
 public interface IGameChat
 {
     IReadOnlyList<string> History { get; }
+    IReadOnlyList<GameChatLine> Lines { get; }
 
     void Send(string text);
     void SetTyping(bool typing);
 
     event Action<string>? LineAdded;
+    event Action<GameChatLine>? LineArrived;
     event Action? InputRequested;
 }
 
@@ -219,6 +233,9 @@ public interface IGameCommands
     void GoTown();
     void ToggleSit();
     void TradeWithTarget();
+    void InviteTarget();
+    void ShowExitMenu();
+    void Run(KeyAction action);
 }
 
 public interface IGameMap
@@ -231,6 +248,15 @@ public interface IGameMap
     float WorldExtent { get; }
     Texture2D? MapTexture { get; }
     IReadOnlyList<MiniMap.Blip> Blips { get; }
+    int NpcKind { get; }
+
+    IReadOnlyList<byte> MonumentOwners => Array.Empty<byte>();
+    bool WantedUiOn => false;
+
+    bool NpcKindPresent(int kind);
+    void ToggleWantedUi() { }
+    void ShowWantedList() { }
+    void PickNpcKind(int kind);
 
     event Action? Changed;
 }
@@ -399,6 +425,13 @@ public sealed partial class PluginGame
         _vendor.Source = null;
         _warehouse.Source = null;
         _vipVault.Source = null;
+        _attendance.Source = null;
+        _userInfo.Source = null;
+        _repurchase.Source = null;
+        _userVote.Source = null;
+        _equipView.Source = null;
+        _capeShop.Source = null;
+        _genie.Source = null;
         DetachSocial();
         DetachAppearance();
         _friends.Source = null;
@@ -448,9 +481,10 @@ public sealed partial class PluginGame
     internal void RaiseHotbar() => _hotbar.Raise();
     internal void RaiseHotbarReady(IReadOnlyList<int> skillIds) => _hotbar.RaiseReady(skillIds);
     internal void RaiseMap() => _map.Raise();
+    internal void RaiseTopRightRow() => _windows.RaiseRow();
     internal void RaiseQuests() => _quests.Raise();
     internal void RaiseSkills() => _skills.Raise();
-    internal void RaiseChatLine(string bbcode) => _chat.RaiseLine(bbcode);
+    internal void RaiseChatLine(GameChatLine line) => _chat.RaiseLine(line);
     internal void RaiseChatInputRequested() => _chat.RaiseInputRequested();
     internal void RaiseLogLine(GameLogLine line) => _log.RaiseLine(line);
 
@@ -488,6 +522,8 @@ public sealed partial class PluginGame
         public int Ac => Source?.Ac ?? 0;
         public int Np => Source?.Np ?? 0;
         public int Manner => Source?.Manner ?? 0;
+        public bool NoahKnight => Source?.NoahKnight ?? false;
+        public int MailUnread => Source?.MailUnread ?? 0;
         public int Resist(int index) => Source?.Resist(index) ?? 0;
         public void AllocateStat(int statRow) => Source?.AllocateStat(statRow);
         public int Sp => Source?.Sp ?? 0;
@@ -541,6 +577,7 @@ public sealed partial class PluginGame
         public int ClanId => Source?.ClanId ?? 0;
         public string ClanName => Source?.ClanName ?? "";
         public GameDropTable? Drops => Source?.Drops;
+        public IReadOnlyList<GameTargetDrop> QuestDrops => Source?.QuestDrops ?? Array.Empty<GameTargetDrop>();
         public void Clear() => Source?.Clear();
         public void RequestDrops() => Source?.RequestDrops();
     }
@@ -553,17 +590,28 @@ public sealed partial class PluginGame
         public void Open(string id) => Source?.Open(id);
         public void Close(string id) => Source?.Close(id);
         public void Toggle(string id) => Source?.Toggle(id);
+        public int UiAlpha => Config.UiAlpha;
+        public void SetUiAlpha(int alpha) => Config.SetUiAlpha(alpha);
+        public Rect2 TopRightRow => Source?.TopRightRow ?? default;
+        public event Action? TopRightRowMoved;
+        internal void RaiseRow() => TopRightRowMoved?.Invoke();
     }
 
     private sealed class ChatProxy : IGameChat
     {
         public IGameChat? Source;
         public event Action<string>? LineAdded;
+        public event Action<GameChatLine>? LineArrived;
         public event Action? InputRequested;
-        internal void RaiseLine(string bbcode) => LineAdded?.Invoke(bbcode);
+        internal void RaiseLine(GameChatLine line)
+        {
+            LineAdded?.Invoke(line.BbCode);
+            LineArrived?.Invoke(line);
+        }
         internal void RaiseInputRequested() => InputRequested?.Invoke();
 
         public IReadOnlyList<string> History => Source?.History ?? Array.Empty<string>();
+        public IReadOnlyList<GameChatLine> Lines => Source?.Lines ?? Array.Empty<GameChatLine>();
         public void Send(string text) => Source?.Send(text);
         public void SetTyping(bool typing) => Source?.SetTyping(typing);
     }
@@ -601,6 +649,9 @@ public sealed partial class PluginGame
         public void GoTown() => Source?.GoTown();
         public void ToggleSit() => Source?.ToggleSit();
         public void TradeWithTarget() => Source?.TradeWithTarget();
+        public void InviteTarget() => Source?.InviteTarget();
+        public void ShowExitMenu() => Source?.ShowExitMenu();
+        public void Run(KeyAction action) => Source?.Run(action);
     }
 
     private sealed class MapProxy : IGameMap
@@ -617,6 +668,13 @@ public sealed partial class PluginGame
         public float WorldExtent => Source?.WorldExtent ?? 0f;
         public Texture2D? MapTexture => Source?.MapTexture;
         public IReadOnlyList<MiniMap.Blip> Blips => Source?.Blips ?? Array.Empty<MiniMap.Blip>();
+        public int NpcKind => Source?.NpcKind ?? 0;
+        public IReadOnlyList<byte> MonumentOwners => Source?.MonumentOwners ?? Array.Empty<byte>();
+        public bool WantedUiOn => Source?.WantedUiOn ?? false;
+        public bool NpcKindPresent(int kind) => Source?.NpcKindPresent(kind) ?? false;
+        public void PickNpcKind(int kind) => Source?.PickNpcKind(kind);
+        public void ToggleWantedUi() => Source?.ToggleWantedUi();
+        public void ShowWantedList() => Source?.ShowWantedList();
     }
 
     private sealed class LogProxy : IGameLog

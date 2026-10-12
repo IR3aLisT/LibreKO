@@ -187,6 +187,12 @@ public class CombatRewardService(
 
     private async Task AwardKillExpAsync(UserSession player, long exp)
     {
+        int times = JackpotRules.Roll(player, settings.Value.Jackpot.ExpRates);
+        if (times > JackpotRules.None)
+        {
+            exp *= times;
+            await sessionManager.Regions.SendToRegion(player, ExperiencePacketWriter.Jackpot(player.CharacterId, times), excludeSender: false);
+        }
         if (!await expSeal.TrySealAsync(player, exp))
             await playerProgressionService.AwardExperienceAsync(player, exp);
     }

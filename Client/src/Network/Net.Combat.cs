@@ -19,11 +19,18 @@ public partial class Net
         int maxHp = p.ReadInt();
         int hp = p.ReadInt();
         int damage = p.RemainingBytes >= 4 ? p.ReadInt() : 0;
+        if (p.RemainingBytes >= 4) p.ReadInt();
+        var drops = TargetQuestDrop.ReadList(p);
         if (echo == TargetHpPollEcho)
+        {
             EntityHpSyncEvent?.Invoke(id, hp, maxHp);
+            TargetQuestDropsEvent?.Invoke(id, drops);
+        }
         else
             EntityHpEvent?.Invoke(id, hp, maxHp, damage);
     }
+
+    public event System.Action<int, System.Collections.Generic.IReadOnlyList<TargetQuestDrop>>? TargetQuestDropsEvent;
 
     private const byte AttackChainedFlag = 1;
 

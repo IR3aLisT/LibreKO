@@ -1,6 +1,7 @@
 ﻿using Godot;
 using LibreKO.Domain;
 using LibreKO.Network;
+using LibreKO.Plugins;
 
 namespace LibreKO;
 
@@ -65,6 +66,7 @@ public partial class World
         BuildAttendancePanel();
         Net.I.AttendanceBoardEvent += OnAttendanceBoard;
         Net.I.AttendanceFailedEvent += OnAttendanceFailed;
+        PluginHost.Game.AttachAttendance(new PluginAttendanceBridge(this));
         Net.I.SendAttendanceBoardRequest();
     }
 
@@ -137,6 +139,7 @@ public partial class World
     {
         _attendancePanel.Visible = true;
         _attendanceShown = true;
+        PluginNotifyAttendance();
         CenterAttendancePanel();
         Callable.From(CenterAttendancePanel).CallDeferred();
     }
@@ -242,6 +245,7 @@ public partial class World
         if (!_attendanceShown) return;
         _attendanceShown = false;
         _attendancePanel.Visible = false;
+        PluginNotifyAttendance();
     }
 
     private void OnAttendanceBoard(int[] slots, byte[] states)
@@ -318,6 +322,7 @@ public partial class World
 
         _attendanceCountLabel.Text = ItemData.Text(TextAttendanceCount, "Currently attended %d times")
             .Replace("%d", attended.ToString());
+        PluginNotifyAttendance();
     }
 
     private int ClaimableAttendanceCount()

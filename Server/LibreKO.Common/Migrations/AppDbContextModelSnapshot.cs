@@ -223,6 +223,13 @@ namespace LibreKO.Common.Migrations
                     b.Property<short>("Bind")
                         .HasColumnType("smallint");
 
+                    b.Property<string>("ClanMemo")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasDefaultValue("");
+
                     b.Property<short>("Class")
                         .HasColumnType("smallint");
 
@@ -287,6 +294,12 @@ namespace LibreKO.Common.Migrations
                     b.Property<byte[]>("Items")
                         .IsRequired()
                         .HasColumnType("longblob");
+
+                    b.Property<DateTime?>("JuraidWarnedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<short>("JuraidWarnings")
+                        .HasColumnType("smallint");
 
                     b.Property<short>("KnightsId")
                         .HasColumnType("smallint");
@@ -360,6 +373,10 @@ namespace LibreKO.Common.Migrations
                     b.Property<short>("RebirthLevel")
                         .HasColumnType("smallint");
 
+                    b.Property<byte[]>("RepurchaseItems")
+                        .IsRequired()
+                        .HasColumnType("longblob");
+
                     b.Property<byte[]>("SavedMagic")
                         .IsRequired()
                         .HasColumnType("longblob");
@@ -410,6 +427,64 @@ namespace LibreKO.Common.Migrations
                         .IsUnique();
 
                     b.ToTable("Characters", (string)null);
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.ChatRoomMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<int>("NoteDurationMs")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NoteSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<int>("NoteSizeBytes")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NoteStoragePath")
+                        .HasMaxLength(128)
+                        .HasColumnType("varchar(128)");
+
+                    b.Property<byte[]>("NoteWaveform")
+                        .HasMaxLength(64)
+                        .HasColumnType("varbinary(64)");
+
+                    b.Property<string>("RoomKey")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("varchar(40)");
+
+                    b.Property<int>("SenderCharacterId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SenderName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(256)
+                        .HasColumnType("varchar(256)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("RoomKey", "Id");
+
+                    b.ToTable("ChatRoomMessages");
                 });
 
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.DailyRankCounter", b =>
@@ -1789,6 +1864,12 @@ namespace LibreKO.Common.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<byte>("Ranking")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<byte>("Ticket")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<byte>("Type")
                         .HasColumnType("tinyint unsigned");
 
                     b.HasKey("CapeIndex");

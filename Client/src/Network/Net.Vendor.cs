@@ -7,6 +7,7 @@ public enum ItemTradeResult : byte
     Refused = 0,
     Traded = 1,
     Moved = 3,
+    Repurchase = 5,
 }
 
 public partial class Net
@@ -16,6 +17,7 @@ public partial class Net
     public event Action<bool, int, int, int>? ItemTradeResultEvent;
 
     public event Action? ItemTradeMovedEvent;
+    public event Action<RepurchaseReply>? RepurchaseEvent;
 
     private void HandleTradeNpc(Packet p)
     {
@@ -54,7 +56,29 @@ public partial class Net
             case ItemTradeResult.Moved:
                 ItemTradeMovedEvent?.Invoke();
                 break;
+            case ItemTradeResult.Repurchase:
+                RepurchaseEvent?.Invoke(RepurchaseReply.Read(p));
+                break;
         }
+    }
+
+    public void SendRepurchase(byte op)
+    {
+        var p = new Packet(GameOpcodes.GS_ITEM_TRADE);
+        p.WriteByte((byte)ItemTradeResult.Repurchase);
+        p.WriteByte(op);
+        _conn.Send(p);
+    }
+
+    public void SendRepurchaseBuy(byte row, int itemId, int npcId)
+    {
+        var p = new Packet(GameOpcodes.GS_ITEM_TRADE);
+        p.WriteByte((byte)ItemTradeResult.Repurchase);
+        p.WriteByte(RepurchaseReply.Buy);
+        p.WriteByte(row);
+        p.WriteInt(itemId);
+        p.WriteInt(npcId);
+        _conn.Send(p);
     }
 
     public void SendVendorBuy(int sellingGroup, int npcId, int itemId, byte destPos, ushort count,

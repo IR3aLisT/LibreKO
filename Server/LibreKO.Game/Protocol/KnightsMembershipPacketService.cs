@@ -101,6 +101,7 @@ public class KnightsMembershipPacketService(
         await knightsRuntimeService.SyncCharacterAsync(knightsRepo, session, includeMoney: true);
 
         sessionManager.Knights.AddClan(clan.Id, clan);
+        await knightsRuntimeService.RefreshClanBonusAsync(clan.Id);
 
         var response = KnightsPacketWriter.ClanCreated(
             session.CharacterId, clan.Id, clanName, clan.Grade, clan.Ranking, session.Money);
@@ -224,6 +225,7 @@ public class KnightsMembershipPacketService(
         }
 
         await clanStanding.RefreshClanAsync(clan.Id);
+        await knightsRuntimeService.RefreshClanBonusAsync(clan.Id);
 
         var allianceId = sessionManager.Knights.GetAllianceForClan(clan.Id)?.MainClanId ?? 0;
         var joined = KnightsPacketWriter.JoinAccepted(new KnightsPacketWriter.JoinedState(

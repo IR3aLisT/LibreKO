@@ -11,7 +11,12 @@ public partial class Net
         KnMarkRegister = 0x1A, KnCapeNpc = 0x1B, KnMarkReq = 0x23, KnAllyCreate = 0x1C, KnAllyReq = 0x1D, KnAllyInsert = 0x1E, KnAllyRemove = 0x1F,
         KnAllyPunish = 0x20, KnAllyList = 0x22, KnUpdate = 0x24, KnMemberOnline = 0x27, KnMemberOffline = 0x28,
         KnPointReq = 0x3B, KnPointMethod = 0x3C, KnDonate = 0x3D, KnHandoverList = 0x3E, KnHandoverReq = 0x3F,
-        KnDonationList = 0x40, KnNotice = 0x50, KnNoticeResult = 0x51, KnTop10 = 0x63, KnLeaderPoints = 0x64;
+        KnDonationList = 0x40, KnNotice = 0x50, KnNoticeResult = 0x51, KnClanBonus = 0x62, KnTop10 = 0x63, KnLeaderPoints = 0x64, KnMemo = 0x58;
+    public event Action<byte, string>? ClanMemoEvent;
+
+    public const int NoClanBonus = -1;
+    public int ClanOnlineCount { get; private set; } = NoClanBonus;
+    public event System.Action<int>? ClanBonusEvent;
 
     public const byte KnResultOk = 1;
     public const byte KnDeclined = 11;
@@ -166,6 +171,13 @@ public partial class Net
             case KnClanAdvert: HandleClanKindResult(p, ClanAdvertResultEvent); break;
             case KnClanPromote: HandleClanPromote(p); break;
             case KnWishBoard: HandleWishBoard(p); break;
+            case KnClanBonus:
+            {
+                bool ok = p.RemainingBytes >= 1 && p.ReadByte() == KnResultOk;
+                ClanOnlineCount = ok && p.RemainingBytes >= 1 ? p.ReadByte() : NoClanBonus;
+                ClanBonusEvent?.Invoke(ClanOnlineCount);
+                break;
+            }
             case KnClanBattle: HandleClanBattleResult(p); break;
             case KnClanBattleBegun: HandleClanBattleBegun(p); break;
             case KnClanBattleEnd: HandleClanBattleEnd(p); break;
@@ -535,6 +547,9 @@ public partial class Net
             case KnNoticeResult:
                 ClanNoticeRefusedEvent?.Invoke(p.RemainingBytes >= 1 ? p.ReadByte() : 0);
                 break;
+            case KnMemo:
+                if (ClanMemoReply.Read(p) is { } memo) ClanMemoEvent?.Invoke(memo.Result, memo.Memo);
+                break;
             case KnTop10:
             {
                 if (p.RemainingBytes >= 2) p.ReadShort();
@@ -600,6 +615,15 @@ public partial class Net
     public void SendClanPromoteOfficer(string name) => SendKnightsString(KnOfficer, name);
     public void SendClanHandover(string name) => SendKnightsString(KnHandoverReq, name);
     public void SendClanNotice(string notice) => SendKnightsString(KnNotice, notice);
+
+    public void SendClanMemo(string memo)
+    {
+        var p = new Packet(GameOpcodes.GS_KNIGHTS_PROCESS);
+        p.WriteByte(KnMemo);
+        p.WriteByte(Domain.ClanMemo.WriteKind);
+        p.WriteString(memo);
+        _conn.Send(p);
+    }
 
     public void SendClanInvite(int charId)
     {

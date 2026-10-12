@@ -9,6 +9,7 @@ public partial class World
 {
     private const string GenieSubId = "genie_sub";
     private const int GenieSubRows = 3;
+    private const int GenieSubLastRow = GenieSubRows - 1;
     private const int GeniePointsPerSpirit = 120;
     private const double GenieToggleCooldown = 10.0;
     private const float GenieSubWidth = 189f;
@@ -18,16 +19,20 @@ public partial class World
     private const int GenieTitleText = 31016;
     private const float GenieSubMargin = 12f;
 
+    private CanvasLayer _genieSubLayer = null!;
     private PanelContainer? _genieSub;
     private Button _genieSubToggle = null!;
     private ProgressBar _genieSubBar = null!;
     private Label _genieSubPoints = null!;
-    private readonly List<(CheckBox On, Label Name, Button Action)> _genieSubRows = new();
+    private readonly List<(CheckBox On, Label Name, Button? Action)> _genieSubRows = new();
     private int _geniePoints;
     private double _genieToggledAt = double.NegativeInfinity;
 
     private void GenieSubInit()
     {
+        _genieSubLayer = new CanvasLayer { Layer = _genieLayer.Layer };
+        AddChild(_genieSubLayer);
+        PluginHudSeam(_genieSubLayer, LibreKO.Plugins.HudPart.GenieSub);
         _genieSub = new PanelContainer
         {
             CustomMinimumSize = new Vector2(GenieSubWidth, 0),
@@ -35,7 +40,7 @@ public partial class World
             MouseFilter = Control.MouseFilterEnum.Stop,
         };
         _genieSub.AddThemeStyleboxOverride("panel", UiTheme.Panel(6, true));
-        _genieLayer.AddChild(_genieSub);
+        _genieSubLayer.AddChild(_genieSub);
 
         var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 3);
@@ -82,10 +87,14 @@ public partial class World
             name.ClipText = true;
             name.VerticalAlignment = VerticalAlignment.Center;
             row.AddChild(name);
-            var action = new Button { FocusMode = Control.FocusModeEnum.None, CustomMinimumSize = new Vector2(22, 0) };
-            action.AddThemeFontSizeOverride("font_size", 11);
-            action.Pressed += () => GenieSubRowAction(index);
-            row.AddChild(action);
+            Button? action = null;
+            if (index < GenieSubLastRow)
+            {
+                action = new Button { FocusMode = Control.FocusModeEnum.None, CustomMinimumSize = new Vector2(22, 0) };
+                action.AddThemeFontSizeOverride("font_size", 11);
+                action.Pressed += () => GenieSubRowAction(index);
+                row.AddChild(action);
+            }
             _genieSubRows.Add((on, name, action));
         }
 
@@ -115,6 +124,13 @@ public partial class World
     private void ToggleGenieSubRow(int index, bool on)
     {
         var targets = GenieTargetsInOrder();
+        if (index == GenieSubLastRow)
+        {
+            if (on && targets.Count == GenieSubLastRow) AddGenieTarget();
+            else if (!on && index < targets.Count) RemoveGenieTarget(targets[index]);
+            RefreshGenieSub();
+            return;
+        }
         if (index < targets.Count) SetGenieTargetOn(targets[index], on);
     }
 
@@ -129,6 +145,7 @@ public partial class World
     private void RefreshGenieSub()
     {
         if (_genieSub == null || !IsInstanceValid(_genieSub)) return;
+        PluginNotifyGenie();
         _genieSub.Visible = _geniePoints > 0 || Net.I.GenieRunning;
         bool running = Net.I.GenieRunning;
         _genieSubToggle.Text = running ? "Stop" : "Start";
@@ -142,6 +159,13 @@ public partial class World
             var (on, name, action) = _genieSubRows[i];
             bool filled = i < targets.Count;
             name.Text = filled ? targets[i] : "";
+            if (action == null)
+            {
+                on.Disabled = targets.Count < GenieSubLastRow;
+                on.SetPressedNoSignal(filled);
+                on.TooltipText = filled ? "Return" : "Add the selected monster";
+                continue;
+            }
             on.Disabled = !filled;
             on.SetPressedNoSignal(filled && !_genieMonstersOff.Contains(targets[i]));
             action.Text = filled ? "−" : "+";

@@ -49,6 +49,7 @@ public partial class Audio : Node
         AddChild(_ambience);
         ApplyVolumes();
         Config.AudioChanged += ApplyVolumes;
+        VoiceChat.Ensure(this);
     }
 
     public override void _ExitTree()
@@ -57,11 +58,23 @@ public partial class Audio : Node
         if (I == this) I = null;
     }
 
+    public const string QuietMeta = "ui_quiet";
+
     public static void HookButton(BaseButton b)
     {
         if (b.HasMeta("uiclick")) return;
         b.SetMeta("uiclick", true);
-        b.Pressed += () => PlayUi(b is CheckBox or CheckButton ? Sfx.CheckboxClick : Sfx.UiButton);
+        b.Pressed += () =>
+        {
+            if (!IsQuiet(b)) PlayUi(b is CheckBox or CheckButton ? Sfx.CheckboxClick : Sfx.UiButton);
+        };
+    }
+
+    private static bool IsQuiet(Node node)
+    {
+        for (Node? n = node; n != null; n = n.GetParent())
+            if (n.HasMeta(QuietMeta)) return true;
+        return false;
     }
 
     public static void ApplyVolumes()
@@ -85,17 +98,19 @@ public partial class Audio : Node
         if (!SoundCatalog.TryGet(soundId, out var e)) return;
         if (e.Type == SoundCatalog.Kind.Stream) { Bgm(soundId); return; }
         if (e.Type == SoundCatalog.Kind.TwoD) { I.Play2DInternal(soundId, e, BusSfx); return; }
-        I.Play3DInternal(soundId, e, pos);
+        I.Play3DInternal(soundId, e, pos, e.Instances);
     }
 
-    public static void PlayOwned(int soundId, Vector3 pos, ulong owner, SoundOwnerKind kind)
+    private const int SingleCopy = 1;
+
+    public static void PlayOwned(int soundId, Vector3 pos, ulong owner, SoundOwnerKind kind, bool single = false)
     {
         if (Perf.SkipAudio) return;
         if (I == null || !Config.AudioEnabled) return;
         if (!SoundCatalog.TryGet(soundId, out var e)) return;
         if (e.Type != SoundCatalog.Kind.ThreeD) { Play(soundId, pos); return; }
         I.StopOwned(owner, kind);
-        if (I.Play3DInternal(soundId, e, pos) is { } player)
+        if (I.Play3DInternal(soundId, e, pos, single ? SingleCopy : e.Instances) is { } player)
         {
             if (I._owned.Count >= OwnedPruneAt) I.PruneOwned();
             I._owned[(owner, kind)] = player;
@@ -231,12 +246,12 @@ public partial class Audio : Node
         _fade = 0f;
     }
 
-    private AudioStreamPlayer3D? Play3DInternal(int soundId, SoundCatalog.Entry e, Vector3 pos)
+    private AudioStreamPlayer3D? Play3DInternal(int soundId, SoundCatalog.Entry e, Vector3 pos, int instances)
     {
         if (_listener != null && GodotObject.IsInstanceValid(_listener)
             && _listener.GlobalPosition.DistanceSquaredTo(pos) > MaxAudible * MaxAudible)
             return null;
-        if (!Reserve(soundId, e.Instances)) return null;
+        if (!Reserve(soundId, instances)) return null;
         var p = Take3D();
         if (p == null) { Release(soundId); return null; }
         var stream = Stream(e.File, looping: false);

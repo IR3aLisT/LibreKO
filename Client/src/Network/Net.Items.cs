@@ -31,7 +31,7 @@ public partial class Net
             if (ok) ApplyPendingItemMove();
             else _pendingItemMove = null;
             ItemMoveResultEvent?.Invoke(ok);
-            if (ok && TryReadItemStats(p, out var stats))
+            if (ok && ItemStatsBlock.TryRead(p, out var stats))
             {
                 ApplyLastStats(stats);
                 ItemStatsEvent?.Invoke(stats);
@@ -196,41 +196,16 @@ public partial class Net
     {
         if (GoldChangeReply.Read(p) is not { } reply) return;
         GoldChangeLogEvent?.Invoke(reply);
-        GoldChangeEvent?.Invoke(reply.Total);
+        if (reply.ChangesBalance) GoldChangeEvent?.Invoke(reply.Total);
     }
 
     private void HandleExpChange(Packet p)
     {
         if (p.RemainingBytes < 1) return;
         byte sub = p.ReadByte();
-        if (sub == 4 && p.RemainingBytes >= 8) ExpChangeEvent?.Invoke(p.ReadLong());
+        if (sub == Domain.Jackpot.ExpSub && p.RemainingBytes >= 6) ExpJackpotEvent?.Invoke(p.ReadInt(), p.ReadUShort());
+        else if (sub == 4 && p.RemainingBytes >= 8) ExpChangeEvent?.Invoke(p.ReadLong());
         else if (sub == 5 && p.RemainingBytes >= 8) DeathExpLossEvent?.Invoke(p.ReadLong());
-    }
-
-    private static bool TryReadItemStats(Packet p, out DerivedStats stats)
-    {
-        stats = new DerivedStats();
-        if (p.RemainingBytes < 34)
-            return false;
-
-        stats.TotalHit = p.ReadShort();
-        stats.TotalAc = p.ReadShort();
-        stats.MaxWeight = p.ReadInt();
-        p.ReadByte(); p.ReadByte();
-        stats.MaxHp = p.ReadShort();
-        stats.MaxMp = p.ReadShort();
-        stats.StrBonus = p.ReadShort();
-        stats.StaBonus = p.ReadShort();
-        stats.DexBonus = p.ReadShort();
-        stats.IntBonus = p.ReadShort();
-        stats.ChaBonus = p.ReadShort();
-        stats.FireR = p.ReadShort();
-        stats.ColdR = p.ReadShort();
-        stats.LightningR = p.ReadShort();
-        stats.MagicR = p.ReadShort();
-        stats.DiseaseR = p.ReadShort();
-        stats.PoisonR = p.ReadShort();
-        return true;
     }
 
     private void ApplyPendingItemMove()
@@ -267,6 +242,7 @@ public partial class Net
     {
         Vitals.ApplyMaxima(stats.MaxHp, stats.MaxMp);
         Sheet.ApplyDerived(stats);
+        HealStrikesEnemies = stats.HealStrikesEnemies;
     }
 
     private void ApplyLastInventoryGridRefresh(ItemSlot[] items)

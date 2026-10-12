@@ -14,6 +14,7 @@ public partial class World
     private void PremiumInit()
     {
         BuildPremiumChip();
+        BuildClanBonusChip();
         Net.I.PremiumEvent += OnPremiumStatus;
         Net.I.LevelChangeEvent += OnPremiumLevelChange;
 
@@ -21,8 +22,54 @@ public partial class World
         Net.I.SendPremiumRequest();
     }
 
+    private const float ClanBonusChipGap = 4f;
+    private PanelContainer _clanBonusChip = null!;
+    private Label _clanBonusMarks = null!;
+
+    private void BuildClanBonusChip()
+    {
+        _clanBonusChip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Stop, Visible = false };
+        _clanBonusChip.AddThemeStyleboxOverride("panel", UiTheme.Chip());
+        _premiumLayer.AddChild(_clanBonusChip);
+        var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        row.AddThemeConstantOverride("separation", 7);
+        _clanBonusChip.AddChild(row);
+        var title = UiTheme.Text("Clan", 12, UiTheme.TextLo);
+        title.MouseFilter = Control.MouseFilterEnum.Ignore;
+        row.AddChild(title);
+        _clanBonusMarks = UiTheme.Text("", 12, UiTheme.GoldBright);
+        _clanBonusMarks.MouseFilter = Control.MouseFilterEnum.Ignore;
+        row.AddChild(_clanBonusMarks);
+        Net.I.ClanBonusEvent += OnClanBonus;
+        OnClanBonus(Net.I.ClanOnlineCount);
+    }
+
+    private void OnClanBonus(int online)
+    {
+        if (!IsInstanceValid(_clanBonusChip)) return;
+        bool shown = online != Net.NoClanBonus && MyClan.InClan;
+        _clanBonusChip.Visible = shown;
+        if (!shown) return;
+        _clanBonusMarks.Text = ClanBonusCard.Marks(online,
+            ItemData.Text(ClanBonusCard.OnText, ClanBonusCard.OnFallback),
+            ItemData.Text(ClanBonusCard.OffText, ClanBonusCard.OffFallback));
+        _clanBonusChip.TooltipText = ClanBonusCard.Tooltip(online,
+            ItemData.Text(ClanBonusCard.NeedText, ClanBonusCard.NeedFallback),
+            ItemData.Text(ClanBonusCard.BonusText, ClanBonusCard.BonusFallback));
+        PinClanBonusChip();
+    }
+
+    private void PinClanBonusChip()
+    {
+        if (!IsInstanceValid(_clanBonusChip) || !IsInstanceValid(_premiumChip)) return;
+        float below = _premiumChip.Size.Y + ClanBonusChipGap;
+        HudAnchor.Pin(_clanBonusChip, HudAnchor.Spot.TopRight,
+            new Vector2(MiniMapRightSpan() + StatusHudGap, HudAnchor.Edge + below));
+    }
+
     private void PremiumDispose()
     {
+        Net.I.ClanBonusEvent -= OnClanBonus;
         Net.I.PremiumEvent -= OnPremiumStatus;
         Net.I.LevelChangeEvent -= OnPremiumLevelChange;
     }
@@ -74,6 +121,7 @@ public partial class World
     private void OnPremiumStatus(int accountStatus, int premiumType, int remainingHours)
     {
         bool active = accountStatus != 0 && remainingHours > 0;
+        RefreshPremiumSeller();
         if (!active)
         {
             _premiumLabel.Text = "No Premium";
@@ -83,20 +131,18 @@ public partial class World
             return;
         }
 
-        string prefix = accountStatus == PcRoomStatus ? "PC Room" : PremiumNames.Of(premiumType);
-        string timeLeft = FormatPremiumTime(remainingHours);
-        _premiumLabel.Text = $"{prefix}: {timeLeft}";
-        _premiumChip.TooltipText = PremiumBonus.Tooltip(prefix, timeLeft, Net.I.PremiumBonuses);
+        string name = accountStatus == PcRoomStatus ? "PC Room" : PremiumTitle(premiumType);
+        var (timeText, timeFallback, timeValue) = PremiumNames.TimeLeft(remainingHours);
+        string timeLine = ItemData.Text(timeText, timeFallback).Replace("%d", timeValue.ToString());
+        _premiumLabel.Text = name;
+        _premiumChip.TooltipText = PremiumBonus.Tooltip(name, timeLine, Net.I.PremiumBonuses);
         _premiumLabel.AddThemeColorOverride("font_color", UiTheme.GoldBright);
         SetPremiumDot(UiTheme.Gold);
     }
 
-    private static string FormatPremiumTime(int hours)
+    private static string PremiumTitle(int type)
     {
-        if (hours <= 0) return "<1h";
-        if (hours < 24) return $"{hours}h";
-        int days = hours / 24;
-        int rem = hours % 24;
-        return rem > 0 ? $"{days}d {rem}h" : $"{days}d";
+        string premium = ItemData.Text(PremiumNames.PremiumText, PremiumNames.PremiumFallback);
+        return PremiumNames.Name(type) is { } name ? $"{ItemData.Text(name.Text, name.Fallback)} {premium}" : premium;
     }
 }

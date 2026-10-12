@@ -19,6 +19,7 @@ public interface IKnightsRuntimeService
     Task SendClanUpdateAsync(KnightsEntity clan);
     Task NotifyMemberOnlineAsync(UserSession session);
     Task NotifyMemberOfflineAsync(UserSession session);
+    Task RefreshClanBonusAsync(short clanId, UserSession? leaving = null);
 }
 
 public class KnightsRuntimeService(SessionManager sessionManager) : IKnightsRuntimeService
@@ -35,6 +36,12 @@ public class KnightsRuntimeService(SessionManager sessionManager) : IKnightsRunt
 
     public void ClearClanState(UserSession session)
     {
+        short oldClan = session.KnightsId;
+        if (oldClan > 0)
+        {
+            session.ClanOnlineCount = 0;
+            _ = ClearClanBonusAsync(session, oldClan);
+        }
         session.KnightsId = 0;
         session.KnightsFame = 0;
         session.KnightsName = string.Empty;
@@ -92,15 +99,55 @@ public class KnightsRuntimeService(SessionManager sessionManager) : IKnightsRunt
         NotifyOnlineClanMembersAsync(clan.Id, KnightsPacketWriter.ClanUpdate(
             clan.Id, clan.Flag, clan.Cape, clan.CapeR, clan.CapeG, clan.CapeB, clan.ClanPointFund));
 
-    public Task NotifyMemberOnlineAsync(UserSession session) =>
-        session.KnightsId > 0
-            ? NotifyOthersAsync(session, KnightsPacketWriter.MemberOnline(session.Name))
-            : Task.CompletedTask;
+    public async Task NotifyMemberOnlineAsync(UserSession session)
+    {
+        if (session.KnightsId <= 0)
+            return;
+        await NotifyOthersAsync(session, KnightsPacketWriter.MemberOnline(session.Name));
+        await RefreshClanBonusAsync(session.KnightsId);
+    }
 
-    public Task NotifyMemberOfflineAsync(UserSession session) =>
-        session.KnightsId > 0
-            ? NotifyOthersAsync(session, KnightsPacketWriter.MemberOffline(session.Name))
-            : Task.CompletedTask;
+    public async Task NotifyMemberOfflineAsync(UserSession session)
+    {
+        if (session.KnightsId <= 0)
+            return;
+        await NotifyOthersAsync(session, KnightsPacketWriter.MemberOffline(session.Name));
+        await RefreshClanBonusAsync(session.KnightsId, session);
+    }
+
+    public async Task RefreshClanBonusAsync(short clanId, UserSession? leaving = null)
+    {
+        if (clanId <= 0)
+            return;
+
+        var members = sessionManager.GetAll()
+            .Where(m => m.KnightsId == clanId && m.CharacterId != leaving?.CharacterId)
+            .ToList();
+        var packet = KnightsPacketWriter.ClanBonus(members.Count);
+        foreach (var member in members)
+        {
+            member.ClanOnlineCount = members.Count;
+            try
+            {
+                await member.Client.SendPacket(packet);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private async Task ClearClanBonusAsync(UserSession session, short oldClan)
+    {
+        try
+        {
+            await session.Client.SendPacket(KnightsPacketWriter.ClanBonusCleared());
+        }
+        catch
+        {
+        }
+        await RefreshClanBonusAsync(oldClan, session);
+    }
 
     private async Task NotifyOthersAsync(UserSession session, Packet packet)
     {

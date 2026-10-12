@@ -20,11 +20,12 @@ public partial class World : Node3D
         Facet(BuildStatusHud);
         Facet(BuildBuffBar);
         Facet(BuildMiniMap);
+        Facet(BuildNpcFinder);
         Facet(BuildFullMap);
         Facet(BuildClockHud);
         Facet(BuildSelectionRing);
         Facet(BuildObjectHighlight);
-        Facet(BuildTargetHud);
+        Facet(BuildTargetHud, TargetQuestDropsDispose);
         if (Config.Development)
             Facet(BuildInfoPanel);
         Facet(BuildEscMenu);
@@ -106,6 +107,9 @@ public partial class World : Node3D
         Facet(ClanWarehouseInit, ClanWarehouseDispose);
         Facet(VipWarehouseInit, VipWarehouseDispose);
         Facet(PartyCommanderInit, PartyCommanderDispose);
+        Facet(UserVoteInit, UserVoteDispose);
+        Facet(UiOpacityInit, UiOpacityDispose);
+        Facet(() => NamePlate.RescaledEvent += OnNamePlatesRescaled, () => NamePlate.RescaledEvent -= OnNamePlatesRescaled);
         Facet(ClanBattleInit, ClanBattleDispose);
         Facet(ClanPremiumInit, ClanPremiumDispose);
         Facet(ObjectEventInit, ObjectEventDispose);
@@ -142,6 +146,7 @@ public partial class World : Node3D
         Facet(MessengerInit, MessengerDispose);
         Facet(ForcesInit, ForcesDispose);
         Facet(NationChatInit, NationChatDispose);
+        Facet(ChatRoomInit, ChatRoomDispose);
         Facet(KillSplashInit, KillSplashDispose);
         Facet(KrowazInit, KrowazDispose);
         Facet(ChatNoticesInit, ChatNoticesDispose);
@@ -171,6 +176,7 @@ public partial class World : Node3D
         Facet(ClanBoardInit, ClanBoardDispose);
         Facet(DailyRankInit, DailyRankDispose);
         Facet(TimedItemsInit);
+        Facet(RepurchaseInit, RepurchaseDispose);
         Facet(SoccerInit, SoccerDispose);
         Facet(ContinuanceInit, ContinuanceDispose);
         Facet(PetPlateInit);

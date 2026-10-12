@@ -67,6 +67,37 @@ public partial class World
 
     private bool InSiegeLook => SiegeTower.InSiegeLook(LookOf(_selfTransformSkill));
 
+    private bool SiegeSkillAllowed(SkillData.Skill s)
+    {
+        var verdict = SiegeSkills.Check(s.Id, s.SelfAnim2, _selfTransformSkill != 0, LookOf(_selfTransformSkill), _onTower, _zone,
+            SiegeWar.OwnerSide(MyClan.InClan ? MyClan.ClanId : 0, MyClan.InClan ? MyClan.AllianceId : 0, _siegeShown),
+            SiegeTargetKind());
+        switch (verdict)
+        {
+            case SiegeSkills.Verdict.Failed:
+                CombatLogAdd(TextTemplate.Fill(SystemText(SiegeSkills.FailedText, "%s failed"), s.Name), CombatLogKind.Incoming);
+                return false;
+            case SiegeSkills.Verdict.ZoneRefused:
+                CombatNotice(SystemText(SiegeSkills.ZoneRefusedText, "It is not allowed in this zone."));
+                return false;
+            case SiegeSkills.Verdict.NotDefender:
+                CombatNotice(SystemText(SiegeSkills.NotDefenderText, "You cannot use Siege Member"));
+                return false;
+            default:
+                return true;
+        }
+    }
+
+    private SiegeSkills.TargetKind SiegeTargetKind()
+    {
+        if (_selectedId < 0 || _selectedId == _myId || !_ents.TryGetValue(_selectedId, out var e))
+            return SiegeSkills.TargetKind.None;
+        if (!e.IsNpc) return SiegeSkills.TargetKind.Player;
+        return e.Attackable && NpcTypes.IsStructure(e.NpcType)
+            ? SiegeSkills.TargetKind.HostileStructure
+            : SiegeSkills.TargetKind.OtherNpc;
+    }
+
     private int TowerModeFor(int id)
     {
         if (id < 0 || !_ents.TryGetValue(id, out var e) || e.Dead || _onTower) return TowerNoButton;

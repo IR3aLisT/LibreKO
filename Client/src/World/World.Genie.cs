@@ -40,10 +40,12 @@ public partial class World
         Net.I.GenieStatusEvent += OnGenieStatus;
         Net.I.GenieClaimEvent += OnGenieClaim;
         GenieSubInit();
+        PluginHost.Game.AttachGenie(new PluginGenieBridge(this));
     }
 
     private void GenieDispose()
     {
+        if (Net.I.Connected) SaveGenieIfEdited();
         AdvancedGenieDispose();
         Net.I.GenieStatusEvent -= OnGenieStatus;
         Net.I.GenieClaimEvent -= OnGenieClaim;
@@ -56,6 +58,8 @@ public partial class World
         RefreshGeniePotionSelectors();
         _geniePanel.Visible = true;
         _genieShown = true;
+        _genieShownBytes = _genie.ToBytes();
+        PluginNotifyGenie();
         Net.I.SendGenieStatus();
         Net.I.SendGenieSystem(Net.GenieLoadOptions);
     }
@@ -65,6 +69,8 @@ public partial class World
         if (!_genieShown) return;
         _genieShown = false;
         _geniePanel.Visible = false;
+        SaveGenieIfEdited();
+        PluginNotifyGenie();
     }
 
     private void OnGenieStatus(string tip, bool rewardAvail)

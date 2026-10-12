@@ -80,6 +80,7 @@ public partial class World : Node3D
     private ItemSlot _tipItem;
     private string _tipNote = "";
     private bool _tipCompareHeld;
+    private bool _tipShopGoods;
     private bool _tooltipCompareForced;
 
     private bool CompareKeyHeld() => _tooltipCompareForced || KeyBinds.Held(KeyAction.CompareItems);
@@ -108,12 +109,13 @@ public partial class World : Node3D
 
     public bool ItemTooltipVisible => _itemTipPanel is { Visible: true };
 
-    private void ShowItemTooltip(int absSlot, ItemSlot item, string note = "")
+    private void ShowItemTooltip(int absSlot, ItemSlot item, string note = "", bool shopGoods = false)
     {
         if (_itemTipPanel == null) return;
         _tipSlot = absSlot;
         _tipItem = item;
         _tipNote = note;
+        _tipShopGoods = shopGoods;
         _tipCompareHeld = CompareKeyHeld();
 
         int wornSlot = CompareTarget(absSlot, item);
@@ -165,6 +167,7 @@ public partial class World : Node3D
     {
         _hoverCell = null;
         _tipSlot = NoTooltipSlot;
+        _tipShopGoods = false;
         _itemTipPanel?.Close();
         _itemTipCompare?.Close();
     }
@@ -174,7 +177,7 @@ public partial class World : Node3D
         if (_itemTipPanel == null || !_itemTipPanel.Visible) return;
         if (_tipSlot != NoTooltipSlot && CompareKeyHeld() != _tipCompareHeld)
         {
-            ShowItemTooltip(_tipSlot, _tipItem, _tipNote);
+            ShowItemTooltip(_tipSlot, _tipItem, _tipNote, _tipShopGoods);
             return;
         }
         var vp = GetViewport();
@@ -265,9 +268,16 @@ public partial class World : Node3D
             lines.Add(TooltipLine.Rule());
         }
 
-        if (ItemData.IsSellable(item.ItemId))
+        if (_tipShopGoods && absSlot < 0)
+        {
+            long price = ShopTooltipPrice.Purchase(ItemData.BuyPrice(item.ItemId), def.SaleType,
+                Net.I.CurrentZoneAbility.Tariff, LoyaltyShop);
+            lines.Add(new TooltipLine(FormatMoneyText(ShopTooltipPrice.PurchasingPriceText, "Purchasing Price", price),
+                price > VendorWallet ? TooltipColorWorse : TooltipColorPlain));
+        }
+        else if (ItemData.IsSellable(item.ItemId))
             lines.Add(new TooltipLine(
-                FormatMoneyText(4552, "Selling Price", ItemData.SellPrice(item.ItemId)), TooltipColorPlain));
+                FormatMoneyText(ShopTooltipPrice.SellingPriceText, "Selling Price", ItemData.SellPrice(item.ItemId)), TooltipColorPlain));
 
         var other = compareWith is { IsEmpty: false } worn ? ItemData.Get(worn.ItemId) : null;
         var otherExt = other != null ? ItemData.ExtFor(compareWith!.Value.ItemId) : null;
@@ -671,8 +681,8 @@ public partial class World : Node3D
         AddCospreLine(lines, 4518, bonus.Dex);
         AddCospreLine(lines, 4520, bonus.Int);
         AddCospreLine(lines, 4517, bonus.Cha);
-        AddCospreLine(lines, CospreDamageToText(bonus.ApClass), bonus.ApClassPct);
-        AddCospreLine(lines, CospreDamageFromText(bonus.AcClass), bonus.AcClassPct);
+        AddCospreLine(lines, Domain.CospreDamageText.Dealt(bonus.ApClass), bonus.ApClassPct);
+        AddCospreLine(lines, Domain.CospreDamageText.Received(bonus.AcClass), bonus.AcClassPct);
         AddCospreLine(lines, 4610, bonus.MaxWeight / CospreWeightDivisor);
         AddCospreLine(lines, 4611, bonus.Np);
         if (lines.Count > before) lines.Insert(before, TooltipLine.Rule());
@@ -683,18 +693,6 @@ public partial class World : Node3D
         if (textId == 0 || value == 0) return;
         lines.Add(new TooltipLine(FormatIntText(textId, "", value), TooltipColorCospre));
     }
-
-    private static int CospreDamageToText(int classCode) => classCode switch
-    {
-        1 => 9605, 2 => 9606, 3 => 9607, 4 => 9608, 5 => 9615,
-        _ => 0,
-    };
-
-    private static int CospreDamageFromText(int classCode) => classCode switch
-    {
-        1 => 9609, 2 => 9610, 3 => 9611, 4 => 9612, 7 => 9614,
-        _ => 0,
-    };
 
     private const string UnknownClassName = "Unknown Class";
 

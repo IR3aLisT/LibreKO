@@ -12,6 +12,7 @@ public sealed class NpcDialogPacketWriter
     public const byte ObjectEventShown = 1;
     public const byte RebirthPanelStyle = 48;
     public const byte RebirthResetPanelStyle = 52;
+    public const byte RepurchaseWindowStyle = 30;
     public const byte FamiliarPanelStyle = 9;
     public const byte FamiliarShopStyle = 14;
     public const byte GenderChangePanelStyle = 53;
@@ -101,6 +102,9 @@ public sealed class NpcDialogPacketWriter
 
     public static Packet RebirthResetPanel(int npcId, string scriptFile) =>
         SelectMessage(npcId, RebirthResetPanelStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
+
+    public static Packet RepurchaseWindow(int npcId, string scriptFile) =>
+        SelectMessage(npcId, RepurchaseWindowStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
 
     public static Packet FamiliarPanel(int npcId, string scriptFile) =>
         SelectMessage(npcId, FamiliarPanelStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);

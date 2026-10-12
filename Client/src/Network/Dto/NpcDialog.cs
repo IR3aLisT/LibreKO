@@ -15,6 +15,7 @@ public sealed class NpcDialog
     public const int ItemCombinePanelFlag = 18;
     public const int CombineRecipeBookFlag = 21;
     public const int DisassemblePanelFlag = 27;
+    public const int RepurchaseWindowFlag = 30;
 
     public int NpcId;
     public int Flag;

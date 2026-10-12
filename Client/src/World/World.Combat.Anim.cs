@@ -192,7 +192,7 @@ public partial class World
             if (now < _selfActionUntil && action == _selfActionAnim) return;
             if (!CanPlaySelfAction(rank, now)) return;
             double len = PlayActionOn(_selfAnim, action, fallback);
-            if (len > 0 && rank == ActionRankSkill && Net.I.GenieRunning) len *= GenieClipScale();
+            if (len > 0 && rank == ActionRankSkill && Net.I.GenieRunning && GenieComboOn) len *= GenieClipScale();
             if (len > 0)
             {
                 BeginSelfAction(len, rank, now, action);
@@ -269,25 +269,28 @@ public partial class World
     private void PlayStruck(int entityId)
     {
         double now = Now();
+        bool monsterLook = WearsMonsterLook(entityId);
         if (entityId == _myId)
         {
-            if (_selfFlinch != null)
+            if (_selfFlinch != null && !monsterLook)
             {
                 if (SelfFlinchReady(now)) PlayFlinch(_selfFlinch, _selfAnim);
                 return;
             }
-            PlaySkillAction(entityId, StruckAnim(npc: false), StruckClips, ActionRankStruck);
+            if (monsterLook && GD.Randi() % NpcFlinchOneIn != 0) return;
+            PlaySkillAction(entityId, StruckAnim(monsterLook), StruckClips, ActionRankStruck);
             return;
         }
 
         if (!_ents.TryGetValue(entityId, out var e)) return;
-        if (e.Flinch != null)
+        if (e.Flinch != null && !monsterLook)
         {
             if (EntityFlinchReady(e, now)) PlayFlinch(e.Flinch, e.Anim);
             return;
         }
-        if (e.IsNpc && GD.Randi() % NpcFlinchOneIn != 0) return;
-        PlaySkillAction(entityId, StruckAnim(e.IsNpc), StruckClips, ActionRankStruck);
+        bool monsterClips = e.IsNpc || monsterLook;
+        if (monsterClips && GD.Randi() % NpcFlinchOneIn != 0) return;
+        PlaySkillAction(entityId, StruckAnim(monsterClips), StruckClips, ActionRankStruck);
     }
 
     private const int MoveAttackWeaponAnim = 14;
@@ -307,6 +310,45 @@ public partial class World
         a.MoveSwingAt = swing >= 0f ? now + swing : -1;
         a.MoveStrikeAt = strike >= 0f ? now + strike : -1;
         return true;
+    }
+
+    private double _selfMoveSwingAt = -1;
+    private double _selfMoveStrikeAt = -1;
+
+    private bool SelfMoveAttackReady() =>
+        _selfMoving && _selfFlinch != null && _selfAnim != null && !IsWearingTransformLook(_myId);
+
+    private bool SelfMoveAttack(int target, double now, out float lastStrike)
+    {
+        lastStrike = 0f;
+        int pose = HandLoadout(SelfGear()).Right != WeaponAnimation.NoItem ? MoveAttackWeaponAnim : MoveAttackBareAnim;
+        string? name = AnimationNameAt(_selfAnim!, pose);
+        if (name == null || !_selfAnim!.HasAnimation(name) || _selfAnim.GetAnimation(name) is not { } clip) return false;
+        var meta = AnimationMetaAt(_selfAnim, pose);
+        _selfFlinch!.PlayThrough(pose, clip, meta?.Blend ?? ActionClip.DefaultBlend);
+        float swing = meta?.SoundTime(0) ?? -1f;
+        float strike = meta?.StrikeTime(0) ?? -1f;
+        _selfMoveSwingAt = swing >= 0f ? now + swing : -1;
+        _selfMoveStrikeAt = strike >= 0f ? now + strike : -1;
+        _selfStrikeAnim = pose;
+        _swingTarget = target;
+        if (target >= 0) _swingCommitAt = now + (strike > 0f ? strike : SwingCommitFallback);
+        lastStrike = strike > 0f ? strike : (float)clip.Length;
+        return true;
+    }
+
+    private void SelfMoveAttackTick(double now)
+    {
+        if (_selfMoveSwingAt >= 0 && now >= _selfMoveSwingAt)
+        {
+            _selfMoveSwingAt = -1;
+            AudioSelfSwing();
+        }
+        if (_selfMoveStrikeAt >= 0 && now >= _selfMoveStrikeAt)
+        {
+            _selfMoveStrikeAt = -1;
+            SelfStrike();
+        }
     }
 
     private void MoveAttackTick(Ent e, double now)

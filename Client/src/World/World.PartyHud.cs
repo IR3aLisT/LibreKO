@@ -14,6 +14,9 @@ public partial class World
     private const float PartyMpBarHeight = 5f;
     private const float PartyMeterBarHeight = 4f;
     private const float PartyClassIconSize = 14f;
+    private const float PartyRowArrowSize = 10f;
+    private const int PartyRowArrowFont = 8;
+    private static readonly string[] PartyRowArrowStates = { "normal", "hover", "pressed", "focus" };
     private const int PartyHudTitleFont = 12;
     private const int PartyHudNameFont = 11;
     private const int TextPartyMakeLeader = 3431;
@@ -49,6 +52,8 @@ public partial class World
         public PartyMeter Meter = null!;
         public TextureRect Icon = null!;
         public Label Name = null!;
+        public Button MoveUp = null!;
+        public Button MoveDown = null!;
         public int MemberId = -1;
     }
 
@@ -82,6 +87,14 @@ public partial class World
         title.MouseFilter = Control.MouseFilterEnum.Ignore;
         headRow.AddChild(title);
         AddMeterButtons(headRow);
+        _partyRejoinToggle = new CheckBox { FocusMode = Control.FocusModeEnum.None, ButtonPressed = _partyRejoin.On };
+        _partyRejoinToggle.Toggled += _ => TogglePartyRejoin();
+        headRow.AddChild(_partyRejoinToggle);
+        RefreshPartyRejoinToggle();
+        _commanderRestore = UiTheme.IconButton(UiIcons.Get("system/combat-attack"), "Show the commander bar");
+        _commanderRestore.Visible = false;
+        _commanderRestore.Pressed += ShowCommanderBarAgain;
+        headRow.AddChild(_commanderRestore);
         var leave = UiTheme.IconButton(UiIcons.Get("system/close"), "Leave the party");
         leave.Pressed += AskLeaveParty;
         headRow.AddChild(leave);
@@ -129,9 +142,22 @@ public partial class World
         var box = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         box.AddThemeConstantOverride("separation", 2);
         row.Frame.AddChild(box);
-        box.AddChild(row.Hp);
-        box.AddChild(row.Mp);
-        box.AddChild(row.Meter);
+        var top = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        top.AddThemeConstantOverride("separation", 2);
+        box.AddChild(top);
+        var bars = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        bars.AddThemeConstantOverride("separation", 2);
+        top.AddChild(bars);
+        bars.AddChild(row.Hp);
+        bars.AddChild(row.Mp);
+        bars.AddChild(row.Meter);
+        var arrows = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        arrows.AddThemeConstantOverride("separation", 0);
+        top.AddChild(arrows);
+        row.MoveUp = PartyRowArrow("▲", "Move up", () => MovePartyRow(row.MemberId, PartyOrder.Up));
+        row.MoveDown = PartyRowArrow("▼", "Move down", () => MovePartyRow(row.MemberId, PartyOrder.Down));
+        arrows.AddChild(row.MoveUp);
+        arrows.AddChild(row.MoveDown);
 
         var line = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         line.AddThemeConstantOverride("separation", 4);
@@ -147,6 +173,31 @@ public partial class World
         return row;
     }
 
+    private CheckBox? _partyRejoinToggle;
+
+    private void RefreshPartyRejoinToggle()
+    {
+        if (_partyRejoinToggle == null) return;
+        _partyRejoinToggle.SetPressedNoSignal(_partyRejoin.On);
+        _partyRejoinToggle.TooltipText = PartyRejoinTip;
+    }
+
+    private static Button PartyRowArrow(string glyph, string tip, Action pressed)
+    {
+        var arrow = new Button
+        {
+            Text = glyph,
+            Flat = true,
+            FocusMode = Control.FocusModeEnum.None,
+            TooltipText = tip,
+            CustomMinimumSize = new Vector2(PartyRowArrowSize, PartyRowArrowSize),
+        };
+        arrow.AddThemeFontSizeOverride("font_size", PartyRowArrowFont);
+        foreach (var state in PartyRowArrowStates) arrow.AddThemeStyleboxOverride(state, new StyleBoxEmpty());
+        arrow.Pressed += pressed;
+        return arrow;
+    }
+
     private void RefreshPartyHud()
     {
         if (_partyHud == null) return;
@@ -156,8 +207,8 @@ public partial class World
         long second = (long)Now();
         _partyHudSecond = second;
         _partyHudCycles = false;
-        var members = PartyMembers;
-        int leader = members.Count > 0 ? members[0].CharId : -1;
+        int leader = PartyMembers.Count > 0 ? PartyMembers[0].CharId : -1;
+        var members = PartyRows;
         for (int i = 0; i < PartyHud.MaxRows; i++)
         {
             var row = _partyHudRows[i];
@@ -169,11 +220,12 @@ public partial class World
                 continue;
             }
             FillPartyHudRow(row, members[i], members[i].CharId == leader, second);
+            row.MoveUp.Visible = row.MoveDown.Visible = members.Count > 1;
         }
     }
 
     private readonly record struct PartyRowView(int Level, int Class, int Hp, int MaxHp, int Mp, int MaxMp,
-        Color NameColour, Color HpColour, string Tooltip, bool Cycles);
+        Color NameColour, Color HpColour, string Tooltip, bool Cycles, PartyHpLook HpLook);
 
     private PartyRowView PartyRowOf(PartyMember m, bool leader, long second)
     {
@@ -191,10 +243,11 @@ public partial class World
                 if (StatusName(s) is { Length: > 0 } name) names.Add(name);
             if (names.Count > 0) status = "\n" + string.Join(", ", names);
         }
+        var look = PartyHud.HpLook(statuses, second);
         return new PartyRowView(level, cls, hp, maxHp, mp, maxMp, PartyNameColourOf(m.CharId, leader),
-            PartyHpFills[PartyHud.HpLook(statuses, second)],
+            PartyHpFills[look],
             $"{m.Name}  Lv {level} {ClassName(cls)}\nHP {hp} / {maxHp}   MP {mp} / {maxMp}{status}",
-            statuses is { Count: > 1 });
+            statuses is { Count: > 1 }, look);
     }
 
     private void FillPartyHudRow(PartyHudRow row, PartyMember m, bool leader, long second)
@@ -219,6 +272,8 @@ public partial class World
     private void PartyHudTick(double now)
     {
         WarBoardTick(now);
+        UserVoteTick(now);
+        FullMoonAutoTick(now);
         if (_partyHudCycles && (long)now != _partyHudSecond) RefreshPartyHud();
     }
 
@@ -246,12 +301,17 @@ public partial class World
 
     private bool ShowPartyMemberMenu(int memberId)
     {
-        if (!AmLeader || memberId == _myId) return false;
+        bool vote = _zone == UserVote.JuraidZone;
+        if (memberId == _myId || (!AmLeader && !vote)) return false;
         _partyHudMenuMember = memberId;
         _partyHudMenu.Clear();
-        _partyHudMenu.AddItem("Make leader", PartyMenuMakeLeader);
-        _partyHudMenu.AddItem("Kick out", PartyMenuKick);
-        _partyHudMenu.AddItem("Make commander", PartyMenuCommander);
+        if (AmLeader)
+        {
+            _partyHudMenu.AddItem("Make leader", PartyMenuMakeLeader);
+            _partyHudMenu.AddItem("Kick out", PartyMenuKick);
+            _partyHudMenu.AddItem("Make commander", PartyMenuCommander);
+        }
+        if (vote) _partyHudMenu.AddItem(ItemData.Text(UserVote.TitleText, "User Vote"), PartyMenuUserVote);
         PopupAtCursor(_partyHudMenu, GetViewport().GetMousePosition());
         return true;
     }
@@ -266,7 +326,13 @@ public partial class World
     {
         int member = _partyHudMenuMember;
         _partyHudMenuMember = -1;
-        if (member < 0 || !AmLeader) return;
+        if (member < 0) return;
+        if (id == PartyMenuUserVote)
+        {
+            OpenUserVote(member);
+            return;
+        }
+        if (!AmLeader) return;
         string name = PartyMemberName(member);
         if (id == PartyMenuMakeLeader)
             Notice.Confirm(this, SystemText(TextPartyMakeLeader, "Do you authorize %s as a Party Leader?", name),

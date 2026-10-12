@@ -164,15 +164,33 @@ public partial class Water : Node3D
     private static Shader? _waterShader;
     private static (Texture2D, Texture2D)? _waveNormals;
 
+    private readonly record struct WaveNormalSpec(string Path, int Seed, float Strength);
+
+    private static readonly WaveNormalSpec WaveNormalA = new("res://assets/water/wave_normal_a.png", 1337, 2.2f);
+    private static readonly WaveNormalSpec WaveNormalB = new("res://assets/water/wave_normal_b.png", 7919, 1.6f);
+
     private static (Texture2D, Texture2D) WaveNormals()
     {
         if (_waveNormals.HasValue) return _waveNormals.Value;
-        _waveNormals = (MakeWaterNormal(seed: 1337, strength: 2.2f),
-                        MakeWaterNormal(seed: 7919, strength: 1.6f));
+        _waveNormals = (WaveNormal(WaveNormalA), WaveNormal(WaveNormalB));
         return _waveNormals.Value;
     }
 
-    private static ImageTexture MakeWaterNormal(int seed, float strength)
+    private static Texture2D WaveNormal(WaveNormalSpec spec) =>
+        ResourceLoader.Exists(spec.Path)
+            ? ResourceLoader.Load<Texture2D>(spec.Path)
+            : ImageTexture.CreateFromImage(MakeWaterNormal(spec.Seed, spec.Strength));
+
+    internal static void BakeWaveNormals()
+    {
+        foreach (var spec in new[] { WaveNormalA, WaveNormalB })
+        {
+            var err = MakeWaterNormal(spec.Seed, spec.Strength).SavePng(ProjectSettings.GlobalizePath(spec.Path));
+            GD.Print($"[bakewater] {spec.Path} {err}");
+        }
+    }
+
+    private static Image MakeWaterNormal(int seed, float strength)
     {
         const int N = 512;
         const int Layers = 40;
@@ -218,7 +236,7 @@ public partial class Water : Node3D
         }
         var img = Image.CreateFromData(N, N, false, Image.Format.Rgba8, buf);
         img.GenerateMipmaps();
-        return ImageTexture.CreateFromImage(img);
+        return img;
     }
 
     

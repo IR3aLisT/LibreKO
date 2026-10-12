@@ -40,6 +40,7 @@ public partial class World
     private readonly Label[] _commanderCooldowns = new Label[CommanderOrders.Bar.Length];
     private BoxContainer _commanderSlots = null!;
     private bool _commanderUserHidden;
+    private Button? _commanderRestore;
     private TextureRect _commanderPin = null!;
     private int _commanderMarkId = -1;
     private double _commanderMarkSentAt;
@@ -82,6 +83,7 @@ public partial class World
         {
             _commanderUserHidden = true;
             _commanderBar.Visible = false;
+            RefreshCommanderBar();
         };
         var layer = new CanvasLayer { Layer = 70 };
         AddChild(layer);
@@ -240,10 +242,21 @@ public partial class World
         _commanderBadge.Position = screen * 0.5f;
     }
 
+    private bool CommanderBarHidden => AmCommander && _commanderUserHidden;
+
     private void RefreshCommanderBar()
     {
+        if (_commanderRestore != null && IsInstanceValid(_commanderRestore))
+            _commanderRestore.Visible = CommanderBarHidden;
+        PluginNotifyParty();
         if (_commanderBar == null) return;
         _commanderBar.Visible = AmCommander && !_commanderUserHidden;
+    }
+
+    private void ShowCommanderBarAgain()
+    {
+        _commanderUserHidden = false;
+        RefreshCommanderBar();
     }
 
     private void OnPartyCommander(CommanderNamedReply reply)

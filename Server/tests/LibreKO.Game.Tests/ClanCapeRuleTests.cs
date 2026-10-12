@@ -24,4 +24,12 @@ public class ClanCapeRuleTests
     public void TheCapeRankIsTheClanTypeAndThePointGradeCountsOnlyBelowAccredited(
         ClanType clan, byte grade, ClanType capeRank, byte capeGrade, bool allowed) =>
         ClanRules.MeetsCapeRank((byte)clan, grade, (byte)capeRank, capeGrade).Should().Be(allowed);
+
+    [Theory]
+    [InlineData(3, 1, true)]
+    [InlineData(3, 0, false)]
+    [InlineData(2, 0, false)]
+    [InlineData(1, 0, false)]
+    public void OnlyCastleCloaksMarkedForTheTicketTakeTheVoucher(byte capeType, byte ticket, bool voucher) =>
+        ClanRules.VoucherCape(capeType, ticket).Should().Be(voucher);
 }

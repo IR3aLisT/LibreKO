@@ -14,7 +14,6 @@ public partial class World
     private const float WarBoardRowHeight = 17f;
     private const float WarBoardButtonSize = 16f;
     private const float WarBoardAlphaWidth = 64f;
-    private const float WarBoardMinAlpha = 0.25f;
     private const int WarBoardTitleFont = 12;
     private const int WarBoardRowFont = 11;
     private const int WarBoardCoolFont = 36;
@@ -42,13 +41,14 @@ public partial class World
     }
 
     private readonly Dictionary<int, int> _warBoardRowShares = new();
+    private readonly List<GameWarBoardRow> _warBoardLines = new();
     private readonly WarBoardRow[] _warBoardRows = new WarBoardRow[PartyWarBoard.MaxRows];
     private TextureButton _meterToggle = null!;
     private PanelContainer? _warBoard;
     private TextureButton _warBoardDeal = null!;
     private TextureButton _warBoardHeal = null!;
     private Label _warBoardCool = null!;
-    private byte _warBoardMode;
+    private byte _warBoardMode = Config.PartyBoardMode;
     private bool _warBoardPending;
     private bool _warBoardInParty;
     private double _meterToggleSentAt = double.NegativeInfinity;
@@ -61,6 +61,7 @@ public partial class World
         Net.I.PartyRemovedEvent += OnWarBoardPartyRemoved;
         Net.I.PartyDisbandEvent += OnWarBoardPartyGone;
         _warBoardInParty = InParty;
+        _warBoard ??= BuildWarBoard();
     }
 
     private void PartyWarBoardDispose()
@@ -135,6 +136,7 @@ public partial class World
         _warBoardRowShares.Clear();
         RefreshMeterToggle();
         RefreshPartyHud();
+        PluginNotifyParty();
     }
 
     private static string AvailableInText(double secondsLeft) =>
@@ -149,6 +151,7 @@ public partial class World
             _warBoardRowShares.Clear();
             foreach (var share in reply.Shares) _warBoardRowShares[share.MemberId] = share.Share;
             RefreshPartyHud();
+            PluginNotifyParty();
             return;
         }
         if (reply.Target == PartyWarBoard.TargetBoard && _warBoard is { Visible: true } && reply.Mode == _warBoardMode)
@@ -174,7 +177,9 @@ public partial class World
         _warBoardInParty = false;
         _warBoardRowShares.Clear();
         _warBoardPending = false;
+        _warBoardLines.Clear();
         if (_warBoard != null) _warBoard.Visible = false;
+        PluginNotifyParty();
     }
 
     private void ToggleWarBoard()
@@ -187,6 +192,7 @@ public partial class World
         _warBoard ??= BuildWarBoard();
         _warBoard.Visible = true;
         FillWarBoard(Array.Empty<WarBoardShare>());
+        PluginNotifyParty();
         RequestWarBoardMode(_warBoardMode == PartyWarBoard.ModeOff ? PartyWarBoard.DefaultBoardMode(_selfClass) : _warBoardMode);
     }
 
@@ -197,13 +203,16 @@ public partial class World
         _warBoardPending = false;
         _warBoardCool.Visible = false;
         if (InParty) Net.I.SendPartyWarBoard(PartyWarBoard.TargetBoard, PartyWarBoard.ModeOff);
+        PluginNotifyParty();
     }
 
     private void RequestWarBoardMode(byte mode)
     {
         _warBoardMode = mode;
+        Config.SetPartyBoardMode(mode);
         _warBoardDeal.ButtonPressed = mode == PartyWarBoard.ModeDamage;
         _warBoardHeal.ButtonPressed = mode == PartyWarBoard.ModeHealing;
+        PluginNotifyParty();
         if (PartyWarBoard.SecondsLeft(_warBoardSentAt, Now(), PartyWarBoard.BoardTabSeconds) > 0)
         {
             _warBoardPending = true;
@@ -233,6 +242,7 @@ public partial class World
     {
         var layer = new CanvasLayer { Layer = 64 };
         AddChild(layer);
+        PluginHudSeam(layer, LibreKO.Plugins.HudPart.WarBoard);
         var panel = new PanelContainer
         {
             Visible = false,
@@ -255,16 +265,22 @@ public partial class World
         head.AddChild(title);
         var alpha = new HSlider
         {
-            MinValue = WarBoardMinAlpha,
+            MinValue = PartyWarBoard.MinAlpha,
             MaxValue = 1,
             Step = 0.05,
-            Value = 1,
+            Value = Config.PartyBoardAlpha,
             CustomMinimumSize = new Vector2(WarBoardAlphaWidth, 0),
             SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             FocusMode = Control.FocusModeEnum.None,
             TooltipText = "Background transparency",
         };
-        alpha.ValueChanged += value => panel.SelfModulate = new Color(1, 1, 1, (float)value);
+        panel.SelfModulate = new Color(1, 1, 1, Config.PartyBoardAlpha);
+        _warBoardAlpha = alpha;
+        alpha.ValueChanged += value =>
+        {
+            panel.SelfModulate = new Color(1, 1, 1, (float)value);
+            Config.SetPartyBoardAlpha((float)value);
+        };
         head.AddChild(alpha);
         _warBoardDeal = WarBoardTab("deal", "Damage dealt", PartyWarBoard.ModeDamage);
         head.AddChild(_warBoardDeal);
@@ -345,9 +361,19 @@ public partial class World
         return row;
     }
 
+    private HSlider? _warBoardAlpha;
+
+    private void SetWarBoardAlpha(float alpha)
+    {
+        if (_warBoardAlpha != null) _warBoardAlpha.Value = alpha;
+        else Config.SetPartyBoardAlpha(alpha);
+        PluginNotifyParty();
+    }
+
     private void FillWarBoard(IReadOnlyList<WarBoardShare> shares)
     {
         var ranked = PartyWarBoard.Ranked(shares);
+        _warBoardLines.Clear();
         for (int i = 0; i < PartyWarBoard.MaxRows; i++)
         {
             var row = _warBoardRows[i];
@@ -363,7 +389,9 @@ public partial class World
             row.Bar.Value = PartyWarBoard.Fill(share.Share);
             row.Name.Text = PartyWarBoard.RowName(i + 1, member.Name);
             row.Percent.Text = PartyWarBoard.Percent(share.Share);
+            _warBoardLines.Add(new GameWarBoardRow(i + 1, member.Name, cls, share.Share));
         }
+        PluginNotifyParty();
     }
 
     private PartyMember? MemberOf(int memberId)

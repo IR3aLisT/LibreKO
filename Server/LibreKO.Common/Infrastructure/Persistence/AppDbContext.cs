@@ -34,6 +34,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<KingBallotBox> KingBallotBox { get; set; }
     public DbSet<SheriffReportEntity> SheriffReports { get; set; }
     public DbSet<SheriffVoteEntity> SheriffVotes { get; set; }
+    public DbSet<ChatRoomMessage> ChatRoomMessages { get; set; }
 
     // Static game data
     public DbSet<LevelUpData> LevelUp { get; set; }

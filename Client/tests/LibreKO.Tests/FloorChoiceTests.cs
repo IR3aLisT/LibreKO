@@ -27,4 +27,8 @@ public class FloorChoiceTests
     [Fact]
     public void LoginNeverSinksBelowTheTerrain() =>
         Assert.Equal(Terrain, FloorChoice.Login(Terrain, new[] { 4f }, 4f));
+
+    [Fact]
+    public void AJuraidBridgeStandsOnItsAbutmentAboveTheTerrain() =>
+        Assert.Equal(18.9f, FloorChoice.Login(15.48f, new[] { 18.9f, -7.4f, -8.9f }, 15.48f + 1f));
 }

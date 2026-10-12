@@ -42,6 +42,14 @@ public partial class CharSelect : Node3D
         _status.Text = "Loading characters…";
         RequestCharListWithTimeout();
         Callable.From(() => GlyphWarmer.Warm(this)).CallDeferred();
+        GetTree().CreateTimer(MemoryCensusDelaySeconds).Timeout += LogMemoryCensus;
+    }
+
+    private const double MemoryCensusDelaySeconds = 3;
+
+    private void LogMemoryCensus()
+    {
+        if (IsInsideTree()) MemoryCensus.Log("character select");
     }
 
     public override void _Process(double delta) => TickStage(delta);
@@ -138,7 +146,7 @@ public partial class CharSelect : Node3D
 
         var line = new Label
         {
-            Text = $"Level {c.Level}  ·  {ClassLabel(c.Class)}",
+            Text = $"{CharacterLevelText.Of(c.Level, c.Rebirth)}  ·  {ClassLabel(c.Class)}",
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         line.AddThemeFontSizeOverride("font_size", 13);

@@ -157,6 +157,7 @@ public enum GameOpcodes : byte
     GS_TOURNAMENT = 0xDB,
     GS_MESSENGER = 0xDC,
     GS_FORCES = 0xDD,
+    GS_ROOM_MEDIA = 0xDF,
     GS_NATION_TAX = 0xE0,
     GS_FISHING_HALL = 0xE3,
     GS_TARGET_STATE = 0xE4,

@@ -143,7 +143,7 @@ public class CharacterTests : GameTestBase
         var accountId = await GetAccountIdAsync(provider, "starter-user");
 
         var invalidRace = await preGameService.CreateCharacterAsync(accountId, 0, "BadRace", 9, 101, 2, 3, 60, 60, 60, 60, 60);
-        invalidRace.ReadByte().Should().Be((byte)CreateCharacterResult.InvalidRace);
+        invalidRace.ReadByte().Should().Be((byte)CreateCharacterResult.NationRaceMismatch);
 
         var invalidCombo = await preGameService.CreateCharacterAsync(accountId, 0, "BadCombo", 1, 104, 2, 3, 60, 60, 60, 60, 60);
         invalidCombo.ReadByte().Should().Be((byte)CreateCharacterResult.InvalidClass);

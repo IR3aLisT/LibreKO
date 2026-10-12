@@ -33,8 +33,10 @@ public partial class World
     private VBoxContainer _ncPrivateRows = null!;
     private Button _ncPubJoin = null!;
     private Button _ncPubLeave = null!;
+    private Button _ncPubOpen = null!;
     private Button _ncPriJoin = null!;
     private Button _ncPriLeave = null!;
+    private Button _ncPriOpen = null!;
     private Button _ncPriChange = null!;
     private Button _ncPriPersons = null!;
     private List<NationChannel> _ncChannels = [];
@@ -70,6 +72,7 @@ public partial class World
     private void NationChatInit()
     {
         _ncLayer = new CanvasLayer { Layer = 68 };
+        _ncLayer.SetMeta(Audio.QuietMeta, true);
         AddChild(_ncLayer);
         BuildNationChannelList();
         BuildNationCreate();
@@ -143,6 +146,7 @@ public partial class World
         _ncPublicPage.AddChild(pubButtons);
         _ncPubJoin = NationButton(pubButtons, "Enter", JoinNationChannel);
         _ncPubLeave = NationButton(pubButtons, "Leave", () => Net.I.SendNationPublicLeave());
+        _ncPubOpen = NationButton(pubButtons, "Open", ShowChatRoom);
         NationButton(pubButtons, "Cancel", CloseNationChat);
 
         _ncPrivatePage = new VBoxContainer();
@@ -157,6 +161,7 @@ public partial class World
         priButtons.AddChild(joinCell);
         _ncPriJoin = NationButton(joinCell, "Enter", JoinNationRoom);
         _ncPriLeave = NationButton(joinCell, "Leave", () => Net.I.SendNationPrivateLeave());
+        _ncPriOpen = NationButton(joinCell, "Open", ShowChatRoom);
         NationButton(priButtons, "Create room", OpenNationCreate);
         NationButton(priButtons, "Search", OpenNationSearch);
         _ncPriChange = NationButton(priButtons, "Change options", OpenNationEdit);
@@ -231,8 +236,10 @@ public partial class World
         var state = Net.I.NationChat;
         _ncPubJoin.Visible = !state.InPublic;
         _ncPubLeave.Visible = state.InPublic;
+        _ncPubOpen.Visible = state.InPublic;
         _ncPriJoin.Visible = !state.InPrivate;
         _ncPriLeave.Visible = state.InPrivate;
+        _ncPriOpen.Visible = state.InPrivate;
         _ncPriChange.Disabled = !(state.InPrivate && state.Owner);
         _ncPriPersons.Disabled = !state.InPrivate;
         if (!state.InPrivate && IsInstanceValid(_ncMembers)) _ncMembers.Visible = false;
@@ -341,16 +348,23 @@ public partial class World
     private void JoinNationChannel()
     {
         if (_ncSelectedChannel == NationChatRules.NoRoom) { NationNotice(NationChatTexts.SelectRoom, "Select a chatroom."); return; }
-        if (Net.I.NationChat.InRoom) { NationNotice(NationChatTexts.AlreadyInRoom, "You already are part of another chatroom."); return; }
+        var state = Net.I.NationChat;
+        if (state.InPublic && state.RoomId == _ncSelectedChannel) { ShowChatRoom(); return; }
+        if (state.InRoom) { NationNotice(NationChatTexts.AlreadyInRoom, "You already are part of another chatroom."); return; }
+        var channel = _ncChannels.Find(c => c.Id == _ncSelectedChannel);
+        Net.I.NameNextRoom(channel.Name, false, channel.Members, NationChatRules.PublicCapacity);
         Net.I.SendNationPublicEnter(_ncSelectedChannel);
     }
 
     private void JoinNationRoom()
     {
         if (_ncSelectedRoom == NationChatRules.NoRoom) { NationNotice(NationChatTexts.SelectRoom, "Select a chatroom."); return; }
-        if (Net.I.NationChat.InRoom) { NationNotice(NationChatTexts.AlreadyInRoom, "You already are part of another chatroom."); return; }
+        var state = Net.I.NationChat;
+        if (state.InPrivate && state.RoomId == _ncSelectedRoom) { ShowChatRoom(); return; }
+        if (state.InRoom) { NationNotice(NationChatTexts.AlreadyInRoom, "You already are part of another chatroom."); return; }
         var room = _ncRooms.Find(r => r.Id == _ncSelectedRoom);
         if (room.Nation != Net.I.LastEnter.Nation) { NationNotice(NationChatTexts.NationMismatch, "Nations do not match."); return; }
+        Net.I.NameNextRoom(room.Name, room.Locked, room.Members, room.MaxMembers);
         if (room.Locked)
         {
             _ncPasswordEdit.Text = "";
@@ -509,14 +523,12 @@ public partial class World
         _ncMembers = new HudWindow("nation_chat_members", "Members", bodyMinWidth: NationMembersWidth) { Visible = false };
         _ncMembers.Closed += () => _ncMembers.Visible = false;
         _ncLayer.AddChild(_ncMembers);
-        var head = new HBoxContainer();
-        _ncMembers.Body.AddChild(head);
         _ncMembersTitle = UiTheme.Text("", 13, UiTheme.GoldBright);
-        _ncMembersTitle.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         _ncMembersTitle.ClipText = true;
-        head.AddChild(_ncMembersTitle);
-        _ncMembersCount = UiTheme.Text("", 12, UiTheme.TextLo);
-        head.AddChild(_ncMembersCount);
+        _ncMembers.Body.AddChild(_ncMembersTitle);
+        _ncMembersCount = UiTheme.Text("", 11, UiTheme.TextLo);
+        _ncMembersCount.ClipText = true;
+        _ncMembers.Body.AddChild(_ncMembersCount);
         _ncMemberRows = NationRowBox(_ncMembers.Body, NationChatRules.MemberRows);
         var buttons = new HBoxContainer();
         buttons.AddThemeConstantOverride("separation", 8);
@@ -536,7 +548,7 @@ public partial class World
     {
         _ncMemberList = list;
         _ncMembersTitle.Text = list.Title;
-        _ncMembersCount.Text = $"({list.Members.Count}/{list.MaxMembers})";
+        _ncMembersCount.Text = NationChatRules.Summary(false, Net.I.NationChat.RoomPrivate, list.Members.Count, list.MaxMembers);
         if (!list.Members.Any(m => m.CharacterId == _ncSelectedMember)) _ncSelectedMember = NationChatRules.NoRoom;
         foreach (var child in _ncMemberRows.GetChildren()) child.QueueFree();
         foreach (var member in list.Members)
@@ -584,6 +596,7 @@ public partial class World
         if (entered || created) Chat?.UseRoomChannel(true);
         if (left) Chat?.UseRoomChannel(false);
         if (created || (sub == NationChatReplies.Options && code == 0)) _ncCreate.Visible = false;
+        if (sub == NationChatReplies.Options) ChatRoomConfigReplied(code, text);
         if (sub == NationChatReplies.Search && code != 0) _ncSearchEdit.Text = "";
         if ((sub == NationChatReplies.HandOver && code == 0) && _ncMembers.Visible) Net.I.SendNationMembers();
 
@@ -604,7 +617,8 @@ public partial class World
             Net.RoomChatNewOwner => NcText(NationChatTexts.NewOwner, "%s has become the room owner."),
             _ => NcText(NationChatTexts.Kicked, "%s has been kicked."),
         };
-        CombatLogAdd(line.Replace("%s", name).Replace("%d", members.ToString()), CombatLogKind.Status, UiTheme.GoldBright);
-        if (_ncMembers.Visible) Net.I.SendNationMembers();
+        ChatRoomNotice(line.Replace("%s", name).Replace("%d", members.ToString()));
+        RefreshChatRoomHeader();
+        if (_ncMembers.Visible || Net.I.Voice != null || (Net.I.NationChat.InPrivate && ChatRoomShown)) Net.I.SendNationMembers();
     }
 }

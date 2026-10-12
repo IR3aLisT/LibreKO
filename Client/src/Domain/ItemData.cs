@@ -144,6 +144,15 @@ public static class ItemData
     public const int SaleTypeFull = 1;
     public const int SaleTypeLowNoRepair = 2;
     private const int SellPriceDivisor = 6;
+    private const int PremiumSellPriceDivisor = 4;
+
+    public static bool PremiumSeller { get; set; }
+
+    public static int SellUnit(int buyPrice, bool fullSale, bool premium)
+    {
+        int price = fullSale ? buyPrice : buyPrice / (premium ? PremiumSellPriceDivisor : SellPriceDivisor);
+        return price < 1 ? 0 : price;
+    }
 
     public const int NoTradeIdFirst = 900000001;
     public const int NoTradeIdLast = 999999999;
@@ -622,10 +631,7 @@ public static class ItemData
     public static int SellPrice(int id)
     {
         var def = Get(id);
-        if (def == null) return 0;
-        int price = BuyPrice(id);
-        if (def.SaleType != SaleTypeFull) price /= SellPriceDivisor;
-        return price < 1 ? 0 : price;
+        return def == null ? 0 : SellUnit(BuyPrice(id), def.SaleType == SaleTypeFull, PremiumSeller);
     }
 
     public static bool IsSellable(int id)

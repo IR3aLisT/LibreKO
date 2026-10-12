@@ -13,6 +13,7 @@ public class PlayerInspectPacketWriterTests
         "Tester12", 72, 105, 1_200, 340,
         new PlayerInspectPacketWriter.Clan(9, 3, 1, 2, "Vipers", "Chief", 2),
         1,
+        PlayerInspectPacketWriter.NoParty,
         [1, 2, 3, 4, 5, 6, 7]);
 
     private static PlayerInspectPacketWriter.Equipment SampleEquipment(
@@ -38,13 +39,14 @@ public class PlayerInspectPacketWriterTests
     }
 
     [Fact]
-    public void Detail_RefusalIsNotTheAcceptedMarker()
+    public void Detail_RefusalIsTheNoUserCodeTheClientAnswers()
     {
         var packet = PlayerInspectPacketWriter.DetailRefused();
         packet.ResetOffset();
         packet.ReadByte();
 
-        packet.ReadByte().Should().NotBe(PlayerInspectPacketWriter.DetailAccepted);
+        packet.ReadByte().Should().Be(PlayerInspectPacketWriter.DetailNoUser,
+            because: "2619 shows No available user for 2 or 3 and ignores any other refusal");
         packet.RemainingBytes.Should().Be(0);
     }
 
@@ -72,9 +74,10 @@ public class PlayerInspectPacketWriterTests
         packet.ReadByte().Should().Be(2);
 
         packet.ReadByte().Should().Be(1);
-        packet.ReadShort().Should().Be(0);
+        packet.ReadShort().Should().Be(PlayerInspectPacketWriter.NoParty,
+            because: "2619 adds \" / Party\" to the status unless this is 0xFFFF");
 
-        for (var i = 1; i <= PlayerInspectPacketWriter.VisibleEquipmentCount; i++)
+        for (var i = 1; i <= PlayerInspectPacketWriter.RankPlaceCount; i++)
             packet.ReadInt().Should().Be(i);
 
         packet.ReadByte().Should().Be(0);

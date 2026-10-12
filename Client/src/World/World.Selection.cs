@@ -613,6 +613,7 @@ public partial class World
                                 new Vector2(TargetHudWidth, TargetHudBarHeight)) { Glide = true };
         _targetBox.AddChild(_targetHp);
         BuildTargetEffectsRow(_targetBox);
+        BuildTargetQuestDrops(_targetBox);
         BuildDropListUi(_targetBox);
         BuildTowerButton(_targetBox);
         HudLayout.Attach(_targetBox, "hud_target", _targetName,
@@ -749,6 +750,7 @@ public partial class World
             _targetBox.Visible = false;
         }
         SyncDropListButton(_targetHudId);
+        SyncTargetQuestDrops(_selectedId);
         SyncTowerButton(_targetHudId);
         TickTargetEffects();
         PluginNotifyTarget();

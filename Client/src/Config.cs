@@ -78,12 +78,17 @@ public static class Config
     public static RenderDriver Renderer { get; private set; } = RenderDriver.Direct3D12;
     public static int Screen { get; private set; } = CurrentScreen;
     public static bool ShowTitles { get; private set; } = true;
+    public static bool QuestNotices { get; private set; } = true;
     public static CospreKinds HiddenCospre { get; private set; } = CospreKinds.None;
     public static event System.Action? PlatesChanged;
+    public static int UiAlpha { get; private set; } = LibreKO.Domain.UiOpacityRules.Opaque;
+    public static event System.Action? UiAlphaChanged;
     public static event System.Action? CospreChanged;
     public static bool VolumetricFog { get; private set; } = false;
     public static bool Bloom { get; private set; } = true;
     public static bool FxLayer { get; private set; } = true;
+    public static LibreKO.Domain.CrowdMode Crowd { get; private set; } = LibreKO.Domain.CrowdMode.Balanced;
+    public static LibreKO.Domain.ShineStyle Shine { get; private set; } = LibreKO.Domain.ShineStyle.Glow;
     public static bool Clouds { get; private set; } = true;
     public static bool Capes { get; private set; } = true;
 
@@ -134,6 +139,9 @@ public static class Config
     public static bool DestroyWellLocked { get; private set; }
     public static WhisperSize WhisperSize { get; private set; } = WhisperLook.DefaultSize;
     public static float WhisperAlpha { get; private set; } = WhisperLook.DefaultAlpha;
+    public static byte PartyRowMeter { get; private set; } = PartyWarBoard.ModeDamage;
+    public static byte PartyBoardMode { get; private set; } = PartyWarBoard.ModeOff;
+    public static float PartyBoardAlpha { get; private set; } = 1f;
     public static event System.Action? WhisperLookChanged;
     public static float CamEdgePanSpeed { get; private set; } = CamEdgePanSpeedRetail;
 
@@ -173,6 +181,11 @@ public static class Config
     public static float SfxVolume { get; private set; } = 0.9f;
     public static float UiVolume { get; private set; } = 0.7f;
     public static float VoiceVolume { get; private set; } = 0.9f;
+    public static float VoiceChatVolume { get; private set; } = 0.9f;
+    public static float VoiceThreshold { get; private set; } = 0.35f;
+    public static bool VoicePushToTalk { get; private set; }
+    public static string VoiceInputDevice { get; private set; } = DefaultAudioDevice;
+    public const string DefaultAudioDevice = "Default";
     public static bool OtherPlayersSounds { get; private set; } = true;
     public static int DailyRankLastViewDay { get; private set; }
     public static int TimedItemsHiddenDay { get; private set; }
@@ -236,6 +249,7 @@ public static class Config
     public static event System.Action? GraphicsChanged;
 
     public static event System.Action? AudioChanged;
+    public static event System.Action? VoiceChatChanged;
 
     public static event System.Action? EffectsChanged;
 
@@ -263,7 +277,7 @@ public static class Config
             GD.PushWarning($"[config] '{InstallDir()}' is not writable — preferences go to {SettingsSavePath}. " +
                            "Server settings still come from the install directory.");
 
-        if (!haveInstall && InstallDirWritable)
+        if ((!haveInstall || _hostMigrated) && InstallDirWritable)
             Save();
 
         ApplyCommandLineOverrides();
@@ -273,6 +287,8 @@ public static class Config
     }
 
     private static ConfigFile? _shippedDefaults;
+    private static bool _hostMigrated;
+    private static string _retiredHost = "";
 
     public static void PinShippedDefaults()
     {
@@ -292,7 +308,10 @@ public static class Config
 
         if (server)
         {
-            ServerHost = cfg.GetValue("server", "host", ServerHost).AsString();
+            string host = cfg.GetValue("server", "host", ServerHost).AsString();
+            if (shipped) _retiredHost = cfg.GetValue("server", "retired_host", "").AsString();
+            ServerHost = shipped ? host : ServerHosts.Migrate(host, _retiredHost, ServerHost);
+            if (!shipped && ServerHost != host) _hostMigrated = true;
             ServerPort = cfg.GetValue("server", "login_port", ServerPort).AsInt32();
             GamePort = cfg.GetValue("server", "game_port", GamePort).AsInt32();
             ServerVersion = cfg.GetValue("server", "version", ServerVersion).AsInt32();
@@ -330,10 +349,14 @@ public static class Config
         Renderer = ReadEnum(cfg, "graphics", "renderer", Renderer);
         Screen = cfg.GetValue("video", "screen", Screen).AsInt32();
         ShowTitles = cfg.GetValue("hud", "show_titles", ShowTitles).AsBool();
+        QuestNotices = cfg.GetValue("hud", "quest_notices", QuestNotices).AsBool();
+        UiAlpha = LibreKO.Domain.UiOpacityRules.Clamp(cfg.GetValue("hud", "ui_alpha", UiAlpha).AsInt32());
         HiddenCospre = (CospreKinds)cfg.GetValue("graphics", "hidden_cospre", (int)HiddenCospre).AsInt32();
         VolumetricFog = cfg.GetValue("graphics", "volumetric_fog", VolumetricFog).AsBool();
         Bloom = cfg.GetValue("graphics", "bloom", Bloom).AsBool();
         FxLayer = cfg.GetValue("graphics", "fx_layer", FxLayer).AsBool();
+        Crowd = ReadEnum(cfg, "graphics", "crowd_mode", Crowd);
+        Shine = ReadEnum(cfg, "effects", "item_shine", Shine);
         Clouds = cfg.GetValue("graphics", "clouds", Clouds).AsBool();
         Capes = cfg.GetValue("graphics", "capes", Capes).AsBool();
         AntiAlias = ReadEnum(cfg, "graphics", "aa", AntiAlias);
@@ -355,6 +378,9 @@ public static class Config
         DestroyWellLocked = cfg.GetValue("inventory", "destroy_locked", DestroyWellLocked).AsBool();
         WhisperSize = WhisperLook.SizeFrom(cfg.GetValue("whisper", "size", (int)WhisperSize).AsInt32());
         WhisperAlpha = WhisperLook.ClampAlpha((float)cfg.GetValue("whisper", "alpha", WhisperAlpha).AsDouble());
+        PartyRowMeter = PartyWarBoard.SavedMode(cfg.GetValue("party", "row_meter", (int)PartyRowMeter).AsInt32(), PartyRowMeter);
+        PartyBoardMode = PartyWarBoard.SavedMode(cfg.GetValue("party", "board_mode", (int)PartyBoardMode).AsInt32(), PartyBoardMode);
+        PartyBoardAlpha = PartyWarBoard.SavedAlpha((float)cfg.GetValue("party", "board_alpha", PartyBoardAlpha).AsDouble());
         CamEdgePanSpeed = Mathf.Clamp((float)cfg.GetValue("controls", "cam_edge_pan_speed", CamEdgePanSpeed).AsDouble(),
             CamEdgePanSpeedMin, CamEdgePanSpeedMax);
         FxAmbient = cfg.GetValue("effects", "ambient", FxAmbient).AsBool();
@@ -400,6 +426,10 @@ public static class Config
         SfxVolume = Vol(cfg, "sfx", SfxVolume);
         UiVolume = Vol(cfg, "ui", UiVolume);
         VoiceVolume = Vol(cfg, "voice", VoiceVolume);
+        VoiceChatVolume = Mathf.Clamp((float)cfg.GetValue("voice_chat", "volume", VoiceChatVolume).AsDouble(), 0f, 1f);
+        VoiceThreshold = Mathf.Clamp((float)cfg.GetValue("voice_chat", "threshold", VoiceThreshold).AsDouble(), 0f, 1f);
+        VoicePushToTalk = cfg.GetValue("voice_chat", "push_to_talk", VoicePushToTalk).AsBool();
+        VoiceInputDevice = cfg.GetValue("voice_chat", "input_device", VoiceInputDevice).AsString();
         OtherPlayersSounds = cfg.GetValue("audio", "other_players", OtherPlayersSounds).AsBool();
         DailyRankLastViewDay = cfg.GetValue("dailyrank", "last_view_day", DailyRankLastViewDay).AsInt32();
         TimedItemsHiddenDay = cfg.GetValue("itemlist", "item_time", TimedItemsHiddenDay).AsInt32();
@@ -456,10 +486,14 @@ public static class Config
         cfg.SetValue("graphics", "renderer", (int)Renderer);
         cfg.SetValue("video", "screen", Screen);
         cfg.SetValue("hud", "show_titles", ShowTitles);
+        cfg.SetValue("hud", "quest_notices", QuestNotices);
+        cfg.SetValue("hud", "ui_alpha", UiAlpha);
         cfg.SetValue("graphics", "hidden_cospre", (int)HiddenCospre);
         cfg.SetValue("graphics", "volumetric_fog", VolumetricFog);
         cfg.SetValue("graphics", "bloom", Bloom);
         cfg.SetValue("graphics", "fx_layer", FxLayer);
+        cfg.SetValue("graphics", "crowd_mode", (int)Crowd);
+        cfg.SetValue("effects", "item_shine", (int)Shine);
         cfg.SetValue("graphics", "clouds", Clouds);
         cfg.SetValue("graphics", "capes", Capes);
         cfg.SetValue("graphics", "aa", (int)AntiAlias);
@@ -487,6 +521,9 @@ public static class Config
         cfg.SetValue("inventory", "destroy_locked", DestroyWellLocked);
         cfg.SetValue("whisper", "size", (int)WhisperSize);
         cfg.SetValue("whisper", "alpha", WhisperAlpha);
+        cfg.SetValue("party", "row_meter", (int)PartyRowMeter);
+        cfg.SetValue("party", "board_mode", (int)PartyBoardMode);
+        cfg.SetValue("party", "board_alpha", PartyBoardAlpha);
         cfg.SetValue("controls", "cam_edge_pan_speed", CamEdgePanSpeed);
         cfg.SetValue("effects", "ambient", FxAmbient);
         cfg.SetValue("effects", "distance", FxDistance);
@@ -504,6 +541,10 @@ public static class Config
         cfg.SetValue("audio", "sfx", SfxVolume);
         cfg.SetValue("audio", "ui", UiVolume);
         cfg.SetValue("audio", "voice", VoiceVolume);
+        cfg.SetValue("voice_chat", "volume", VoiceChatVolume);
+        cfg.SetValue("voice_chat", "threshold", VoiceThreshold);
+        cfg.SetValue("voice_chat", "push_to_talk", VoicePushToTalk);
+        cfg.SetValue("voice_chat", "input_device", VoiceInputDevice);
         cfg.SetValue("audio", "other_players", OtherPlayersSounds);
         cfg.SetValue("dailyrank", "last_view_day", DailyRankLastViewDay);
         cfg.SetValue("itemlist", "item_time", TimedItemsHiddenDay);
@@ -550,6 +591,22 @@ public static class Config
         ApplyGraphicsToViewport();
         Save();
         GraphicsChanged?.Invoke();
+    }
+
+    public static void SetUiAlpha(int alpha)
+    {
+        alpha = LibreKO.Domain.UiOpacityRules.Clamp(alpha);
+        if (UiAlpha == alpha) return;
+        UiAlpha = alpha;
+        Save();
+        UiAlphaChanged?.Invoke();
+    }
+
+    public static void SetQuestNotices(bool on)
+    {
+        if (QuestNotices == on) return;
+        QuestNotices = on;
+        Save();
     }
 
     public static void SetShowTitles(bool show)
@@ -640,6 +697,21 @@ public static class Config
         GraphicsChanged?.Invoke();
     }
 
+    public static void SetShineStyle(LibreKO.Domain.ShineStyle style)
+    {
+        if (Shine == style) return;
+        Shine = style;
+        Save();
+        ItemShine.ApplyStyle();
+    }
+
+    public static void SetCrowdMode(LibreKO.Domain.CrowdMode mode)
+    {
+        if (Crowd == mode) return;
+        Crowd = mode;
+        Save();
+    }
+
     public static void SetFxLayer(bool on)
     {
         if (FxLayer == on) return;
@@ -663,6 +735,16 @@ public static class Config
         VoiceVolume = Mathf.Clamp(voice, 0f, 1f);
         Save();
         AudioChanged?.Invoke();
+    }
+
+    public static void SetVoiceChat(float volume, float threshold, bool pushToTalk, string inputDevice)
+    {
+        VoiceChatVolume = Mathf.Clamp(volume, 0f, 1f);
+        VoiceThreshold = Mathf.Clamp(threshold, 0f, 1f);
+        VoicePushToTalk = pushToTalk;
+        VoiceInputDevice = inputDevice.Length == 0 ? DefaultAudioDevice : inputDevice;
+        Save();
+        VoiceChatChanged?.Invoke();
     }
 
     public static void SetDailyRankLastViewDay(int dayKey)
@@ -768,6 +850,28 @@ public static class Config
         WhisperAlpha = clamped;
         Save();
         WhisperLookChanged?.Invoke();
+    }
+
+    public static void SetPartyRowMeter(byte mode)
+    {
+        if (mode == PartyRowMeter) return;
+        PartyRowMeter = mode;
+        Save();
+    }
+
+    public static void SetPartyBoardMode(byte mode)
+    {
+        if (mode == PartyBoardMode || mode == PartyWarBoard.ModeOff) return;
+        PartyBoardMode = mode;
+        Save();
+    }
+
+    public static void SetPartyBoardAlpha(float alpha)
+    {
+        float clamped = PartyWarBoard.SavedAlpha(alpha);
+        if (Mathf.IsEqualApprox(clamped, PartyBoardAlpha)) return;
+        PartyBoardAlpha = clamped;
+        Save();
     }
 
     public static void SetDestroyWellLocked(bool locked)

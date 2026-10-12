@@ -89,6 +89,7 @@ public partial class World : Node3D
         EscapeCloses(() => _chatColorsWindow is { Visible: true }, CloseChatColors);
         EscapeCloses(() => _msgrShown, () => CloseMessenger());
         EscapeCloses(() => _forcesShown, () => CloseForces());
+        EscapeCloses(() => ChatRoomExpanded, () => _roomWindow.SetMinimized(true));
         EscapeCloses(() => _nationChatShown, () => CloseNationChat());
         EscapeCloses(() => _fortuneShown, () => CloseFortune());
         EscapeCloses(() => _combineBookShown, () => CloseCombineRecipeBook());

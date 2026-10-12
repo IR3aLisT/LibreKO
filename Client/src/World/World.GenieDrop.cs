@@ -1,4 +1,5 @@
 ﻿using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -8,37 +9,47 @@ public partial class World
     private const string GenieSkillSlotKey = "genieSkillSlot";
     private const string GenieScrollSlotKey = "genieScrollSlot";
 
-    private bool GenieSkillAllowed(SkillData.Skill s, int slot)
+    private static readonly int[] GenieRefusalTexts = { 31045, 31046, 31048 };
+    private static readonly string[] GenieRefusalFallbacks =
+    {
+        "This skill can be used on Attack tab > Attack Skill slot.",
+        "This skill can be used on Attack tab > Recovery Skill slot.",
+        "This skill can be used on Support tab.",
+    };
+
+    private bool GenieSkillAllowed(SkillData.Skill s, int cell)
     {
         if (s.IsPotion || s.IsDeadFriend || s.IsBlink || s.IsGroundArea || !SkillRequirementMet(s)) return false;
-        return slot < GenieSkillGroupSlots ? s.IsEnemy
-            : slot < GenieSkillGroupSlots * 2
-                ? s.Moral is SkillTarget.Self or SkillTarget.FriendWithMe or SkillTarget.Party or SkillTarget.PartyAll
-                : s.IsFriendly;
+        var kind = GenieCellAt(cell).Kind;
+        if (GenieKindOf(s) != kind) return false;
+        return kind != GenieCellKind.Support
+            || s.Moral is SkillTarget.Self or SkillTarget.FriendWithMe or SkillTarget.Party or SkillTarget.PartyAll;
+    }
+
+    private void GenieRefuseSkill(SkillData.Skill s)
+    {
+        if (s.IsPotion || !SkillRequirementMet(s)) return;
+        int kind = (int)GenieKindOf(s);
+        CombatNotice(ItemData.Text(GenieRefusalTexts[kind], GenieRefusalFallbacks[kind]));
     }
 
     private void WireGenieSkillSlot(Button button, int slot)
     {
         button.SetDragForwarding(
-            Callable.From<Vector2, Variant>(_ => GenieSlotDrag(button, GenieSkillSlotKey, slot, _genieSkills[slot], SkillData.Icon(_genieSkills[slot]))),
+            Callable.From<Vector2, Variant>(_ => GenieSlotDrag(button, GenieSkillSlotKey, slot, GenieCell(slot), SkillData.Icon(GenieCell(slot)))),
             Callable.From<Vector2, Variant, bool>((_, data) => GenieSkillDrop(data, slot) != 0),
             Callable.From<Vector2, Variant>((_, data) =>
             {
                 int id = GenieSkillDrop(data, slot);
                 if (id == 0) return;
-                if (TryDragSlot(data, GenieSkillSlotKey, out int from) && from != slot)
-                {
-                    int displaced = _genieSkills[slot];
-                    _genieSkills[from] = displaced != 0 && SkillData.Get(displaced) is { } back && GenieSkillAllowed(back, from) ? displaced : 0;
-                }
-                _genieSkills[slot] = id;
-                RefreshGenieSlots();
+                MoveGenieSkill(id, TryDragSlot(data, GenieSkillSlotKey, out int from) ? from : -1, slot);
             }));
         button.GuiInput += ev =>
         {
             if (ev is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right }) return;
-            _genieSkills[slot] = 0;
+            SetGenieCell(slot, 0);
             RefreshGenieSlots();
+            GenieSetupEdited();
             button.AcceptEvent();
         };
     }
@@ -83,6 +94,18 @@ public partial class World
     }
 
     private const float GenieDragPreviewSize = 36f;
+
+    private void MoveGenieSkill(int id, int from, int to)
+    {
+        if (from >= 0 && from != to)
+        {
+            int displaced = GenieCell(to);
+            SetGenieCell(from, displaced != 0 && SkillData.Get(displaced) is { } back && GenieSkillAllowed(back, from) ? displaced : 0);
+        }
+        SetGenieCell(to, id);
+        RefreshGenieSlots();
+        GenieSetupEdited();
+    }
 
     private int GenieSkillDrop(Variant data, int slot)
     {

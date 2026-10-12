@@ -48,6 +48,7 @@ public enum KnightsSubOpcode : byte
     ClanAdvancePromote = 0x56,
     UpdateMemo = 0x58,
     WishBoard = 0x61,
+    ClanBonus = 0x62,
     Top10 = 0x63,
     LeaderPoints = 0x64,
 }

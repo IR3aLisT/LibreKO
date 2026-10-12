@@ -83,6 +83,9 @@ public class MagicOverTimeService(
 
         var isHeal = (SkillMoral)magic.Moral is SkillMoral.Self or SkillMoral.FriendWithMe
             or SkillMoral.FriendExceptMe or SkillMoral.Party or SkillMoral.PartyAll or SkillMoral.AreaFriend;
+        if (isHeal && await TryHealStrikeAsync(caster, magic, skillId, targetId, type3Data, data))
+            return;
+
         var playerTargets = new List<UserSession>();
         var npcTargets = new List<NpcInstance>();
         ResolveOverTimeTargets(caster, magic, type3Data, targetId, data, isHeal, playerTargets, npcTargets);
@@ -169,6 +172,94 @@ public class MagicOverTimeService(
                 targetId,
                 data),
             excludeSender: false);
+    }
+
+    private async Task<bool> TryHealStrikeAsync(
+        UserSession caster, MagicData magic, int skillId, int targetId, MagicType3Data type3Data, int[] data)
+    {
+        if (targetId == caster.CharacterId
+            || !HealStrike.Turns(caster.HealStrikesEnemies, (SkillMoral)magic.Moral, (MagicDirectType)type3Data.DirectType))
+            return false;
+
+        if (sessionManager.GetByCharacterId(targetId) is { } player)
+        {
+            if (player.Hp <= 0 || !PvpRules.CanAttackPlayer(caster, player))
+                return false;
+            await StrikePlayerAsync(caster, player, skillId, type3Data);
+        }
+        else if (sessionManager.Regions.GetNpc(targetId) is { IsAlive: true } npc
+            && npc.ZoneId == caster.ZoneId && NpcHostility.IsAttackableBy(npc, caster))
+        {
+            await StrikeNpcAsync(caster, npc, skillId, type3Data);
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!await magicItemUsageService.TryConsumeSkillItemAsync(caster, magic))
+        {
+            await MagicCombatHelper.SendMagicFailAsync(caster, skillId);
+            return true;
+        }
+
+        await sessionManager.Regions.SendToRegion(
+            caster,
+            MagicProcessPacketWriter.Create(
+                MagicProcessOpcode.Effecting,
+                skillId,
+                (short)caster.CharacterId,
+                targetId,
+                data),
+            excludeSender: false);
+        return true;
+    }
+
+    private async Task StrikePlayerAsync(UserSession caster, UserSession target, int skillId, MagicType3Data type3Data)
+    {
+        var damage = GmMode.Taken(target, GmMode.Dealt(caster, target.Hp, HealStrike.Damage(type3Data.FirstDamage)));
+        if (damage > 0)
+        {
+            target.Hp = (short)Math.Max(0, target.Hp - damage);
+            target.MarkCombat();
+            await combatLifecycleService.SendHpChangeAsync(target, caster.CharacterId);
+            await combatLifecycleService.SendPlayerTargetHpAsync(caster, target, damage);
+            if (target.Hp <= 0)
+            {
+                target.ActiveOverTimeEffects.TryRemove(skillId, out _);
+                await combatLifecycleService.HandlePlayerDeathAsync(target, caster);
+                return;
+            }
+        }
+
+        ScheduleOverTimeEffect(target.ActiveOverTimeEffects, skillId, caster.CharacterId,
+            -HealStrike.Damage(type3Data.TimeDamage), type3Data.Duration);
+        if (target.ActiveOverTimeEffects.TryGetValue(skillId, out var applied) && applied.TickAmount < 0)
+        {
+            applied.PartyStatusCode = AttributeToPartyStatus(type3Data.Attribute);
+            await combatNotificationService.SendPartyStatusUpdateAsync(target, applied.PartyStatusCode, applied: true);
+        }
+    }
+
+    private async Task StrikeNpcAsync(UserSession caster, NpcInstance npc, int skillId, MagicType3Data type3Data)
+    {
+        combatLifecycleService.SetNpcAggro(npc, caster);
+        var damage = GmMode.Dealt(caster, npc.Hp, HealStrike.Damage(type3Data.FirstDamage));
+        if (damage > 0)
+        {
+            npc.Hp = Math.Max(0, npc.Hp - damage);
+            npc.RecordDamage(caster.CharacterId, damage, caster, id => sessionManager.GetByCharacterId(id));
+            await combatLifecycleService.SendNpcTargetHpAsync(caster, npc, damage);
+            if (npc.Hp <= 0)
+            {
+                npc.ActiveOverTimeEffects.TryRemove(skillId, out _);
+                await combatLifecycleService.HandleNpcDeathAsync(npc, caster);
+                return;
+            }
+        }
+
+        ScheduleOverTimeEffect(npc.ActiveOverTimeEffects, skillId, caster.CharacterId,
+            -HealStrike.Damage(type3Data.TimeDamage), type3Data.Duration);
     }
 
     private const int PartyWideTarget = -1;

@@ -30,6 +30,7 @@ public partial class World : Node3D
         Net.I.GoldChangeEvent += OnGoldChange;
         Net.I.LootGoldEvent += OnLootGold;
         Net.I.GoldChangeLogEvent += OnGoldChangeLog;
+        Net.I.ExpJackpotEvent += OnExpJackpot;
         Net.I.ExpChangeEvent += OnExpChange;
         Net.I.ItemStatsEvent += OnSheetStats;
         Net.I.LevelChangeEvent += OnLevelChange;
@@ -48,6 +49,7 @@ public partial class World : Node3D
         Net.I.GoldChangeEvent -= OnGoldChange;
         Net.I.LootGoldEvent -= OnLootGold;
         Net.I.GoldChangeLogEvent -= OnGoldChangeLog;
+        Net.I.ExpJackpotEvent -= OnExpJackpot;
         Net.I.ExpChangeEvent -= OnExpChange;
         Net.I.ItemStatsEvent -= OnSheetStats;
         Net.I.LevelChangeEvent -= OnLevelChange;
@@ -587,31 +589,49 @@ public partial class World : Node3D
     private const int TextLostCoins = 6089;
     private const int TextUsedCoins = 6099;
     private const int TextReceivedCoins = 6091;
+    private const int TextMultipliedCoins = 6093;
 
     private void OnGoldChangeLog(GoldChangeReply reply)
     {
         switch (reply.Sub)
         {
             case GoldChangeReply.Earned:
-                CombatLogAdd(WithAmount(TextEarnedCoins, "Earned %d Coins.", reply.Amount), CombatLogKind.Resource);
+                CombatLogAdd(WithAmount(TextEarnedCoins, "Earned %d Coins.", reply.Amount), CombatLogKind.Resource, tab: LogTab.Item);
                 break;
             case GoldChangeReply.Lost:
-                CombatLogAdd(WithAmount(TextLostCoins, "Lost %d Coins.", reply.Amount), CombatLogKind.Incoming);
+                CombatLogAdd(WithAmount(TextLostCoins, "Lost %d Coins.", reply.Amount), CombatLogKind.Incoming, tab: LogTab.Item);
                 break;
             case GoldChangeReply.Used:
-                CombatLogAdd(WithAmount(TextUsedCoins, "Used %d Coins.", reply.Amount), CombatLogKind.Incoming);
+                CombatLogAdd(WithAmount(TextUsedCoins, "Used %d Coins.", reply.Amount), CombatLogKind.Incoming, tab: LogTab.Item);
                 break;
             case GoldChangeReply.Received:
-                CombatLogAdd(WithAmount(TextReceivedCoins, "Received %d coins.", reply.Amount), CombatLogKind.Resource);
+                CombatLogAdd(WithAmount(TextReceivedCoins, "Received %d coins.", reply.Amount), CombatLogKind.Resource, tab: LogTab.Item);
+                break;
+            case GoldChangeReply.Multiplied:
+                if (reply.UnitId == _myId)
+                    CombatLogAdd(WithAmount(TextMultipliedCoins, "Received %d times of the coins.", reply.Times), CombatLogKind.Resource, tab: LogTab.Item);
+                PlayJackpotEffect(reply.UnitId, Jackpot.CoinEffect(reply.Times));
                 break;
         }
+    }
+
+    private void OnExpJackpot(int unitId, int times)
+    {
+        if (unitId == _myId)
+            CombatLogAdd(WithAmount(Jackpot.ExpText, "You have been awarded %d times your EXP.", times), CombatLogKind.Resource, tab: LogTab.System);
+        PlayJackpotEffect(unitId, Jackpot.ExpEffect(times));
+    }
+
+    private void PlayJackpotEffect(int unitId, int fxId)
+    {
+        if (fxId > 0 && Fx.NameForId(fxId) is { } name) SpawnFxOn(unitId, name, 0f);
     }
 
     private void OnLootGold(int total)
     {
         long gained = total - Sheet.Gold;
         if (gained > 0)
-            CombatLogAdd(WithAmount(TextPickedUpCoins, "Picked up %d Coins.", gained), CombatLogKind.Resource);
+            CombatLogAdd(WithAmount(TextPickedUpCoins, "Picked up %d Coins.", gained), CombatLogKind.Resource, tab: LogTab.Item);
     }
 
     private void LogExpDelta(long delta)

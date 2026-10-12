@@ -56,7 +56,7 @@ public class PremiumBonusTests
     [Fact]
     public void TheTooltipNamesThePremiumAndListsKnownBonuses()
     {
-        var text = PremiumBonus.Tooltip("Gold Premium", "3d", new[]
+        var text = PremiumBonus.Tooltip("GOLD PREMIUM", "Premium Service : 3 day(s) remaining.", new[]
         {
             new PremiumBonus(PremiumBonusKind.Coins, 5),
             new PremiumBonus(PremiumBonusKind.RepairDiscount, 50),
@@ -64,6 +64,6 @@ public class PremiumBonusTests
             new PremiumBonus(PremiumBonusKind.FreeReset, 0),
         });
 
-        Assert.Equal("Gold Premium — 3d left\nCoins +5%\nRepairs 50% cheaper\nFree stat and skill resets", text);
+        Assert.Equal("GOLD PREMIUM\nPremium Service : 3 day(s) remaining.\nCoins +5%\nRepairs 50% cheaper\nFree stat and skill resets", text);
     }
 }

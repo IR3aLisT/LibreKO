@@ -196,6 +196,9 @@ public class KnightsPacketCoordinator(
                 await knightsManagementPacketService.HandleAllyListAsync(session);
                 break;
 
+            case KnightsSubOpcode.ClanBonus:
+                break;
+
             default:
                 logger.LogDebug("Unhandled knights sub-opcode 0x{SubOp:X2} from {Name}", (byte)subOpcode, session.Name);
                 break;

@@ -38,4 +38,9 @@ public static class NpcTypes
     public const int FixedPose = 178;
 
     public static bool IsGuard(int npcType) => npcType >= Guard && npcType <= WarGuard;
+
+    public static bool IsStructure(int npcType) => npcType is Gate or Lever or KeyGate or BattleMonument;
+
+    public static bool KeepsSpawnFacing(float direction, int npcType, bool hasWalkCycle) =>
+        direction != 0 || IsStructure(npcType) || !hasWalkCycle;
 }

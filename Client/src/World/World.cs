@@ -184,6 +184,7 @@ public partial class World : Node3D, IWorldContext
         if (!Alive) return;
 
         if (!await LoadStep("Ready", 1.0f, "Welcome to LibreKO")) return;
+        MemoryCensus.Log($"zone {_zone} loaded");
         if (fxWarm != null && IsInstanceValid(fxWarm)) fxWarm.QueueFree();
         HideLoading();
         RefreshInZoneLeaveUi();

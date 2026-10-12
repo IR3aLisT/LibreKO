@@ -46,6 +46,7 @@ public partial class Net : Node
     public event Action<int, int, int, int, int, int>? PointChangeEvent;
     public event Action<int>? GoldChangeEvent;
     public event Action<long>? ExpChangeEvent;
+    public event Action<int, int>? ExpJackpotEvent;
     public event Action<long>? DeathExpLossEvent;
 
     public event Action<int, int>? TimeEvent;
@@ -439,6 +440,7 @@ public partial class Net : Node
             case GameOpcodes.GS_MESSENGER:         HandleMessenger(p); break;
             case GameOpcodes.GS_FORCES:            HandleForces(p); break;
             case GameOpcodes.GS_NATION_CHAT:       HandleNationChat(p); break;
+            case GameOpcodes.GS_ROOM_MEDIA:        HandleRoomMedia(p); break;
             case GameOpcodes.GS_KILL_ASSIST:       HandleKillAssist(p); break;
             case GameOpcodes.GS_CONTINOUS_PACKET:  HandleContinuous(p); break;
             case GameOpcodes.GS_NPC_EVENT:         HandleNpcEvent(p); break;

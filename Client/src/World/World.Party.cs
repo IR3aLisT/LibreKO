@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using Godot;
+using LibreKO.Domain;
 using LibreKO.Network;
 
 namespace LibreKO;
@@ -16,6 +17,13 @@ public partial class World
     private const int PartyMaxMembers = 8;
 
     private static IReadOnlyList<PartyMember> PartyMembers => Net.I.Party;
+    private readonly PartyOrder _partyOrder = new();
+    private List<PartyMember> PartyRows => _partyOrder.Arrange(PartyMembers, member => member.CharId);
+
+    private void MovePartyRow(int memberId, int step)
+    {
+        if (_partyOrder.Move(memberId, step)) RefreshPartyHud();
+    }
     private bool InParty => Net.I.InParty;
     private bool AmLeader => PartyMembers.Count > 0 && PartyMembers[0].CharId == _myId;
 
@@ -26,6 +34,7 @@ public partial class World
         BuildPartyHud();
 
         Net.I.PartyMemberEvent += OnPartyMember;
+        Net.I.PartyRejoinForgetEvent += _partyRejoin.Forget;
         Net.I.PartyErrorEvent += OnPartyError;
         Net.I.PartyInviteEvent += OnPartyInvite;
         Net.I.PartyRemovedEvent += OnPartyRemoved;
@@ -46,6 +55,7 @@ public partial class World
     private void PartyDispose()
     {
         Net.I.PartyMemberEvent -= OnPartyMember;
+        Net.I.PartyRejoinForgetEvent -= _partyRejoin.Forget;
         Net.I.PartyErrorEvent -= OnPartyError;
         Net.I.PartyInviteEvent -= OnPartyInvite;
         Net.I.PartyRemovedEvent -= OnPartyRemoved;
@@ -163,7 +173,36 @@ public partial class World
         Net.I.SendPartyAnswer(accept);
     }
 
-    private void OnPartyMember(PartyMember m) => RefreshPartyUI();
+    private readonly PartyRejoin _partyRejoin = new();
+
+    private void OnPartyMember(PartyMember m)
+    {
+        if (m.CharId != _myId) _partyRejoin.Remember(m.CharId, m.Name);
+        RefreshPartyUI();
+    }
+
+    private void TryPartyRejoin(string name)
+    {
+        bool member = false;
+        foreach (var m in PartyMembers)
+            if (string.Equals(m.Name, name, System.StringComparison.OrdinalIgnoreCase)) member = true;
+        if (_partyRejoin.Recall(name, AmLeader, PartyMembers.Count, PartyMaxMembers, member))
+            InvitePlayerToParty(name);
+    }
+
+    private string PartyRejoinTip => _partyRejoin.On
+        ? ItemData.Text(PartyRejoin.TipOnText, "Members who drop out are invited again when they come back into view.")
+        : ItemData.Text(PartyRejoin.TipOffText, "Members who drop out are not invited again.");
+
+    private void TogglePartyRejoin()
+    {
+        _partyRejoin.Toggle();
+        CombatNotice(_partyRejoin.On
+            ? ItemData.Text(PartyRejoin.TurnedOnText, "Automatic party re-invite is on.")
+            : ItemData.Text(PartyRejoin.TurnedOffText, "Automatic party re-invite is off."));
+        RefreshPartyRejoinToggle();
+        PluginNotifyParty();
+    }
 
     private void OnPartyError(int code)
     {
@@ -172,6 +211,7 @@ public partial class World
 
     private void OnPartyRemoved(int memberId, string who)
     {
+        if (memberId == _myId) _partyRejoin.Clear();
         if (memberId == _myId) CombatNotice(ItemData.Text(PartyQuitText, "You've quit the party."));
         else if (who.Length > 0) CombatNotice($"{who} left the party.");
         RefreshPartyUI();
@@ -179,6 +219,7 @@ public partial class World
 
     private void OnPartyDisband()
     {
+        _partyRejoin.Clear();
         CombatNotice(ItemData.Text(PartyDisbandedText, "The party has been disbanded."));
         RefreshPartyUI();
     }

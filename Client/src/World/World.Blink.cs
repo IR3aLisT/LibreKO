@@ -20,7 +20,7 @@ public partial class World
 
         bool skipCooldown = SpendInstantMagic(s);
         _blinkWarpUntil = Now() + BlinkWarpWindow;
-        Net.I.SendMagic(MagicSub.Casting, s.Id, _myId, data);
+        SendCastingStage(s, _myId, data);
         QueuePendingStage(s.Id, _myId, PendingEffecting, CastDelay(s), data);
         BeginLocalCast(s, skipCooldown);
     }

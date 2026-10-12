@@ -60,7 +60,7 @@ public partial class Cape : MeshInstance3D, IFxTicked
     };
 
     public readonly record struct CapeDef(
-        string Name, int Family, int Grade, int Ranking, int C, int M, int Price, int Points);
+        string Name, int Family, int Grade, int Ranking, int C, int M, int Price, int Points, string Desc = "", bool Castle = false);
 
     private sealed class GridMesh
     {
@@ -93,7 +93,9 @@ public partial class Cape : MeshInstance3D, IFxTicked
                 o["name"].AsString(), o["family"].AsInt32(), o["grade"].AsInt32(),
                 o["ranking"].AsInt32(), o["c"].AsInt32(), o["m"].AsInt32(),
                 o.TryGetValue("price", out var pr) ? pr.AsInt32() : 0,
-                o.TryGetValue("points", out var pt) ? pt.AsInt32() : 0);
+                o.TryGetValue("points", out var pt) ? pt.AsInt32() : 0,
+                o.TryGetValue("desc", out var desc) ? desc.AsString() : "",
+                o.TryGetValue("castle", out var castle) && castle.AsBool());
         }
         foreach (var k in doc["meshes"].AsGodotDictionary())
         {
@@ -384,6 +386,9 @@ public partial class Cape : MeshInstance3D, IFxTicked
 
     public override void _ExitTree() => FxDriver.Lane(this, FxLane.Late)?.Leave(this);
 
+    private Transform3D _parkedPin;
+    private bool _parkedWritten;
+
     public void FxTick(double delta)
     {
         using var scope = Perf.Measure(Perf.Section.Cape);
@@ -403,13 +408,19 @@ public partial class Cape : MeshInstance3D, IFxTicked
                 Upload(_surfacePos);
                 _frozen = true;
             }
-            GlobalTransform = _pinCurrent;
+            if (!_parkedWritten || !_pinCurrent.IsEqualApprox(_parkedPin))
+            {
+                GlobalTransform = _pinCurrent;
+                _parkedPin = _pinCurrent;
+                _parkedWritten = true;
+            }
             _lastFrameAnchor = anchor;
             _pinPrevious = _pinCurrent;
             _primed = false;
             if (_dbg != null) _dbg.Visible = false;
             return;
         }
+        _parkedWritten = false;
         UpdatePins();
         if (!_primed || _frozen || delta > 0.2 || anchor.Origin.DistanceSquaredTo(_lastFrameAnchor.Origin) > 9f)
             Reset(anchor);

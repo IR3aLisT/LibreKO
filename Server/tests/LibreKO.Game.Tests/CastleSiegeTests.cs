@@ -85,4 +85,21 @@ public class CastleSiegeTests : GameTestBase
         CastleSiegeRules.HoldAfterCapture(3000).Should().Be(CastleSiegeRules.HoldSeconds);
         CastleSiegeRules.HoldAfterCapture(300).Should().Be(300);
     }
+
+    [Theory]
+    [InlineData(450001, 30, true, true)]
+    [InlineData(450001, 30, false, false)]
+    [InlineData(450001, 62, false, true)]
+    [InlineData(450001, 66, false, true)]
+    [InlineData(450001, 21, false, false)]
+    [InlineData(450002, 66, false, true)]
+    [InlineData(450002, 61, false, false)]
+    [InlineData(450003, 63, false, true)]
+    [InlineData(450003, 30, true, false)]
+    [InlineData(450010, 30, true, true)]
+    [InlineData(450010, 66, false, false)]
+    public void SiegeTransformationsKeepToTheirZones(int skillId, byte zoneId, bool siegeOpen, bool allowed)
+    {
+        SiegeRules.SiegeTransformationAllowed(skillId, zoneId, siegeOpen).Should().Be(allowed);
+    }
 }

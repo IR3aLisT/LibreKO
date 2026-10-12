@@ -25,6 +25,12 @@ public partial class Net
             if (p.ReadByte() == ServerStateClientOutOfDate)
             {
                 _autoLoginPending = false;
+                if (ReconnectState != ReconnectPhase.Idle)
+                {
+                    GiveUpReconnect(ClientOutOfDateText);
+                    return;
+                }
+                Disconnect(expected: true);
                 ErrorEvent?.Invoke(ClientOutOfDateText);
                 return;
             }

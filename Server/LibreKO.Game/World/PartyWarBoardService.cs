@@ -11,6 +11,7 @@ public interface IPartyWarBoardService
     void CountHealing(UserSession healer, int amount);
     Task SetModeAsync(UserSession session, byte target, byte mode);
     void MemberJoined(int partyIndex, int memberId);
+    void SeedModes(int partyIndex, int memberId, byte rowMode, byte boardMode);
     void MemberLeft(int partyIndex, int memberId);
     void PartyDeleted(int partyIndex);
     Task PushAsync();
@@ -97,6 +98,19 @@ public sealed class PartyWarBoardService(
             return;
 
         await session.Client.SendPacket(PartyPacketWriter.WarBoard(target, mode, Shares(party, board, mode)));
+    }
+
+    public void SeedModes(int partyIndex, int memberId, byte rowMode, byte boardMode)
+    {
+        if (rowMode > ModeHealing || boardMode > ModeHealing)
+            return;
+        var board = _boards.GetOrAdd(partyIndex, _ => new Board());
+        lock (board)
+        {
+            var member = board.Of(memberId);
+            member.RowMode = rowMode;
+            member.BoardMode = boardMode;
+        }
     }
 
     public void MemberJoined(int partyIndex, int memberId)

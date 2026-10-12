@@ -14,7 +14,14 @@ public enum MonsterStoneResult : byte
 public static class NestDungeon
 {
     public const int EventSummonGroup = 1;
-    public const string CompletedLine = "Quest Mission Completed!!!";
+    public const int TitleText = 7420;
+    public const string TitleFallback = "<< %s >>";
+    public const int CompletedText = 7472;
+    public const string CompletedFallback = "Quest Mission Completed!!!";
+    public const int TerminationText = 7449;
+    public const string TerminationFallback = "Mission termination time....";
+    public const int SecondsText = 7446;
+    public const string SecondsFallback = "seconds";
     public const int InPartyText = 9916;
     public const int DeadText = 9918;
     public const int BattleText = 7725;
@@ -24,7 +31,6 @@ public static class NestDungeon
     private const int ExpFactor = 5;
     private const int ExpBase = 10;
 
-    private const string TerminationLabel = "Mission termination time....";
     private const int FirstNest = 81;
     private const int SecondNest = 82;
     private const int ThirdNest = 83;
@@ -38,13 +44,14 @@ public static class NestDungeon
     public static bool IsInstancedZone(int zone) =>
         IsNestZone(zone) || zone is BorderDefenseWar or JuraidMountain;
 
-    public static string TerminationLine(int secondsLeft, bool completed)
+    public static string TerminationLine(int secondsLeft, bool completed, string label = TerminationFallback,
+        string seconds = SecondsFallback)
     {
-        if (completed) return $"{TerminationLabel} {secondsLeft} seconds";
+        if (completed) return $"{label} {secondsLeft} {seconds}";
         int hours = secondsLeft / SecondsPerHour;
         int minutes = secondsLeft % SecondsPerHour / SecondsPerMinute;
-        int seconds = secondsLeft % SecondsPerMinute;
-        return $"{TerminationLabel}{hours:00}:{minutes:00}:{seconds:00}";
+        int secondsPart = secondsLeft % SecondsPerMinute;
+        return $"{label}{hours:00}:{minutes:00}:{secondsPart:00}";
     }
 
     public static long ExpFor(int level) => ExpFactor * ((long)level * level * level + ExpBase);

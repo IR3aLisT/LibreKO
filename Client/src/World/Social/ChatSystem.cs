@@ -552,8 +552,8 @@ internal sealed partial class ChatSystem
 
     private void OnRoomChat(RoomChatLine line)
     {
-        string name = ZoneCatalog.Knows(line.ZoneId) ? $"[ {ZoneCatalog.Name(line.ZoneId)} ] {line.Name}" : line.Name;
-        AddEntry(ChatEntry.Player(ChatRoomChannel, name, Net.I.LastEnter.Nation, false, line.Text));
+        string place = ZoneCatalog.Knows(line.ZoneId) ? ZoneCatalog.Name(line.ZoneId) : "";
+        AddEntry(ChatEntry.Player(ChatRoomChannel, line.Name, Net.I.LastEnter.Nation, false, line.Text) with { Place = place });
     }
 
     internal Action<string, string>? WhisperEcho;

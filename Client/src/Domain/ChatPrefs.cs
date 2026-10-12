@@ -12,6 +12,9 @@ public sealed class ChatPrefs
     public static readonly int[] FontSizes = { 12, 13, 15 };
     public static readonly float[] Backgrounds = { 0.9f, 0.5f, 0.2f, 0f };
     private const string FilterPrefix = "f.";
+    private const int Revision = 2;
+    private const int FirstRevision = 1;
+    private const ChatCategory SplitFromGeneral = ChatCategory.NoahKnights | ChatCategory.ChatRoom;
 
     private readonly Dictionary<string, ChatCategory> _filters = new();
 
@@ -35,7 +38,8 @@ public sealed class ChatPrefs
     public string Format()
     {
         var text = new StringBuilder();
-        text.Append("tab=").Append(Tab);
+        text.Append("rev=").Append(Revision);
+        text.Append(";tab=").Append(Tab);
         text.Append(";ts=").Append(Timestamps ? 1 : 0);
         text.Append(";font=").Append(FontSize);
         text.Append(";bg=").Append(Background);
@@ -49,6 +53,8 @@ public sealed class ChatPrefs
     public static ChatPrefs Parse(string text)
     {
         var prefs = new ChatPrefs();
+        int revision = FirstRevision;
+        var saved = new List<(ChatTabSpec Tab, ChatCategory Filter)>();
         foreach (string part in (text ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
             int eq = part.IndexOf('=');
@@ -64,13 +70,16 @@ public sealed class ChatPrefs
                 case "bg" when number && n >= 0 && n < Backgrounds.Length: prefs.Background = n; break;
                 case "lock" when number: prefs.Locked = n != 0; break;
                 case "nearbylist" when number: prefs.NearbyShown = n != 0; break;
+                case "rev" when number: revision = n; break;
                 default:
                     if (number && key.StartsWith(FilterPrefix, StringComparison.Ordinal)
                         && ChatTabs.IndexOf(key[FilterPrefix.Length..]) is int index and >= 0)
-                        prefs.SetFilter(ChatTabs.All[index], (ChatCategory)n & ChatCategory.All);
+                        saved.Add((ChatTabs.All[index], (ChatCategory)n & ChatCategory.All));
                     break;
             }
         }
+        foreach (var (tab, filter) in saved)
+            prefs.SetFilter(tab, revision < Revision && filter.HasFlag(ChatCategory.General) ? filter | SplitFromGeneral : filter);
         return prefs;
     }
 }

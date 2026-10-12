@@ -73,6 +73,7 @@ public partial class World
         Net.I.ClanInviteEvent += OnClanInvite;
         Net.I.ClanResultEvent += OnClanResult;
         Net.I.ClanNoticeRefusedEvent += OnClanNoticeRefused;
+        Net.I.ClanMemoEvent += OnClanMemo;
         Net.I.ClanTop10Event += OnClanTop10;
         Net.I.ClanDonationListEvent += OnClanDonationList;
         Net.I.ClanLeaderPointsEvent += OnClanLeaderPoints;
@@ -100,6 +101,7 @@ public partial class World
         Net.I.ClanInviteEvent -= OnClanInvite;
         Net.I.ClanResultEvent -= OnClanResult;
         Net.I.ClanNoticeRefusedEvent -= OnClanNoticeRefused;
+        Net.I.ClanMemoEvent -= OnClanMemo;
         Net.I.ClanTop10Event -= OnClanTop10;
         Net.I.ClanDonationListEvent -= OnClanDonationList;
         Net.I.ClanLeaderPointsEvent -= OnClanLeaderPoints;
@@ -270,6 +272,11 @@ public partial class World
         var refreshBtn = new Button { Text = "Refresh", FocusMode = Control.FocusModeEnum.None };
         refreshBtn.Pressed += () => RefreshClanTab();
         actions.AddChild(refreshBtn);
+
+        var memoBtn = new Button { Text = "Memo", FocusMode = Control.FocusModeEnum.None,
+            TooltipText = ItemData.Text(Domain.ClanMemo.TitleText, "Memo writing space") };
+        memoBtn.Pressed += OpenClanMemo;
+        actions.AddChild(memoBtn);
 
         _clanSaveBtn = new Button { Text = "Save Contribution", FocusMode = Control.FocusModeEnum.None };
         _clanSaveBtn.Pressed += () => ToggleClanPoints();
@@ -505,6 +512,13 @@ public partial class World
             name.MouseFilter = Control.MouseFilterEnum.Ignore;
             hb.AddChild(name);
 
+            var memo = UiTheme.Text(m.Memo ?? "", 11, UiTheme.TextLo);
+            memo.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            memo.ClipText = true;
+            memo.TooltipText = m.Memo ?? "";
+            memo.MouseFilter = Control.MouseFilterEnum.Ignore;
+            hb.AddChild(memo);
+
             var sub = UiTheme.Text(
                 $"{ClassName(m.Class)}  Lv {m.Level}", 12, m.IsOnline ? UiTheme.TextLo : UiTheme.TextDim);
             sub.MouseFilter = Control.MouseFilterEnum.Ignore;
@@ -517,6 +531,29 @@ public partial class World
             hb.AddChild(seen);
             _clanList.AddChild(row);
         }
+    }
+
+    private void OpenClanMemo()
+    {
+        string mine = _clanMembers.Find(m => string.Equals(m.Name, Net.I.LastEnter.Name, StringComparison.OrdinalIgnoreCase)).Memo ?? "";
+        Notice.AskText(this, ItemData.Text(Domain.ClanMemo.PromptText, "Enter Memo"), typed => Net.I.SendClanMemo(typed.Trim()),
+            ItemData.Text(Domain.ClanMemo.TitleText, "Memo writing space"), initial: mine,
+            placeholder: ItemData.Text(Domain.ClanMemo.PlaceholderText, "Please enter the Memo"), maxLength: Domain.ClanMemo.MaxLength);
+    }
+
+    private void OnClanMemo(byte result, string memo)
+    {
+        if (result != Domain.ClanMemo.Written)
+        {
+            CombatNotice(ItemData.Text(Domain.ClanMemo.FailureText(result), "You have failed to register a memo."));
+            return;
+        }
+        int index = _clanMembers.FindIndex(m => string.Equals(m.Name, Net.I.LastEnter.Name, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return;
+        var mine = _clanMembers[index];
+        mine.Memo = memo;
+        _clanMembers[index] = mine;
+        if (_clanTab == ClanTab.Members) RenderClanMembers();
     }
 
     private static string LastSeen(int hours) =>

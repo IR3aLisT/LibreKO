@@ -17,6 +17,7 @@ public partial class World
 
     private const string ClanWindowId = "clan";
     private const string PresetWindowId = "presets";
+    private const string TitlesWindowId = "titles";
 
     private static readonly Dictionary<string, string> MainWindowKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -92,6 +93,7 @@ public partial class World
         IGameHotbar, IGameMap, IGameCommands, IGameLog, IGameQuests, IGameSkills
     {
         private const string SelectPlayerNotice = "Select a player to trade with.";
+        private const int NoTargetText = 7680;
 
         public void GoTown() => _w.TownRecallPress();
 
@@ -106,6 +108,20 @@ public partial class World
             }
             _w.BeginTradeRequest(_targetId, _targetName);
         }
+
+        public void InviteTarget()
+        {
+            if (!IsPlayer)
+            {
+                _w.CombatNotice(ItemData.Text(NoTargetText, "No target selected."));
+                return;
+            }
+            _w.InvitePlayerToParty(_targetName);
+        }
+
+        public void ShowExitMenu() => _w.ToggleEsc(true);
+
+        public void Run(KeyAction action) => _w.RunKeyAction(action);
 
         private readonly World _w;
         private int _targetId = -1, _targetHp, _targetMaxHp;
@@ -123,9 +139,12 @@ public partial class World
         event Action? IGameHotbar.Changed { add { } remove { } }
         event Action? IGameMap.Changed { add { } remove { } }
         event Action<string>? IGameChat.LineAdded { add { } remove { } }
+        event Action<GameChatLine>? IGameChat.LineArrived { add { } remove { } }
         event Action? IGameChat.InputRequested { add { } remove { } }
         event Action<GameLogLine>? IGameLog.LineAdded { add { } remove { } }
         event Action? IGameQuests.Changed { add { } remove { } }
+        event Action? IGameWindows.TopRightRowMoved { add { } remove { } }
+        public Rect2 TopRightRow => _w._topRightRow;
         event Action? IGameSkills.Changed { add { } remove { } }
 
         public IReadOnlyList<GameSkillTab> Tabs =>
@@ -188,7 +207,10 @@ public partial class World
             net.ItemStatsEvent += OnStats;
             net.NoticeEvent += OnNotice;
             net.RankAuraShownEvent += OnRankAura;
+            net.MailUnreadEvent += OnMailUnread;
         }
+
+        private void OnMailUnread(int unread) => RaiseCharacter();
 
         private void OnRankAura(int charId, bool shown)
         {
@@ -273,6 +295,8 @@ public partial class World
         public int Ac => _w.Sheet.Ac;
         public int Np => _w.Sheet.Np;
         public int Manner => _w.Sheet.Manner;
+        public bool NoahKnight => _w.SelfIsNoahKnight;
+        public int MailUnread => Net.I.MailUnread;
         public int Resist(int index) => _w.Sheet.ResistAt(index);
         public void AllocateStat(int statRow) => _w.OnAllocate(statRow);
         public int Sp => _w.Vitals.Sp;
@@ -344,6 +368,8 @@ public partial class World
 
         public void RequestDrops() => _w.RequestDropsFor(_targetId);
 
+        public IReadOnlyList<GameTargetDrop> QuestDrops => _w.TargetQuestDropsForPlugin();
+
         public void RaiseDrops(int targetId)
         {
             if (targetId == _targetId) PluginHost.Game.RaiseTarget();
@@ -377,11 +403,13 @@ public partial class World
         {
             if (string.Equals(id, ClanWindowId, StringComparison.OrdinalIgnoreCase)) { _w.OpenCharacterPage(CharacterPage.Clan); return; }
             if (string.Equals(id, PresetWindowId, StringComparison.OrdinalIgnoreCase)) { _w.TogglePreset(); return; }
+            if (string.Equals(id, TitlesWindowId, StringComparison.OrdinalIgnoreCase)) { _w.ToggleTitlePicker(); return; }
             if (MainWindowKeys.TryGetValue(id, out var key)) { _w.ToggleMainWindow(key); return; }
             if (HudWindow.Find(id) is { } win) win.Visible = !win.Visible;
         }
 
         IReadOnlyList<string> IGameChat.History => _w.Chat?.History ?? Array.Empty<string>();
+        IReadOnlyList<GameChatLine> IGameChat.Lines => _w.Chat?.Lines ?? Array.Empty<GameChatLine>();
 
         public void Send(string text) => _w.Chat?.SendText(text);
 
@@ -443,12 +471,19 @@ public partial class World
         void IGameHotbar.HideTooltip() => _w.HideItemTooltip();
 
         public int Zone => _w._zone;
+        public IReadOnlyList<byte> MonumentOwners => Net.I.MonumentOwners;
+        public bool WantedUiOn => _w._vanguardUiOn;
+        void IGameMap.ToggleWantedUi() => _w.ToggleVanguardUi();
+        void IGameMap.ShowWantedList() => _w.ShowWantedList();
         public string ZoneName => MapName(_w._zone);
         public float X => _w._myKoX;
         public float Z => _w._myKoZ;
         public float HeadingDegrees => _heading;
         public float WorldExtent => _w._miniMap?.WorldExtent ?? 0f;
         public IReadOnlyList<MiniMap.Blip> Blips => _w._blipScratch;
+        public int NpcKind => _w._npcFinderKind;
+        public bool NpcKindPresent(int kind) => _w.NpcKindPresent(kind);
+        public void PickNpcKind(int kind) => _w.PickNpcKind(kind);
 
         public Texture2D? MapTexture
         {

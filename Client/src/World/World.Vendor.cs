@@ -284,7 +284,7 @@ public partial class World
 
     private void OnVendorCellHovered(ItemSlotView cell)
     {
-        if (_vendorCellIds[cell.Index] != 0) ShowItemTooltip(-1, TooltipItem(_vendorCellIds[cell.Index]));
+        if (_vendorCellIds[cell.Index] != 0) ShowItemTooltip(-1, TooltipItem(_vendorCellIds[cell.Index]), shopGoods: true);
     }
 
     private bool VendorIntoBag(int cell, int abs)
@@ -365,7 +365,8 @@ public partial class World
     {
         if (LoyaltyShop || !InMainBag(abs)) return "";
         int unit = VendorSellUnit(Inv[abs].ItemId);
-        return unit > 0 ? $"Sells for {(long)unit * Mathf.Max(1, (int)Inv[abs].Count):n0} gold" : "";
+        if (unit <= 0) return "";
+        return Inv[abs].Count > 1 ? $"Sells for {unit:n0} gold each" : $"Sells for {unit:n0} gold";
     }
 
     private static int VendorSellUnit(int itemId) => ItemData.IsSellable(itemId) ? ItemData.SellPrice(itemId) : 0;
@@ -462,7 +463,7 @@ public partial class World
             ? $"Bought {ItemData.DisplayName(_pendingTrade.ItemId)} (−{price:n0})"
             : $"Sold {ItemData.DisplayName(_pendingTrade.ItemId)} (+{price:n0})", bad: false);
         int textId = !_pendingTrade.Buy ? ShopReceivedText : LoyaltyShop ? ShopUsedContText : ShopPaidText;
-        CombatLogAdd(ItemData.Text(textId, "%d").Replace("%d", price.ToString("n0")), CombatLogKind.Resource, ShopLogTint);
+        CombatLogAdd(ItemData.Text(textId, "%d").Replace("%d", price.ToString("n0")), CombatLogKind.Resource, ShopLogTint, tab: LogTab.Item);
     }
 
     private const int ShopPaidText = 7683;

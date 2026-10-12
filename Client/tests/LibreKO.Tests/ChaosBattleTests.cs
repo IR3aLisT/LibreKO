@@ -52,9 +52,9 @@ public class ChaosBattleTests
     [Fact]
     public void ZoneEightyFiveAllowsOnlyChaosSkillsAndCubeItems()
     {
-        Assert.True(ChaosBattle.SkillAllowed(ChaosBattle.Zone, ChaosBattle.SkillTree));
-        Assert.False(ChaosBattle.SkillAllowed(ChaosBattle.Zone, 105));
-        Assert.True(ChaosBattle.SkillAllowed(21, 105));
+        Assert.True(ZoneSkillTrees.Allowed(ChaosBattle.Zone, ChaosBattle.SkillTree, 0));
+        Assert.False(ZoneSkillTrees.Allowed(ChaosBattle.Zone, 105, 0));
+        Assert.True(ZoneSkillTrees.Allowed(21, 105, 0));
         Assert.True(ChaosBattle.ItemUsable(ChaosBattle.Zone, ChaosBattle.ChaosItemKind));
         Assert.False(ChaosBattle.ItemUsable(ChaosBattle.Zone, 0));
         Assert.True(ChaosBattle.KeptOnEntry(490230));

@@ -122,6 +122,15 @@ public static class NationChatRules
         : "";
 
     public static string Row(string name, int members, int capacity) => $"{name}({members}/{capacity})";
+
+    public static string Title(string name, int members, int capacity) =>
+        members > 0 ? $"{name} ({members}/{capacity})" : name;
+
+    public static string Summary(bool isPublic, bool locked, int members, int capacity)
+    {
+        string kind = isPublic ? "Public channel" : locked ? "Private room · locked" : "Private room";
+        return members > 0 ? $"{kind} · {members}/{capacity} members" : kind;
+    }
 }
 
 public sealed class NationChatState
@@ -134,8 +143,19 @@ public sealed class NationChatState
     public bool RoomPrivate { get; private set; }
     public string RoomPassword { get; private set; } = "";
     public int RoomMax { get; private set; } = NationChatRules.RoomSizes[0];
+    public int RoomMembers { get; private set; }
 
     public bool InRoom => InPublic || InPrivate;
+
+    public void Describe(string name, bool locked, int members, int max)
+    {
+        RoomName = name;
+        RoomPrivate = locked;
+        RoomMembers = members;
+        RoomMax = max;
+    }
+
+    public void Counted(int members) => RoomMembers = members;
 
     public void EnteredPublic(int channelId)
     {
@@ -143,6 +163,7 @@ public sealed class NationChatState
         InPrivate = false;
         Owner = false;
         RoomId = channelId;
+        RoomMax = NationChatRules.PublicCapacity;
     }
 
     public void EnteredPrivate(int roomId)
@@ -160,9 +181,18 @@ public sealed class NationChatState
         RoomPrivate = isPrivate;
         RoomPassword = password;
         RoomMax = max;
+        if (RoomMembers == 0) RoomMembers = 1;
     }
 
     public void LostOwnership() => Owner = false;
+
+    public void Configured(string name, bool isPrivate, string password, int max)
+    {
+        RoomName = name;
+        RoomPrivate = isPrivate;
+        RoomPassword = isPrivate ? password : "";
+        RoomMax = Math.Max(max, RoomMembers);
+    }
 
     public void Left()
     {
@@ -174,5 +204,6 @@ public sealed class NationChatState
         RoomPrivate = false;
         RoomPassword = "";
         RoomMax = NationChatRules.RoomSizes[0];
+        RoomMembers = 0;
     }
 }

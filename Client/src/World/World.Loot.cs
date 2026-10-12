@@ -12,6 +12,7 @@ public partial class World
         public Vector3 BasePos;
         public double SpawnTime;
         public int OwnerId;
+        public bool Placed;
     }
 
     private readonly Dictionary<int, LootBox> _boxes = new();
@@ -81,7 +82,7 @@ public partial class World
 
     private void OnItemReceived(int itemId, bool newItem) =>
         CombatLogAdd(ItemData.Text(newItem ? ReceivedNewItemText : ReceivedText, "Received %s.")
-            .Replace("%s", ItemData.DisplayName(itemId)), CombatLogKind.Resource, ReceivedTint);
+            .Replace("%s", ItemData.DisplayName(itemId)), CombatLogKind.Resource, ReceivedTint, tab: LogTab.Item);
 
     private const int PickedUpText = 6069;
     private const int PartyMemberGotText = 3413;
@@ -93,7 +94,7 @@ public partial class World
 
     private void OnLootItem(int itemId) =>
         CombatLogAdd(ItemData.Text(PickedUpText, "Picked up %s").Replace("%s", ItemData.DisplayName(itemId)),
-            CombatLogKind.Resource, LootLogTint);
+            CombatLogKind.Resource, LootLogTint, tab: LogTab.Item);
 
     private void OnPartyLoot(string looter, int itemId)
     {
@@ -106,7 +107,7 @@ public partial class World
     private void OnTemporaryLoot(int itemId, bool lost) =>
         CombatLogAdd(ItemData.Text(lost ? TemporaryLostText : TemporaryKeptText, "[%s]")
                 .Replace("%s", ItemData.DisplayName(itemId)),
-            lost ? CombatLogKind.Status : CombatLogKind.Resource, lost ? TemporaryLostTint : TemporaryKeptTint);
+            lost ? CombatLogKind.Status : CombatLogKind.Resource, lost ? TemporaryLostTint : TemporaryKeptTint, tab: LogTab.Item);
 
     private void OnLootRefused(int bundleId, int result)
     {
@@ -126,9 +127,40 @@ public partial class World
         var pos = e.Body.Position - new Vector3(0, e.Lift, 0);
         var node = BuildLootBoxNode();
         node.Position = pos;
+        node.Visible = false;
         _entities.AddChild(node);
-        _boxes[bundleId] = new LootBox { Node = node, BasePos = pos, SpawnTime = Now(), OwnerId = sourceId };
+        var box = new LootBox { Node = node, BasePos = pos, SpawnTime = Now(), OwnerId = sourceId };
+        _boxes[bundleId] = box;
         if (e.Dead) e.CorpseRemoveAt = 0;
+        TryPlaceLootBox(box, Now());
+    }
+
+    private const float LootBoxFloorProbeUp = 2f;
+
+    private void TryPlaceLootBox(LootBox box, double now)
+    {
+        if (box.Placed) return;
+        bool known = _ents.TryGetValue(box.OwnerId, out var owner) && GodotObject.IsInstanceValid(owner.Body);
+        if (!LootBoxPlacement.Ready(known, known && owner!.Dead, now, known ? owner!.DeathClipEnd : 0)) return;
+        float radius = known ? owner!.Radius : 0f;
+        var feet = box.BasePos;
+        if (known)
+        {
+            feet = owner!.Body.Position - new Vector3(0, owner.Lift, 0);
+            var side = owner.Body.GlobalBasis.X;
+            side.Y = 0f;
+            if (side.LengthSquared() > 0f) feet += side.Normalized() * LootBoxPlacement.Offset(radius);
+        }
+        var (koX, koZ) = WorldToKo(feet);
+        var onTerrain = GroundPos(koX, koZ, feet.Y, 0f);
+        var floors = ObjectFloorsAt(onTerrain.X, onTerrain.Z, Mathf.Max(onTerrain.Y, feet.Y) + LootBoxFloorProbeUp,
+            onTerrain.Y - EntityFloorProbeDown);
+        var at = new Vector3(onTerrain.X, FloorChoice.Login(onTerrain.Y, floors, feet.Y), onTerrain.Z);
+        box.BasePos = at;
+        box.Node.Position = at;
+        box.Node.Scale = Vector3.One * LootBoxPlacement.Scale(radius);
+        box.Node.Visible = true;
+        box.Placed = true;
     }
 
     private bool HoldsLootBox(int entityId)
@@ -188,7 +220,8 @@ public partial class World
         foreach (var (id, box) in _boxes)
         {
             if (now - box.SpawnTime >= LootBoxLife) { _despawnScratch.Add(id); continue; }
-            if (box.BasePos.DistanceSquaredTo(me) <= LootRangeSq) anyInRange = true;
+            TryPlaceLootBox(box, now);
+            if (box.Placed && box.BasePos.DistanceSquaredTo(me) <= LootRangeSq) anyInRange = true;
         }
         foreach (var id in _despawnScratch) DespawnBox(id);
 
@@ -227,6 +260,7 @@ public partial class World
         int best = -1; float bestD = LootClickPickRadius;
         foreach (var (id, box) in _boxes)
         {
+            if (!box.Placed) continue;
             var world = box.BasePos + Vector3.Up * 0.4f;
             if (_camera.IsPositionBehind(world)) continue;
             float px = _camera.UnprojectPosition(world).DistanceTo(mouse);
@@ -246,7 +280,7 @@ public partial class World
         if (_self == null || _selfDead || _boxes.Count == 0) return false;
         Vector3 me = _self.Position;
         foreach (var (_, box) in _boxes)
-            if (box.BasePos.DistanceSquaredTo(me) <= LootRangeSq)
+            if (box.Placed && box.BasePos.DistanceSquaredTo(me) <= LootRangeSq)
                 return true;
         return false;
     }
@@ -259,6 +293,7 @@ public partial class World
         float bestDistSq = LootRangeSq;
         foreach (var (id, box) in _boxes)
         {
+            if (!box.Placed) continue;
             float d = box.BasePos.DistanceSquaredTo(me);
             if (d <= bestDistSq)
             {

@@ -20,7 +20,7 @@ public partial class Net
     public const byte GenieMagic = 4;
     public const byte GenieAcknowledged = 1;
     public const byte GenieActive = 1;
-    public const int GenieOptionBytes = 128;
+    public const int GenieOptionBytes = Domain.GenieOptionsBlob.Size;
 
     public event Action<bool>? GenieHammerResult;
     public event Action<int, bool>? GenieAuraEvent;

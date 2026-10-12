@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Godot;
 using LibreKO.Domain;
@@ -31,6 +32,7 @@ internal sealed partial class ChatSystem
         public DateTime Time { get; init; }
         public int Rank { get; init; } = NationRankAura.Unranked;
         public bool Masked { get; init; }
+        public string Place { get; init; } = "";
 
         public static ChatEntry Raw(ChatCategory category, string bbcode) =>
             new(category, 0, WhisperSide.None, "", 0, false, "", bbcode);
@@ -46,7 +48,7 @@ internal sealed partial class ChatSystem
     }
 
     private readonly LinkedList<ChatEntry> _store = new();
-    private readonly Queue<string> _published = new();
+    private readonly Queue<GameChatLine> _published = new();
     private long _seq;
     private int _missed;
     private int _shown;
@@ -60,7 +62,8 @@ internal sealed partial class ChatSystem
     private int _hoverItem;
     private bool _itemTipPinned;
 
-    internal IReadOnlyList<string> History => _published.ToArray();
+    internal IReadOnlyList<string> History => _published.Select(line => line.BbCode).ToArray();
+    internal IReadOnlyList<GameChatLine> Lines => _published.ToArray();
 
     private void BuildLogPanel()
     {
@@ -174,7 +177,7 @@ internal sealed partial class ChatSystem
     {
         entry = entry with { Seq = ++_seq, Time = DateTime.Now };
         string bbcode = Render(entry);
-        Publish(bbcode);
+        Publish(new GameChatLine(bbcode, entry.Category));
 
         _store.AddLast(entry);
         if (_store.Count > StoreMax)
@@ -238,12 +241,12 @@ internal sealed partial class ChatSystem
         if (!keepTrim) _pendingTrim = 0;
     }
 
-    private void Publish(string bbcode)
+    private void Publish(GameChatLine line)
     {
-        _published.Enqueue(bbcode);
+        _published.Enqueue(line);
         while (_published.Count > PublishedMax) _published.Dequeue();
-        PluginHost.Game.RaiseChatLine(bbcode);
-        UpdateChatPeek(bbcode);
+        PluginHost.Game.RaiseChatLine(line);
+        UpdateChatPeek(line.BbCode);
     }
 
     private static int Paragraphs(string bbcode)
@@ -299,6 +302,7 @@ internal sealed partial class ChatSystem
         };
         if (tag.Length > 0) line.Append($"[color=#{hex}][lb]{tag}[rb][/color] ");
         if (RankSymbol.TexturePath(entry.Rank) is { } symbol) line.Append($"[img={RankSymbolSize}]{symbol}[/img] ");
+        if (entry.Place.Length > 0) line.Append($"[color=#{hex}][lb] {BbCode.Esc(entry.Place)} [rb][/color] ");
         line.Append(entry.Masked ? $"[color=#{hex}]{BbCode.Esc(entry.Name)}[/color]" : NameLink(entry.Name, hex));
         line.Append($"[color=#{hex}]: [/color]");
         line.Append(RenderText(entry.Text, hex));

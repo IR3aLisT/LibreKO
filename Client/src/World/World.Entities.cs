@@ -49,6 +49,7 @@ public partial class World
         public bool CombatStance;
         public bool Dead;
         public double CorpseRemoveAt;
+        public double DeathClipEnd;
         public Vector3 Target;
         public bool HasTarget;
         public float Speed;
@@ -133,6 +134,7 @@ public partial class World
             RefreshRankAuraFor(_myId, _stealthIds.Contains(_myId));
             return;
         }
+        if (!info.IsNpc && info.Name.Length > 0) TryPartyRejoin(info.Name);
         if (!info.IsNpc && ZoneLooks.HidesOtherPlayers(_zone)) return;
         if (info.IsNpc && info.ObjectType != 0) NoteGateState(info.X, info.Z, info.GateOpen != 0);
 
@@ -141,7 +143,7 @@ public partial class World
             if (info.IsNpc && info.ObjectType == 0)
                 ApplyPlainNpcBridgeState(existing, info.GateOpen);
 
-            var rp = existing.Statue ? StatueSpot(info.X, info.Z, info.Y) : GroundPosFor(info.IsNpc, info.X, info.Z, info.Y, existing.Lift);
+            var rp = existing.Statue ? StatueSpot(info.X, info.Z, info.Y) : InOutGroundPos(info.IsNpc, info.X, info.Z, info.Y, existing.Lift, existing.BridgeFloor);
             float jump = existing.Body.Position.DistanceTo(rp);
             if (existing.Dead || info.Dead || jump > TeleportSnap || jump < MoveArriveEps)
             {
@@ -226,7 +228,7 @@ public partial class World
                                     : ResolvePlayerScene(PlayerRig.LookRace(info.Race, info.Class));
         Diag.Slow($"model load {label} model={info.ModelId} race={info.Race}", loadWatch);
         float lift = scene != null || mapObject ? 0f : CapsuleHalf;
-        var pos = statue ? StatueSpot(info.X, info.Z, info.Y) : GroundPosFor(info.IsNpc, info.X, info.Z, info.Y, lift);
+        var pos = statue ? StatueSpot(info.X, info.Z, info.Y) : InOutGroundPos(info.IsNpc, info.X, info.Z, info.Y, lift);
 
         Node3D body;
         AnimationPlayer? anim = null;
@@ -245,7 +247,8 @@ public partial class World
             body = MakeEntity(ColorFor(info), label);
 
         body.Position = pos;
-        float spawnYaw = info.Dir != 0 ? 180f - 2f * info.Dir : (info.Id * 137) % 360;
+        bool walks = anim != null && Pick(anim, WalkClips) != null;
+        float spawnYaw = NpcTypes.KeepsSpawnFacing(info.Dir, info.NpcType, walks) ? 180f - 2f * info.Dir : (info.Id * 137) % 360;
         if (scene != null)
             body.RotationDegrees = new Vector3(0, spawnYaw, 0);
         using (Perf.Measure(Perf.Section.BuildEnter)) _entities.AddChild(body);
@@ -394,8 +397,9 @@ public partial class World
         e.Flinch?.Stop();
         if (settled) e.Hp = 0;
         RefreshEntityCollision(e);
-        int clip = DeathPoses.ClipIndex(pose, e.IsNpc);
+        int clip = DeathPoses.ClipIndex(pose, e.IsNpc || WearsMonsterLook(e.Id));
         double len = PlayActionOn(e.Anim, clip, DeathClips);
+        e.DeathClipEnd = settled ? Now() : Now() + len;
         e.ActionUntil = Now() + Mathf.Max((float)len, 3.0f);
         e.ActionRank = ActionRankDeath;
         e.ActionClip = "dead";
@@ -769,6 +773,12 @@ public partial class World
 
     private PlateStack? _selfPlate;
 
+    private void OnNamePlatesRescaled()
+    {
+        _selfPlate?.Rescaled();
+        foreach (var ent in _ents.Values) ent.Plate?.Rescaled();
+    }
+
     private PlateStack? SelfPlate()
     {
         if (_selfPlate != null) return _selfPlate;
@@ -928,11 +938,13 @@ public partial class World
                 CollectFaces(e.Body, faces);
                 if (faces.Count > 0)
                 {
+                    var toBody = e.Body.GlobalTransform.AffineInverse();
+                    for (int i = 0; i < faces.Count; i++) faces[i] = toBody * faces[i];
                     var shape = new ConcavePolygonShape3D { BackfaceCollision = true };
                     shape.SetFaces(faces.ToArray());
                     var floor = new StaticBody3D { Name = "BridgeFloor", CollisionLayer = WorldCollisionLayer, CollisionMask = 0 };
                     floor.AddChild(new CollisionShape3D { Shape = shape });
-                    _entities.AddChild(floor);
+                    e.Body.AddChild(floor);
                     e.BridgeFloor = floor;
                 }
             }
