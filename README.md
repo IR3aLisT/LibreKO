@@ -1,6 +1,19 @@
+<div align="center">
+
 # LibreKO
 
-An open-source game server and client for a classic MMORPG, written in C# (.NET 10) and Godot 4 (C#).
+### An open-source game server and client for a classic MMORPG, written in C# (.NET 10) and Godot 4 (C#).
+
+[![Website](https://img.shields.io/badge/website-libreko.org-0a7cff?style=flat-square)](https://libreko.org)
+[![Tests](https://img.shields.io/github/actions/workflow/status/ZeusAFK/LibreKO/tests.yml?branch=main&style=flat-square&label=tests)](https://github.com/ZeusAFK/LibreKO/actions/workflows/tests.yml)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512bd4?style=flat-square&logo=dotnet&logoColor=white)](#requirements)
+[![Godot 4.7](https://img.shields.io/badge/Godot-4.7_.NET-478cbf?style=flat-square&logo=godotengine&logoColor=white)](#client)
+[![AGPL-3.0 license](https://img.shields.io/badge/license-AGPL--3.0-a42e2b?style=flat-square)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/ZeusAFK/LibreKO?style=flat-square&color=f4c430)](https://github.com/ZeusAFK/LibreKO/stargazers)
+[![Discord](https://img.shields.io/discord/1542258360903139388?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865f2)](https://discord.gg/wyQ335WfPx)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-support-ffdd00?style=flat-square&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/zeusafk)
+
+</div>
 
 - `Server/` — the login server, the game server, the shared library and the quest language compiler.
 - `Client/` — the Godot 4 client project.
