@@ -103,6 +103,8 @@ Donations support development only and buy nothing in game.
 
 ## Star History
 
+Thanks to everyone using LibreKO, reporting bugs, requesting features, and contributing fixes.
+
 <a href="https://www.star-history.com/?repos=zeusafk%2Flibreko&type=date&legend=top-left">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=zeusafk/libreko&type=date&theme=dark&legend=top-left" />
