@@ -3,6 +3,7 @@
 On greeting
     Say "Do you wish to enter the Lost Chamber to face Ultima? You will need a Crystal of Trial to unlock the portal."
     Topic "Enter the Lost Chamber." goto enter_chamber
+    Topic "Craft Crystal of Trial." goto craft_crystal
     Topic "Cancel" goto close
     Goto close
 
@@ -15,5 +16,15 @@ On enter_chamber
             Teleport 31 at 940 186
     Else
         Say "You do not have a Crystal of Trial. You need to obtain one before entering the Lost Chamber."
+        Topic "Confirm" goto close
+    Goto close
+
+On craft_crystal
+    Exchange 478
+    If the last step worked
+        Say "The fragments merge into a Crystal of Trial! You may now use it to enter the Lost Chamber."
+        Topic "Confirm" goto close
+    Else
+        Say "To craft a Crystal of Trial, you need 1x Fragment of Arrogance, 1x Fragment of Gluttony, 1x Fragment of Rage, and 1x Fragment of Sloth."
         Topic "Confirm" goto close
     Goto close

@@ -27,7 +27,7 @@ public class BifrostQuestTests
     }
 
     [Fact]
-    public void RothenQuest_Greeting_Presents_Options_To_Enter_Lost_Chamber()
+    public void RothenQuest_Greeting_Presents_Options_To_Enter_Lost_Chamber_And_Craft()
     {
         var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
         var compilation = QuestCompilation.Create(text, "16095_31.quest");
@@ -42,9 +42,26 @@ public class BifrostQuestTests
             Arg.Any<int>(),
             Arg.Is<DialogLine>(l => l.Text!.Contains("Lost Chamber") || l.Text.Contains("Ultima")),
             Arg.Is<IReadOnlyList<DialogButton>>(buttons =>
-                buttons.Count == 2
+                buttons.Count == 3
                 && buttons.Any(b => b.Label.Text!.Contains("Enter the Lost Chamber"))
+                && buttons.Any(b => b.Label.Text!.Contains("Craft Crystal of Trial"))
                 && buttons.Any(b => b.Label.Text!.Contains("Cancel"))));
+    }
+
+    [Fact]
+    public void RothenQuest_CraftCrystal_Executes_Exchange_478()
+    {
+        var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
+        var compilation = QuestCompilation.Create(text, "16095_31.quest");
+        var host = Substitute.For<IQuestHost>();
+        host.ActionFailed.Returns(false);
+
+        var interpreter = new QuestInterpreter(compilation.Program, host);
+        compilation.Program.EventNames.TryGetValue("craft_crystal", out var craftEventId).Should().BeTrue();
+
+        interpreter.Run(craftEventId).Failure.Should().BeNull();
+
+        host.Received(1).RunExchange(478);
     }
 
     [Fact]
