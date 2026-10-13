@@ -11,10 +11,11 @@ public partial class World
     private readonly HashSet<int> _infiltratingIds = new();
     private float _sightRadius;
 
-    private const float StealthSelfAlpha = 0.40f;
-    private const float StealthHideAlpha = 0.02f;
-    private const float StealthSeenAlpha = 0.25f;
+    private const float StealthSeenAlpha = 0.5f;
+    private const float StealthHiddenAlpha = 0f;
     private const string StealthFx = "stealth_cast";
+    private const string StealthShadowMeta = "stealth_shadow";
+    private const string StealthVisibleMeta = "stealth_visible";
 
     private void StealthInit()
     {
@@ -125,9 +126,10 @@ public partial class World
 
         float alpha;
         if (!stealthed) alpha = 1f;
-        else if (charId == _myId) alpha = StealthSelfAlpha;
-        else if (_infiltratingIds.Contains(charId)) alpha = 0f;
-        else alpha = _stealthDetected.Contains(charId) ? StealthSeenAlpha : StealthHideAlpha;
+        else if (charId == _myId) alpha = StealthSeenAlpha;
+        else if (_infiltratingIds.Contains(charId)) alpha = StealthHiddenAlpha;
+        else if (_ents.TryGetValue(charId, out var who) && !who.Attackable) alpha = StealthSeenAlpha;
+        else alpha = _stealthDetected.Contains(charId) ? StealthSeenAlpha : StealthHiddenAlpha;
 
         StealthSetBodyAlpha(body, alpha);
         RefreshRankAuraFor(charId, stealthed);
@@ -166,9 +168,44 @@ public partial class World
     private static void StealthSetBodyAlpha(Node3D body, float alpha)
     {
         float transparency = Mathf.Clamp(1f - alpha, 0f, 1f);
+        bool hidden = alpha <= StealthHiddenAlpha;
         foreach (var node in StealthDescendants(body))
             if (node is GeometryInstance3D gi)
-                Fx.SetTransparency(gi, transparency);
+            {
+                StealthSetHidden(gi, hidden);
+                if (!hidden) Fx.SetTransparency(gi, transparency);
+                StealthSetShadow(gi, hidden);
+            }
+    }
+
+    private static void StealthSetHidden(GeometryInstance3D gi, bool hidden)
+    {
+        if (hidden)
+        {
+            if (gi.HasMeta(StealthVisibleMeta)) return;
+            gi.SetMeta(StealthVisibleMeta, gi.Visible);
+            gi.Visible = false;
+        }
+        else if (gi.HasMeta(StealthVisibleMeta))
+        {
+            gi.Visible = gi.GetMeta(StealthVisibleMeta).AsBool();
+            gi.RemoveMeta(StealthVisibleMeta);
+        }
+    }
+
+    private static void StealthSetShadow(GeometryInstance3D gi, bool hidden)
+    {
+        if (hidden)
+        {
+            if (gi.HasMeta(StealthShadowMeta)) return;
+            gi.SetMeta(StealthShadowMeta, (int)gi.CastShadow);
+            gi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        }
+        else if (gi.HasMeta(StealthShadowMeta))
+        {
+            gi.CastShadow = (GeometryInstance3D.ShadowCastingSetting)gi.GetMeta(StealthShadowMeta).AsInt32();
+            gi.RemoveMeta(StealthShadowMeta);
+        }
     }
 
     private static IEnumerable<Node> StealthDescendants(Node root)

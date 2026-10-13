@@ -65,7 +65,7 @@ public partial class World
         if (s == null || _self == null) return;
 
         if (!valid) return;
-        if (impact.DistanceTo(_self.GlobalPosition) > SkillCastRange(s) + 1f) return;
+        if (!AnnounceReach(SkillReachToPoint(s, impact, 0f, targetIsPlayer: false))) return;
 
         SendAreaCast(s, impact);
     }
@@ -80,10 +80,10 @@ public partial class World
         data[2] = (short)Mathf.RoundToInt(koZ);
 
         FaceNodeToward(_self, _self.Position, impact);
-        bool instant = SpendInstantMagic(s);
-        Net.I.SendMagic(1, s.Id, -1, data);
-        QueuePendingStage(s.Id, -1, s.HasFlyingStage ? PendingFlying : PendingEffecting, instant ? 0 : CastDelay(s), data);
-        BeginLocalCast(s, instant);
+        bool skipCooldown = SpendInstantMagic(s);
+        SendCastingStage(s, -1, data);
+        QueuePendingStage(s.Id, -1, s.HasFlyingStage ? PendingFlying : PendingEffecting, CastDelay(s), data);
+        BeginLocalCast(s, skipCooldown);
     }
 
     private static float AreaRingRadius(SkillData.Skill s) => Mathf.Max(1f, s.Radius - AreaRingInset);
@@ -112,6 +112,7 @@ public partial class World
     {
         if (!AimingAreaSkill) return;
         if (!TryPickTerrainPoint(screenPosition, 0f, out Vector3 point)) { _areaAimValid = false; return; }
+        if (PickAreaFloor(screenPosition, point) is { } floor) point = floor;
         _areaAimPoint = point;
         _areaAimValid = true;
         if (_areaAim != null) _areaAim.Centre = point;
@@ -132,14 +133,39 @@ public partial class World
             if (!GodotObject.IsInstanceValid(node)) continue;
             float angle = ring.Spin + Mathf.Tau * i / ring.Pointers.Count;
             var at = ring.Centre + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ring.Grown;
-            node.GlobalPosition = SnapToGround(at) + Vector3.Up * 0.05f;
+            node.GlobalPosition = SnapToFloor(at, ring.Centre.Y) + Vector3.Up * 0.05f;
         }
+    }
+
+    private const float AreaFloorRayMargin = 0.5f;
+    private const float AreaFloorProbeUp = 2f;
+
+    private Vector3? PickAreaFloor(Vector2 screenPosition, Vector3 terrainPoint)
+    {
+        if (_camera == null) return null;
+        var from = _camera.ProjectRayOrigin(screenPosition);
+        var direction = _camera.ProjectRayNormal(screenPosition).Normalized();
+        var to = from + direction * (from.DistanceTo(terrainPoint) + AreaFloorRayMargin);
+        var query = PhysicsRayQueryParameters3D.Create(from, to, WorldCollisionLayer);
+        if (SelfProbeExclude() is { } exclude) query.Exclude = exclude;
+        var hit = GetWorld3D().DirectSpaceState.IntersectRay(query);
+        if (hit.Count == 0 || ((Vector3)hit["normal"]).Y < FloorNormalMin) return null;
+        return (Vector3)hit["position"];
     }
 
     private Vector3 SnapToGround(Vector3 world)
     {
         var (koX, koZ) = WorldToKo(world);
         return GroundPos(koX, koZ, world.Y, 0f);
+    }
+
+    private Vector3 SnapToFloor(Vector3 world, float nearY)
+    {
+        var onTerrain = SnapToGround(world);
+        if (_terrain == null) return onTerrain;
+        var floors = ObjectFloorsAt(onTerrain.X, onTerrain.Z,
+            Mathf.Max(onTerrain.Y, nearY) + AreaFloorProbeUp, onTerrain.Y - EntityFloorProbeDown);
+        return new Vector3(onTerrain.X, FloorChoice.Nearest(onTerrain.Y, floors, nearY), onTerrain.Z);
     }
 
     private AreaRing? NewAreaRing(Vector3 centre, float radius, bool marker)

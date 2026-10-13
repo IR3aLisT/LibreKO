@@ -7,7 +7,7 @@ namespace LibreKO;
 
 public partial class World
 {
-    private enum CombatLogKind { Damage, Outgoing, Incoming, Recovery, Resource, Status }
+    private enum CombatLogKind { Damage, Outgoing, Incoming, Recovery, Resource, Status, Spent, Experience, National }
 
     private VBoxContainer _combatLogFrame = null!;
     private PanelContainer _combatLogRoot = null!;
@@ -23,11 +23,20 @@ public partial class World
     private static readonly Color CombatLogEdgeColour = new(UiTheme.Edge, 0.46f);
     private HudLogText _combatLogText = null!;
     private StyleBoxFlat _combatLogPanelStyle = null!;
-    private readonly Queue<string> _combatLogLines = new();
     private const int CombatLogMaxLines = 120;
+    private readonly TabbedLog _combatLog = new(CombatLogMaxLines);
+    private readonly List<string> _combatLogDropped = new();
+    private const int CombatLogTabMargin = 7;
+    private const int CombatLogTabGap = 3;
+    private static readonly (LogTab Tab, string Caption)[] CombatLogTabCaptions =
+    {
+        (LogTab.All, "All"), (LogTab.State, "Status"), (LogTab.Item, "Item"), (LogTab.System, "System"),
+    };
     private const int TextBeginAttack = 3002;
     private const int TextStopAttack = 3003;
     private const int TextMissed = 3015;
+    private const int TextUsingSkill = 4402;
+    private const int TextNotEnoughMp = 3004;
     private const int TextOverweight = 2601;
 
     private void BuildCombatLog()
@@ -46,11 +55,22 @@ public partial class World
 
         var tools = new HBoxContainer
         {
-            Alignment = BoxContainer.AlignmentMode.End,
             MouseFilter = Control.MouseFilterEnum.Ignore,
             CustomMinimumSize = new Vector2(0, CombatLogToolRow),
         };
         tools.AddThemeConstantOverride("separation", 3);
+        var tabs = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        tabs.AddThemeConstantOverride("separation", CombatLogTabGap);
+        var tabGroup = new ButtonGroup();
+        foreach (var (tab, caption) in CombatLogTabCaptions)
+        {
+            var button = new Button { Text = caption, ToggleMode = true, ButtonGroup = tabGroup, ButtonPressed = tab == _combatLog.Shown };
+            HudToolButton.Style(button, CombatLogTabMargin);
+            button.Pressed += () => ShowCombatLogTab(tab);
+            tabs.AddChild(button);
+        }
+        tools.AddChild(tabs);
+        tools.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MouseFilter = Control.MouseFilterEnum.Ignore });
         var background = HudToolButton.Create("◐", null, "Background opacity");
         background.Pressed += CycleCombatLogBackground;
         tools.AddChild(background);
@@ -90,6 +110,8 @@ public partial class World
         _combatLogText.AddThemeFontSizeOverride("normal_font_size", 12);
         _combatLogText.AddThemeColorOverride("default_color", new Color("#d4d1c9"));
         _combatLogRoot.AddChild(_combatLogText);
+        _combatLogText.MetaHoverStarted += OnLogMetaHover;
+        _combatLogText.MetaHoverEnded += _ => HideItemTooltip();
 
         AttachCombatLogLayout(_combatLogFrame, () => CombatLogSpot(GetViewport().GetVisibleRect().Size));
 
@@ -104,22 +126,36 @@ public partial class World
         Net.I.DeathNoticeEvent -= OnDeathNotice;
     }
 
-    private const int DeathNoticeDefeated = 1;
-    private const int DeathNoticeAvenged = 2;
-
     private void OnDeathNotice(Net.DeathNotice n)
     {
-        string line = n.Kind switch
+        bool listed = Net.I.ForgetWanted(n.VictimName);
+        int text = DeathNotices.TextFor(n.Kind, _zone, n.VictimIsKing, n.KillerNation, listed);
+        string template = ItemData.Text(text, "- %s defeat %s ( %d, %d ) -");
+        string killer = NationColouredName(n.KillerName, n.KillerNation);
+        string victim = NationColouredName(n.VictimName, n.VictimNation);
+        string plain, markup;
+        if (text is Vanguard.KarusSlainText or Vanguard.ElMoradSlainText)
         {
-            DeathNoticeDefeated => TextTemplate.Fill(
-                ItemData.Text(7108, "- %s has been defeated by %s -"), n.VictimName, n.KillerName),
-            DeathNoticeAvenged => TextTemplate.Fill(
-                ItemData.Text(18600, "##### %s has avenged %s. #####"), n.KillerName, n.VictimName),
-            _ => TextTemplate.Fill(
-                ItemData.Text(7109, "- %s defeat %s ( %d, %d ) -"), n.KillerName, n.VictimName, n.X, n.Z),
-        };
-        CombatNotice(line);
+            plain = TextTemplate.Fill(Vanguard.Plain(template), n.KillerName, n.VictimName, n.X, n.Z);
+            markup = TextTemplate.Fill(Vanguard.Markup(BbCode.Esc(template)), BbCode.Esc(n.KillerName), BbCode.Esc(n.VictimName), n.X, n.Z);
+        }
+        else if (n.Kind == DeathNotices.DefeatedKind)
+        {
+            plain = TextTemplate.Fill(template, n.VictimName, n.KillerName);
+            markup = TextTemplate.Fill(BbCode.Esc(template), victim, killer);
+        }
+        else
+        {
+            plain = TextTemplate.Fill(template, n.KillerName, n.VictimName, n.X, n.Z);
+            markup = TextTemplate.Fill(BbCode.Esc(template), killer, victim, n.X, n.Z);
+        }
+        var colour = new Color("#" + DeathNotices.LineColourFor(_zone, n.KillerId == _myId, n.Kind));
+        Floaters?.Notice(plain);
+        CombatLogAdd(plain, CombatLogKind.Status, colour, markup);
     }
+
+    private static string NationColouredName(string name, int nation) =>
+        DeathNotices.NameColour(nation) is { } colour ? $"[color=#{colour}]{BbCode.Esc(name)}[/color]" : BbCode.Esc(name);
 
     private void ApplyCombatLogVisibility()
     {
@@ -177,32 +213,54 @@ public partial class World
         ApplyCombatLogLock();
     }
 
-    private void CombatLogAdd(string message, CombatLogKind kind)
+    private void ShowCombatLogTab(LogTab tab)
     {
-        if (string.IsNullOrWhiteSpace(message)) return;
-        string color = kind switch
-        {
-            CombatLogKind.Damage => "ffffff",
-            CombatLogKind.Outgoing => "f2c45e",
-            CombatLogKind.Incoming => "f07870",
-            CombatLogKind.Recovery => "79d892",
-            CombatLogKind.Resource => "70aee8",
-            _ => "aaa79f",
-        };
-        _combatLogLines.Enqueue($"[color=#{color}]{BbCode.Esc(message)}[/color]");
-        while (_combatLogLines.Count > CombatLogMaxLines)
-            _combatLogLines.Dequeue();
-        if (_combatLogText != null)
-            _combatLogText.Text = string.Join("\n", _combatLogLines);
-        PluginLogAdd(kind == CombatLogKind.Resource ? LibreKO.Plugins.GameLogKind.Item : LibreKO.Plugins.GameLogKind.Status,
-            message, new Color("#" + color));
+        if (!_combatLog.Show(tab) || _combatLogText == null) return;
+        _combatLogText.Text = string.Join("\n", _combatLog.ShownLines);
     }
 
-    private void CombatNotice(string message)
+    private void CombatLogAdd(string message, CombatLogKind kind, Color? tint = null, string? markup = null,
+        LogTab tab = LogTab.System)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        string color = tint?.ToHtml(false) ?? kind switch
+        {
+            CombatLogKind.Damage or CombatLogKind.Outgoing => "ffffff",
+            CombatLogKind.Incoming or CombatLogKind.Spent => "ff3b3b",
+            CombatLogKind.Recovery or CombatLogKind.Resource => "6565ff",
+            CombatLogKind.National => "9b9bff",
+            _ => "ffff00",
+        };
+        string line = $"[color=#{color}]{markup ?? BbCode.Esc(message)}[/color]";
+        bool shown = _combatLog.Add(line, tab, _combatLogDropped);
+        if (_combatLogText != null && shown)
+        {
+            bool rebuild = false;
+            foreach (string dropped in _combatLogDropped)
+                for (int n = dropped.Split('\n').Length; n > 0 && !rebuild; n--)
+                    rebuild = !_combatLogText.RemoveParagraph(0, true);
+            if (rebuild) _combatLogText.Text = string.Join("\n", _combatLog.ShownLines);
+            else
+            {
+                if (_combatLog.ShownLines.Count > 1) _combatLogText.AppendText("\n");
+                _combatLogText.AppendText(line);
+            }
+        }
+        PluginLogAdd(tab switch
+        {
+            LogTab.State => LibreKO.Plugins.GameLogKind.Status,
+            LogTab.Item => LibreKO.Plugins.GameLogKind.Item,
+            _ => LibreKO.Plugins.GameLogKind.System,
+        }, message, new Color("#" + color));
+    }
+
+    private void CombatNotice(string message) => CombatNotice(message, null);
+
+    private void CombatNotice(string message, Color? tint)
     {
         if (string.IsNullOrWhiteSpace(message)) return;
         Floaters?.Notice(message);
-        CombatLogAdd(message, CombatLogKind.Status);
+        CombatLogAdd(message, CombatLogKind.Status, tint);
     }
 
     private static string SystemText(int id, string fallback, string? arg = null)
@@ -215,7 +273,7 @@ public partial class World
     {
         if (id == _myId) return "You";
         return _ents.TryGetValue(id, out var e) && !string.IsNullOrWhiteSpace(e.Name)
-            ? e.Name
+            ? ShownName(e)
             : "Unknown";
     }
 }

@@ -21,7 +21,46 @@ public partial class Net
 
     public event Action<int, byte, bool>? PartyMemberStatusEvent;
 
+    public event Action<int, IReadOnlyList<int>>? PartyMemberBuffsEvent;
+
+    public event Action? PartySignalEvent;
+
+    public event Action<int, int>? PartyLevelProgressEvent;
+
     public event Action? PartyDisbandEvent;
+    public event Action<int>? PartyRejoinForgetEvent;
+    public event Action<UserVoteAsk>? UserVoteAskEvent;
+    public event Action<short>? UserVoteRefusedEvent;
+    public event Action<UserVoteOutcome>? UserVoteResultEvent;
+    public (short Warnings, short Limit)? PendingVoteNotice { get; set; }
+
+    public void SendUserVote(int targetId, byte reason, string text)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.UserVote);
+        p.WriteInt(targetId);
+        p.WriteByte(reason);
+        if (reason == Domain.UserVote.ReasonOther) p.WriteString(text);
+        _conn.Send(p);
+    }
+
+    public void SendPartySignalEcho(uint token) => _conn.Send(new PartySignalProbe(token).Echo());
+
+    public void SendUserVoteAnswer(byte answer)
+    {
+        var p = new Packet(GameOpcodes.GS_PARTY);
+        p.WriteByte(PartyRequest.UserVoteAnswer);
+        p.WriteByte(answer);
+        _conn.Send(p);
+    }
+
+    public event Action<CommanderNamedReply>? PartyCommanderEvent;
+
+    public event Action<CommanderMarkReply>? CommanderMarkEvent;
+
+    public event Action<byte>? CommanderOrderEvent;
+
+    public int PartyCommanderId { get; private set; } = -1;
 
     public event Action<bool>? PartyBbsRegisterEvent;
 
@@ -30,10 +69,17 @@ public partial class Net
     public event Action<int, int, List<PartyBbsEntry>>? PartyBbsListEvent;
 
     public event Action? PartyBbsWantedFailEvent;
+    public event Action<PartyBoardInvite>? PartyBbsInviteEvent;
 
     private readonly List<PartyMember> _party = new();
     private readonly Dictionary<int, HashSet<byte>> _partyStatus = new();
+    private readonly Dictionary<int, IReadOnlyList<int>> _partyBuffs = new();
+    private readonly Dictionary<int, int> _partyPings = new();
+    private readonly Dictionary<int, int> _partyLevelPermille = new();
     private bool _partyJoining;
+    public byte PartyType { get; private set; }
+    public byte PartyBoardMode { get; private set; }
+    private const int MemberTailBytes = 2 + sizeof(int) + 1;
 
     public IReadOnlyList<PartyMember> Party => _party;
 
@@ -42,18 +88,40 @@ public partial class Net
     public IReadOnlyCollection<byte>? PartyStatusOf(int charId) =>
         _partyStatus.TryGetValue(charId, out var status) ? status : null;
 
+    public IReadOnlyList<int> PartyBuffsOf(int charId) =>
+        _partyBuffs.TryGetValue(charId, out var skillIds) ? skillIds : Array.Empty<int>();
+
+    public int PartyPingOf(int charId) =>
+        _partyPings.TryGetValue(charId, out int ms) ? ms : Domain.PartySignal.Unknown;
+
+    public int? PartyLevelPermilleOf(int charId) =>
+        _partyLevelPermille.TryGetValue(charId, out int permille) ? permille : null;
+
     public void SeedPartyPreview(params PartyMember[] members)
     {
         _party.Clear();
         _party.AddRange(members);
     }
 
+    public void SeedPartyMemberPreview(int charId, int pingMs, int levelPermille, IReadOnlyList<int> skillIds)
+    {
+        _partyPings[charId] = pingMs;
+        _partyLevelPermille[charId] = levelPermille;
+        _partyBuffs[charId] = skillIds;
+    }
+
+    public void SeedPartyCommanderPreview(int charId) => PartyCommanderId = charId;
+
     private void ClearParty(string reason)
     {
         if (_party.Count > 0) Godot.GD.Print($"[party] roster cleared: {reason}");
         _party.Clear();
         _partyStatus.Clear();
+        _partyBuffs.Clear();
+        _partyPings.Clear();
+        _partyLevelPermille.Clear();
         _partyJoining = false;
+        PartyCommanderId = -1;
     }
 
     private PartyMember SelfPartyMember() =>
@@ -87,13 +155,16 @@ public partial class Net
 
     public static class PartyRequest
     {
-        public const byte Create = 1, Permit = 2, Insert = 3, Remove = 4, Delete = 5, Promote = 28;
+        public const byte Create = 1, Permit = 2, Insert = 3, Remove = 4, Delete = 5, Promote = 28,
+            CommanderAppoint = 30, CommanderMark = 31, CommanderOrder = 32, UserVote = 33, UserVoteAnswer = 34;
     }
 
     public const byte SubPartyInvite = 2, SubPartyMemberInfo = 3, SubPartyMemberLeft = 4,
                       SubPartyDisband = 5, SubPartyVitals = 6, SubPartyLevel = 7,
                       SubPartyClass = 8, SubPartyStatusEffect = 9, SubPartyCommander = 30,
-                      SubPartyTargetNumber = 31, SubPartyAlert = 32;
+                      SubPartyCommanderMark = 31, SubPartyCommanderOrder = 32, SubPartyRejoinForget = 39,
+                      SubPartyUserVote = 33, SubPartyUserVoteResult = 35, SubPartyMemberBuffs = 64,
+                      SubPartySignal = 65, SubPartySignalTable = 66, SubPartyLevelProgress = 67;
 
     public const short PartyStatusMemberRecord = 1;
 
@@ -124,6 +195,14 @@ public partial class Net
                 int cls = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
                 int maxMp = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
                 int mp = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
+                if (p.RemainingBytes >= MemberTailBytes)
+                {
+                    p.ReadByte();
+                    p.ReadByte();
+                    int marked = p.ReadInt();
+                    PartyType = p.ReadByte();
+                    if (id == MyCharId && marked >= 0) CommanderMarkEvent?.Invoke(new CommanderMarkReply(marked, false));
+                }
                 var member = new PartyMember(id, successCode, name, maxHp, hp, level, cls, maxMp, mp);
                 ApplyPartyMember(member);
                 PartyMemberEvent?.Invoke(member);
@@ -145,7 +224,11 @@ public partial class Net
                 string removedName = idx >= 0 ? _party[idx].Name : "";
                 if (idx >= 0) _party.RemoveAt(idx);
                 _partyStatus.Remove(removedId);
+                _partyBuffs.Remove(removedId);
+                _partyPings.Remove(removedId);
+                _partyLevelPermille.Remove(removedId);
                 if (removedId == MyCharId) ClearParty("the server removed us from the party (GS_PARTY sub 4)");
+                if (removedId == PartyCommanderId) PartyCommanderId = -1;
                 PartyRemovedEvent?.Invoke(removedId, removedName);
                 break;
             }
@@ -203,6 +286,63 @@ public partial class Net
                 PartyMemberStatusEvent?.Invoke(cid, statusType, applied);
                 break;
             }
+            case SubPartyMemberBuffs:
+                if (PartyMemberBuffs.Read(p) is { } buffs)
+                {
+                    _partyBuffs[buffs.CharId] = buffs.SkillIds;
+                    PartyMemberBuffsEvent?.Invoke(buffs.CharId, buffs.SkillIds);
+                }
+                break;
+            case SubPartySignal:
+                if (PartySignalProbe.Read(p) is { } probe) SendPartySignalEcho(probe.Token);
+                break;
+            case SubPartySignalTable:
+                if (PartySignalTable.Read(p) is { } table)
+                {
+                    foreach (var entry in table) _partyPings[entry.CharId] = entry.Ms;
+                    PartySignalEvent?.Invoke();
+                }
+                break;
+            case SubPartyLevelProgress:
+                if (PartyLevelProgress.Read(p) is { } progress)
+                {
+                    _partyLevelPermille[progress.CharId] = progress.Permille;
+                    PartyLevelProgressEvent?.Invoke(progress.CharId, progress.Permille);
+                }
+                break;
+            case SubPartyWarBoard:
+                HandlePartyWarBoard(p);
+                break;
+            case SubPartyRejoinForget:
+                if (p.RemainingBytes >= 4) PartyRejoinForgetEvent?.Invoke(p.ReadInt());
+                break;
+            case SubPartyUserVote:
+            {
+                var (result, ask) = UserVoteReply.ReadStart(p);
+                if (ask is { } started) UserVoteAskEvent?.Invoke(started);
+                else UserVoteRefusedEvent?.Invoke(result);
+                break;
+            }
+            case SubPartyUserVoteResult:
+            {
+                var outcome = UserVoteReply.ReadResult(p);
+                if (outcome.Counted) PendingVoteNotice = (outcome.Warnings, outcome.Limit);
+                UserVoteResultEvent?.Invoke(outcome);
+                break;
+            }
+            case SubPartyCommander:
+                if (CommanderNamedReply.Read(p) is { } named)
+                {
+                    PartyCommanderId = named.CharId;
+                    PartyCommanderEvent?.Invoke(named);
+                }
+                break;
+            case SubPartyCommanderMark:
+                if (CommanderMarkReply.Read(p) is { } mark) CommanderMarkEvent?.Invoke(mark);
+                break;
+            case SubPartyCommanderOrder:
+                if (p.RemainingBytes >= 1) CommanderOrderEvent?.Invoke(p.ReadByte());
+                break;
 
         }
     }
@@ -210,7 +350,7 @@ public partial class Net
     private void HandlePartyBbs(Packet p)
     {
         if (p.RemainingBytes < 2) return;
-        p.ReadByte();
+        PartyBoardMode = p.ReadByte();
         byte sub = p.ReadByte();
         switch (sub)
         {
@@ -225,6 +365,9 @@ public partial class Net
                 break;
             case 0x0B:
                 ParseBbsList(p);
+                break;
+            case PartyBoardInvite.Sub:
+                if (PartyBoardInvite.Read(p) is { } invite) PartyBbsInviteEvent?.Invoke(invite);
                 break;
         }
     }
@@ -244,8 +387,8 @@ public partial class Net
             string name = p.ReadString();
             int classOrWanted = p.ReadInt();
             int level = p.ReadByte();
-            byte type = p.ReadByte();
             p.ReadByte();
+            byte type = p.ReadByte();
             string message = p.ReadSByteString();
             int zoneId = p.ReadShort();
             int memberCount = p.ReadByte();

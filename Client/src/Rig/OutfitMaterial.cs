@@ -66,6 +66,7 @@ internal static class OutfitMaterial
                 ItemShine.PackShine(s.ShineLevel, s.ShinePart, out shineA[i], out shineB[i]);
                 shineB[i].Z = s.Texture != null && s.Scissor > 0f ? 1f : 0f;
                 shineB[i].W = s.Scissor > 0f ? s.Scissor : ItemShine.DefaultAlphaCutoff;
+                ItemShine.EnsureGlobals();
                 shine ??= new ShaderMaterial { Shader = _shineShader ??= new Shader { Code = ShineCode() } };
             }
         }
@@ -143,6 +144,8 @@ internal static class OutfitMaterial
         + "uniform float hold_seconds = 1.0;\n"
         + "uniform float fall_seconds = 1.0;\n"
         + "uniform float cycle_seconds = 1.0;\n"
+        + $"global uniform float {ItemShine.ClassicParam};\n"
+        + $"const float classic_gain = {ClassicGain};\n"
         + "varying vec3 surface_position;\n"
         + "void vertex() { slot = int(UV2.x + 0.5); surface_position = VERTEX; }\n"
         + "float envelope(vec4 a, vec4 b) {\n"
@@ -167,6 +170,10 @@ internal static class OutfitMaterial
         + "    vec4 texel = slot_color[slot] * slot_sample(uv, dFdx(uv), dFdy(uv));\n"
         + "    bool use_alpha = b.z > 0.5;\n"
         + "    float coverage = use_alpha ? texel.a * step(b.w, texel.a) : 1.0;\n"
+        + $"    if ({ItemShine.ClassicParam} > 0.5) {{\n"
+        + "        if (coverage < 0.005) discard;\n"
+        + "        ALBEDO = texel.rgb * coverage * envelope(a, b) * classic_gain;\n"
+        + "    } else {\n"
         + "    float rim = pow(1.0 - abs(dot(normalize(NORMAL), normalize(VIEW))), 2.8);\n"
         + "    float edge = 0.0;\n"
         + "    float halo = 0.0;\n"
@@ -188,5 +195,8 @@ internal static class OutfitMaterial
         + "        + edge * (1.1 + filament * 0.6) + halo * 0.7) * strength;\n"
         + "    vec3 gold = mix(vec3(1.0, 0.65, 0.28), vec3(1.0, 0.94, 0.78), smoothstep(0.2, 1.2, energy));\n"
         + "    ALBEDO = gold * energy * pulse;\n"
+        + "    }\n"
         + "}\n";
+
+    private const string ClassicGain = "0.6";
 }

@@ -10,10 +10,8 @@ public partial class World
     private const byte UpgradeTypePreview = 2;
     private const byte UpgradeResultFailed = 0;
     private const byte UpgradeResultSucceeded = 1;
-    private const byte UpgradeResultTrading = 2;
     private const byte UpgradeResultNeedCoins = 3;
     private const byte UpgradeResultNoMatch = 4;
-    private const byte UpgradeResultSealed = 5;
     private const int AccessoryCompoundScrollFirst = 379159000;
     private const int AccessoryCompoundScrollLast = 379164000;
     private const int UpgradeScrollHigh = 379016000;
@@ -86,6 +84,8 @@ public partial class World
     private TextureRect _anvilSeam = null!;
     private Tween? _upgradeScanTween;
     private UpgradeResult? _upgradePendingResult;
+    private ProgressBar _compoundGauge = null!;
+    private const float CompoundGaugeHeight = 18f;
     private BagCompanion? _anvilCompanion;
     private AnvilBench _anvilBench = AnvilBench.Item;
     private bool _upgradeShown;
@@ -158,6 +158,9 @@ public partial class World
         root.AddChild(_anvilStrip);
 
         _anvilFooter = new FooterBand { Hint = AnvilHint };
+        var back = UiTheme.SmallButton("Back", "Back to the anvil menu");
+        back.Pressed += BackToAnvilMenu;
+        _anvilFooter.Right.AddChild(back);
         root.AddChild(_anvilFooter);
 
         ClearUpgradeSockets();
@@ -202,7 +205,20 @@ public partial class World
         bench.AddChild(BenchSign("="));
         _accessoryResultSocket = BuildResultSocket();
         bench.AddChild(BuildUpgradeColumn("Result", _accessoryResultSocket));
-        return bench;
+
+        _compoundGauge = new ProgressBar
+        {
+            MinValue = 0, MaxValue = 1, Step = 0, ShowPercentage = false, Visible = false,
+            CustomMinimumSize = new Vector2(0, CompoundGaugeHeight),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        _compoundGauge.AddThemeStyleboxOverride("background", UiTheme.MeterTrack());
+        _compoundGauge.AddThemeStyleboxOverride("fill", UiTheme.MeterFill(UiTheme.Gold));
+        var column = new VBoxContainer();
+        column.AddThemeConstantOverride("separation", AnvilSocketGap);
+        column.AddChild(bench);
+        column.AddChild(_compoundGauge);
+        return column;
     }
 
     private static HBoxContainer BenchRow()
@@ -231,7 +247,7 @@ public partial class World
 
     private ItemSlotView BenchSocket(ItemSlotView?[] bench, int index, float size)
     {
-        var socket = new ItemSlotView(size) { Index = index };
+        var socket = new ItemSlotView(size) { Index = index, Veiled = true };
         socket.RightClicked += _ => ClearUpgradeSocket(index);
         socket.DoubleClicked += _ => ClearUpgradeSocket(index);
         socket.Hovered += s => ShowItemTooltip(UpgradeSocketSlot(index), s.Item);
@@ -245,7 +261,7 @@ public partial class World
 
     private ItemSlotView BuildResultSocket()
     {
-        var socket = new ItemSlotView(AnvilItemSocketSize);
+        var socket = new ItemSlotView(AnvilItemSocketSize) { Veiled = true };
         socket.Hovered += s => ShowItemTooltip(-1, s.Item);
         socket.Unhovered += _ => HideItemTooltip();
         return socket;
@@ -356,6 +372,13 @@ public partial class World
         EndNpcDialog(3);
     }
 
+    private void BackToAnvilMenu()
+    {
+        if (!_upgradeSession.CanSend || _upgradePendingResult != null) return;
+        CloseUpgrade();
+        ShowAnvilChoice();
+    }
+
     private void OpenAnvilBench(AnvilBench bench)
     {
         CloseNpcDialog();
@@ -364,7 +387,7 @@ public partial class World
         _anvilFooter.ResetStatus();
         _upgradePanel.Visible = true;
         _upgradeShown = true;
-        _anvilCompanion ??= new BagCompanion(AnvilTakeFromBag, AnvilBagFit, _ => "", CloseUpgrade, AnvilIntoBag);
+        _anvilCompanion ??= new BagCompanion(AnvilTakeFromBag, AnvilBagFit, _ => "", CloseUpgrade, (from, to, _) => AnvilIntoBag(from, to));
         AttachBagCompanion(_anvilCompanion);
         HoldBenchHeight();
         RefreshUpgradeActions();
@@ -774,6 +797,16 @@ public partial class World
         _upgradePendingResult = result;
         _upgradeScanTween?.Kill();
         ResetAnvilLids();
+        if (_anvilBench == AnvilBench.Accessory)
+        {
+            _compoundGauge.Value = 0;
+            _compoundGauge.Visible = true;
+            var fill = CreateTween();
+            fill.TweenProperty(_compoundGauge, "value", 1.0, AnvilScanSeconds);
+            fill.TweenCallback(Callable.From(FinishCompoundGauge));
+            _upgradeScanTween = fill;
+            return;
+        }
         _anvilLids.Visible = true;
         var tween = CreateTween();
         tween.TweenProperty(_anvilLidTop, "anchor_bottom", 0.5f, AnvilLidSeconds);
@@ -793,6 +826,15 @@ public partial class World
         if (_upgradeShown) OpenAnvilLids();
     }
 
+    private void FinishCompoundGauge()
+    {
+        _upgradeScanTween = null;
+        _compoundGauge.Visible = false;
+        if (_upgradePendingResult is not { } result) return;
+        _upgradePendingResult = null;
+        ApplyUpgradeResult(result, onBench: true);
+    }
+
     private void OpenAnvilLids()
     {
         _anvilSeam.AnchorRight = 0f;
@@ -808,6 +850,7 @@ public partial class World
     {
         _upgradeScanTween = null;
         _anvilLids.Visible = false;
+        if (_compoundGauge != null) _compoundGauge.Visible = false;
         _anvilLidTop.AnchorTop = 0f;
         _anvilLidTop.AnchorBottom = 0f;
         _anvilLidBottom.AnchorTop = 1f;
@@ -824,16 +867,16 @@ public partial class World
 
         switch (result.ResultCode)
         {
-            case UpgradeResultSucceeded when resultItemId != 0:
-                CombatNotice($"Upgrade succeeded: {ItemData.DisplayName(resultItemId)}");
+            case UpgradeResultSucceeded:
+                CombatNotice(ItemData.Text(UpgradeSucceededText, "Item upgrade succeeded."), UpgradeSucceededTint);
                 break;
             case UpgradeResultFailed:
                 CombatNotice(resultItemId == 0
-                    ? "The upgrade failed and the item was destroyed."
-                    : $"Upgrade failed. Retained item: {ItemData.DisplayName(resultItemId)}");
+                    ? ItemData.Text(UpgradeFailedText, "Item upgrade failed.")
+                    : $"Upgrade failed. Retained item: {ItemData.DisplayName(resultItemId)}", UpgradeRefusedTint);
                 break;
-            case not UpgradeResultSucceeded when !onBench:
-                CombatNotice(UpgradeError(result.ResultCode));
+            default:
+                CombatNotice(UpgradeError(result.ResultCode), UpgradeRefusedTint);
                 break;
         }
 
@@ -896,13 +939,19 @@ public partial class World
         RefreshUpgradeActions();
     }
 
+    private const int UpgradeSucceededText = 6700;
+    private const int UpgradeFailedText = 6701;
+    private const int UpgradeRefusedText = 6702;
+    private const int UpgradeNoCoinsText = 6703;
+    private const int UpgradeNoMatchText = 6704;
+    private static readonly Color UpgradeSucceededTint = Color.Color8(128, 128, 255);
+    private static readonly Color UpgradeRefusedTint = Color.Color8(255, 0, 255);
+
     private static string UpgradeError(byte code) => code switch
     {
-        UpgradeResultTrading => "Cannot upgrade while trading.",
-        UpgradeResultNeedCoins => "You don't have enough gold.",
-        UpgradeResultNoMatch => "The items required for upgrade do not match.",
-        UpgradeResultSealed => "That item is sealed or rented.",
-        _ => "Cannot perform item upgrade.",
+        UpgradeResultNeedCoins => ItemData.Text(UpgradeNoCoinsText, "You don't have enough Coins."),
+        UpgradeResultNoMatch => ItemData.Text(UpgradeNoMatchText, "The items required for upgrade does not match."),
+        _ => ItemData.Text(UpgradeRefusedText, "Cannot perform item upgrade."),
     };
 
     private void RefreshUpgradeActions()

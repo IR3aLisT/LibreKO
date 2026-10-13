@@ -5,6 +5,7 @@ public enum ItemTradeResult : byte
     Refused = 0,
     Traded = 1,
     Moved = 3,
+    Repurchase = 5,
 }
 
 public enum ItemTradeRefusal : byte

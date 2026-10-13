@@ -12,6 +12,7 @@ public sealed class MyInfoPacketWriter
     private readonly short[] _itemDurability = new short[InventoryConstants.InventoryTotal];
     private readonly short[] _itemCount = new short[InventoryConstants.InventoryTotal];
     private readonly byte[] _itemFlags = new byte[InventoryConstants.InventoryTotal];
+    private readonly int[] _itemExpiry = new int[InventoryConstants.InventoryTotal];
     private readonly PetItemInfo?[] _itemPets = new PetItemInfo?[InventoryConstants.InventoryTotal];
     private byte[] _skillPointData = new byte[SkillPointDataSize];
 
@@ -50,6 +51,7 @@ public sealed class MyInfoPacketWriter
     public byte CapeG { get; set; }
     public byte CapeB { get; set; }
     public ushort NoClanCapeId { get; set; }
+    public bool IsKing { get; set; }
 
     public short MaxHp { get; set; }
     public short Hp { get; set; }
@@ -176,7 +178,7 @@ public sealed class MyInfoPacketWriter
             Array.Copy(data, _skillPointData, Math.Min(data.Length, SkillPointDataSize));
     }
 
-    public void SetItem(int storageSlot, int itemId, short durability, short count, byte flag)
+    public void SetItem(int storageSlot, int itemId, short durability, short count, byte flag, int expiresAt = ItemRecordWriter.NoExpiry)
     {
         if (storageSlot < 0 || storageSlot >= InventoryConstants.InventoryTotal)
             return;
@@ -185,6 +187,7 @@ public sealed class MyInfoPacketWriter
         _itemDurability[storageSlot] = durability;
         _itemCount[storageSlot] = count;
         _itemFlags[storageSlot] = flag;
+        _itemExpiry[storageSlot] = expiresAt;
     }
 
     public void SetPetItem(int storageSlot, PetItemInfo pet)
@@ -214,7 +217,7 @@ public sealed class MyInfoPacketWriter
 
         packet.WriteByte(Rank);
         packet.WriteByte(Title);
-        packet.WriteByte(0);
+        packet.WriteByte((byte)(IsKing ? 1 : 0));
         packet.WriteByte(0);
 
         packet.WriteByte(Level);
@@ -237,10 +240,11 @@ public sealed class MyInfoPacketWriter
             packet.WriteByte(ClanGrade);
             packet.WriteByte(ClanRanking);
             packet.WriteShort(0);
-            packet.WriteShort(ClanCape);
-            packet.WriteByte(ClanCape > 0 ? CapeR : (byte)0);
-            packet.WriteByte(ClanCape > 0 ? CapeG : (byte)0);
-            packet.WriteByte(ClanCape > 0 ? CapeB : (byte)0);
+            bool dyed = ClanCape > 0 && !IsKing;
+            packet.WriteShort(IsKing ? (short)NoClanCapeId : ClanCape);
+            packet.WriteByte(dyed ? CapeR : (byte)0);
+            packet.WriteByte(dyed ? CapeG : (byte)0);
+            packet.WriteByte(dyed ? CapeB : (byte)0);
             packet.WriteByte(0);
         }
         else
@@ -332,7 +336,8 @@ public sealed class MyInfoPacketWriter
                 _itemDurability[storageSlot],
                 _itemCount[storageSlot],
                 _itemFlags[storageSlot],
-                _itemPets[storageSlot]);
+                _itemPets[storageSlot],
+                _itemExpiry[storageSlot]);
         }
 
         for (var reserved = 0; reserved < InventoryConstants.MyInfoReservedItemRecords; reserved++)

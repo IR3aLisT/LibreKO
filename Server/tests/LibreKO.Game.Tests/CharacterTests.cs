@@ -143,7 +143,7 @@ public class CharacterTests : GameTestBase
         var accountId = await GetAccountIdAsync(provider, "starter-user");
 
         var invalidRace = await preGameService.CreateCharacterAsync(accountId, 0, "BadRace", 9, 101, 2, 3, 60, 60, 60, 60, 60);
-        invalidRace.ReadByte().Should().Be((byte)CreateCharacterResult.InvalidRace);
+        invalidRace.ReadByte().Should().Be((byte)CreateCharacterResult.NationRaceMismatch);
 
         var invalidCombo = await preGameService.CreateCharacterAsync(accountId, 0, "BadCombo", 1, 104, 2, 3, 60, 60, 60, 60, 60);
         invalidCombo.ReadByte().Should().Be((byte)CreateCharacterResult.InvalidClass);
@@ -1403,7 +1403,12 @@ public class CharacterTests : GameTestBase
         var viewerClient = Substitute.For<IClient>();
         viewerClient.Id.Returns(Guid.NewGuid());
         Packet? viewerPacket = null;
-        viewerClient.SendPacket(Arg.Do<Packet>(packet => viewerPacket = packet), Arg.Any<CancellationToken>())
+        viewerClient.SendPacket(
+                Arg.Do<Packet>(packet =>
+                {
+                    if (packet.GetOpcode() == (byte)GameOpcodes.GS_USER_INOUT) viewerPacket = packet;
+                }),
+                Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
         var viewer = sessionManager.CreateSession(viewerClient, characterId: 9001, accountId: 9002);

@@ -19,6 +19,7 @@ public class ZoneRulesTests : GameTestBase
     [InlineData(ZoneId.DragonCave, ZoneAbilityType.PvpNeutralNpcs)]
     [InlineData(ZoneId.DrakiTower, ZoneAbilityType.SiegeType2)]
     [InlineData(ZoneId.CaitharosArena, ZoneAbilityType.CaitharosArena)]
+    [InlineData(ZoneId.Arena, ZoneAbilityType.FreeForAll)]
     [InlineData(ZoneId.ClanWar, ZoneAbilityType.SiegeDisabled)]
     [InlineData(ZoneId.RonarkLand, ZoneAbilityType.Pvp)]
     [InlineData(ZoneId.NapiesGorge, ZoneAbilityType.Pvp)]

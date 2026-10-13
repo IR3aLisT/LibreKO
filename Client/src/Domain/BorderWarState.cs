@@ -2,6 +2,13 @@
 
 namespace LibreKO.Domain;
 
+public enum WarOutcome
+{
+    Victory,
+    Defeat,
+    Draw,
+}
+
 public sealed class BorderWarState
 {
     public int KarusScore { get; private set; }
@@ -11,6 +18,7 @@ public sealed class BorderWarState
     public DateTime? AltarBackUtc { get; private set; }
     public int? Winner { get; private set; }
     public DateTime? HomeUtc { get; private set; }
+    public DateTime? EndUtc { get; private set; }
 
     public bool Finished => Winner.HasValue;
 
@@ -43,6 +51,13 @@ public sealed class BorderWarState
         AltarBackUtc = null;
     }
 
+    public void RoomClock(int seconds, DateTime now) => EndUtc = seconds > 0 ? now.AddSeconds(seconds) : null;
+
+    public int EndSecondsLeft(DateTime now) => Finished ? 0 : SecondsUntil(EndUtc, now);
+
+    public static WarOutcome OutcomeFor(int winner, int myNation) =>
+        winner == 0 ? WarOutcome.Draw : winner == myNation ? WarOutcome.Victory : WarOutcome.Defeat;
+
     public int AltarSecondsLeft(DateTime now) => SecondsUntil(AltarBackUtc, now);
 
     public int HomeSecondsLeft(DateTime now) => SecondsUntil(HomeUtc, now);
@@ -55,6 +70,7 @@ public sealed class BorderWarState
         AltarBackUtc = null;
         Winner = null;
         HomeUtc = null;
+        EndUtc = null;
     }
 
     private static int SecondsUntil(DateTime? at, DateTime now) =>

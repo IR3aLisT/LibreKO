@@ -2,8 +2,10 @@
 
 namespace LibreKO;
 
-public partial class FxWeaponGlow : Node3D
+public partial class FxWeaponGlow : Node3D, IFxTicked
 {
+    public int FxSlot { get; set; } = FxTickLane.Unlisted;
+
     private const int Layers = 3;
     private const int Tails = 2;
     private const float RollDegrees = 5f;
@@ -17,8 +19,17 @@ public partial class FxWeaponGlow : Node3D
     private const float ScaleFactor = 0.7f;
 
     private readonly System.Collections.Generic.List<Node3D> _tails = new();
-    private ShaderMaterial[] _materials = System.Array.Empty<ShaderMaterial>();
+    private MeshInstance3D[] _shine = System.Array.Empty<MeshInstance3D>();
     private Node3D[] _meshes = System.Array.Empty<Node3D>();
+    private string _fxName = "";
+    private int _renderFlags;
+    private int _blendWord;
+    private bool _reduced;
+    private const int ReducedLayers = 1;
+    private const int ReducedTails = 1;
+
+    private static readonly System.Collections.Generic.Dictionary<(string Fx, int Layer, int Frame), ShaderMaterial> SharedMaterials =
+        Shutdown.Track(new System.Collections.Generic.Dictionary<(string Fx, int Layer, int Frame), ShaderMaterial>());
     private int[] _shown = System.Array.Empty<int>();
     private Texture2D?[] _frames = System.Array.Empty<Texture2D?>();
     private float _fps = 1f;
@@ -90,9 +101,12 @@ public partial class FxWeaponGlow : Node3D
         {
             Name = $"fx_{fxName}_guide",
             _bounds = shell.GetAabb(),
-            _materials = new ShaderMaterial[Layers],
+            _shine = new MeshInstance3D[Layers],
             _meshes = new Node3D[Layers],
             _shown = new[] { -1, -1, -1 },
+            _fxName = fxName,
+            _renderFlags = FxShading.RenderFlags(part) | Fx.RfDoubleSided | Fx.RfNotZWrite,
+            _blendWord = FxShading.Packed(part),
         };
         var textures = part["tex"].AsGodotArray();
         root._frames = new Texture2D?[textures.Count];
@@ -102,40 +116,58 @@ public partial class FxWeaponGlow : Node3D
         root._wobbleDir = FirstNormal(shell);
         root._texAge = GD.Randf() * TexPhaseMax;
 
-        var frame0 = root._frames.Length > 0 ? root._frames[0] : null;
-        int renderFlags = FxShading.RenderFlags(part) | Fx.RfDoubleSided | Fx.RfNotZWrite;
-        int blendWord = FxShading.Packed(part);
         for (int i = 0; i < Layers; i++)
         {
             var layer = new Node3D { Name = $"layer{i}" };
             root._meshes[i] = layer;
             root.AddChild(layer);
-            var mat = FxShading.SurfaceMaterial(renderFlags, blendWord, frame0);
-            mat.RenderPriority = i;
-            root._materials[i] = mat;
-            layer.AddChild(new MeshInstance3D
+            var shine = new MeshInstance3D
             {
                 Name = $"shine{i}",
                 Mesh = shell,
-                MaterialOverride = mat,
+                MaterialOverride = root.SharedMaterial(i, 0),
                 CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
                 Layers = FxShading.LayerBit,
-            });
+            };
+            root._shine[i] = shine;
+            layer.AddChild(shine);
         }
         return root;
+    }
+
+    private ShaderMaterial SharedMaterial(int layer, int frame)
+    {
+        var key = (_fxName, layer, frame);
+        if (SharedMaterials.TryGetValue(key, out var material)) return material;
+        material = FxShading.SurfaceMaterial(_renderFlags, _blendWord, _frames.Length > frame ? _frames[frame] : null);
+        material.RenderPriority = layer;
+        SharedMaterials[key] = material;
+        return material;
+    }
+
+    private void SetReduced(bool reduced)
+    {
+        if (_reduced == reduced) return;
+        _reduced = reduced;
+        for (int i = ReducedLayers; i < _meshes.Length; i++)
+            if (IsInstanceValid(_meshes[i])) _meshes[i].Visible = !reduced;
+        for (int i = ReducedTails; i < _tails.Count; i++)
+            if (IsInstanceValid(_tails[i])) _tails[i].Visible = !reduced;
     }
 
     private bool _layerUser;
 
     public override void _EnterTree()
     {
-        if (_materials.Length == 0 || _layerUser) return;
+        FxDriver.Lane(this, FxLane.Gear)?.Join(this);
+        if (_shine.Length == 0 || _layerUser) return;
         _layerUser = true;
         FxLayer.Users++;
     }
 
     public override void _ExitTree()
     {
+        FxDriver.Lane(this, FxLane.Gear)?.Leave(this);
         if (!_layerUser) return;
         _layerUser = false;
         FxLayer.Users--;
@@ -150,7 +182,7 @@ public partial class FxWeaponGlow : Node3D
             scale = (_bounds.Size.Y + _bounds.Size.Z) * ScaleFactor;
         for (int i = 0; i < Tails; i++)
         {
-            if (Fx.Spawn(tailFxName, this, ScatterPoint(), sizeScale: scale, forceAdditive: true) is { } tail)
+            if (Fx.Spawn(tailFxName, this, ScatterPoint(), sizeScale: scale) is { } tail)
                 _tails.Add(tail);
         }
     }
@@ -173,7 +205,7 @@ public partial class FxWeaponGlow : Node3D
     private int _frame;
     private bool _far;
 
-    public override void _Process(double delta)
+    public void FxTick(double delta)
     {
         using var scope = Perf.Measure(Perf.Section.Gear);
         if (Fx.ShuttingDown) return;
@@ -181,8 +213,11 @@ public partial class FxWeaponGlow : Node3D
         _texAge += delta;
         _frame++;
         if (_frame % GlowDistCheckFrames == 0)
+        {
             _far = Fx.FrameCamera(this, out var cam)
                 && cam.Origin.DistanceSquaredTo(GlobalPosition) > GlowNearDist * GlowNearDist;
+            SetReduced(_far);
+        }
         if (_far && _frame % GlowFarEvery != 0) return;
 
         for (int i = _tails.Count - 1; i >= 0; i--)
@@ -201,13 +236,14 @@ public partial class FxWeaponGlow : Node3D
             new Basis(Vector3.Up, Mathf.DegToRad(RollDegrees)), _wobbleDir * -wobble);
 
         int frame = Mathf.PosMod((int)(_texAge * _fps), _frames.Length);
-        for (int i = 0; i < Layers; i++)
+        int layersShown = _reduced ? ReducedLayers : Layers;
+        for (int i = 0; i < layersShown; i++)
         {
             int f = (frame + i) % _frames.Length;
             if (f == _shown[i]) continue;
             _shown[i] = f;
-            if (_frames[f] is not { } texture) continue;
-            _materials[i].SetShaderParameter(FxShading.TextureParam, texture);
+            if (_frames[f] == null) continue;
+            _shine[i].MaterialOverride = SharedMaterial(i, f);
         }
     }
 

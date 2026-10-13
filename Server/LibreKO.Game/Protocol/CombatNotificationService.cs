@@ -7,7 +7,7 @@ namespace LibreKO.Game.Protocol;
 
 public interface ICombatNotificationService
 {
-    Task SendDeathNoticeAsync(UserSession killer, UserSession victim);
+    Task SendDeathNoticeAsync(UserSession killer, UserSession victim, bool slainVanguard = false);
     Task SendHpChangeAsync(UserSession session, int attackerId = -1);
     Task SendMspChangeAsync(UserSession session);
     Task SendNpcTargetHpAsync(UserSession attacker, NpcInstance npc, int damage = 0);
@@ -16,18 +16,38 @@ public interface ICombatNotificationService
     Task SendPartyLevelUpdateAsync(UserSession session);
     Task SendPartyClassUpdateAsync(UserSession session);
     Task SendPartyStatusUpdateAsync(UserSession session, byte statusType, bool applied);
+    Task SendPartyBuffsAsync(UserSession session);
     Task SendToPartyAsync(PartyGroup party, Packet packet);
 }
 
-public class CombatNotificationService(SessionManager sessionManager,
-    ILogger<CombatNotificationService> logger) : ICombatNotificationService
+public class CombatNotificationService : ICombatNotificationService
 {
-    public async Task SendDeathNoticeAsync(UserSession killer, UserSession victim)
+    private readonly SessionManager sessionManager;
+    private readonly ILogger<CombatNotificationService> logger;
+    private readonly IPartyWarBoardService? partyWarBoard;
+    private readonly IKingSystemRuntimeService? kings;
+
+    public CombatNotificationService(SessionManager sessionManager,
+        ILogger<CombatNotificationService> logger,
+        IPartyWarBoardService? partyWarBoard = null,
+        IKingSystemRuntimeService? kings = null)
+    {
+        this.sessionManager = sessionManager;
+        this.logger = logger;
+        this.partyWarBoard = partyWarBoard;
+        this.kings = kings;
+        sessionManager.BuffsChanged += session => _ = SendPartyBuffsAsync(session);
+    }
+
+    public async Task SendDeathNoticeAsync(UserSession killer, UserSession victim, bool slainVanguard = false)
     {
         logger.LogInformation("PvP death: {Killer} killed {Victim} in zone {Zone}", killer.Name, victim.Name, victim.ZoneId);
 
+        bool victimIsKing = kings?.GetKingData(victim.Nation)?.KingName is { Length: > 0 } king
+                            && string.Equals(king, victim.Name, StringComparison.OrdinalIgnoreCase);
         var packet = ChatPacketWriter.DeathNotice(
-            (byte)victim.Nation, (byte)killer.Nation, (byte)DeathNoticeType.WithCoordinates,
+            (byte)killer.Nation, (byte)victim.Nation, victimIsKing,
+            (byte)(slainVanguard ? DeathNoticeType.VanguardSlain : DeathNoticeType.WithCoordinates),
             killer.CharacterId, killer.Name, victim.CharacterId, victim.Name,
             victim.GetPosX, victim.GetPosZ);
 
@@ -58,6 +78,7 @@ public class CombatNotificationService(SessionManager sessionManager,
     {
         var packet = TargetHpPacketWriter.For(npc.UniqueId, npc.MaxHp, npc.Hp, damage);
         await attacker.Client.SendPacket(packet);
+        partyWarBoard?.CountDamage(attacker, Math.Abs(damage));
     }
 
     public async Task SendPlayerTargetHpAsync(UserSession attacker, UserSession victim, int damage = 0)
@@ -68,6 +89,7 @@ public class CombatNotificationService(SessionManager sessionManager,
         var packet = TargetHpPacketWriter
             .For(victim.CharacterId, victim.MaxHp, victim.Hp, damage);
         await attacker.Client.SendPacket(packet);
+        partyWarBoard?.CountDamage(attacker, Math.Abs(damage));
     }
 
     public async Task SendPartyHpUpdateAsync(UserSession session)
@@ -116,6 +138,7 @@ public class CombatNotificationService(SessionManager sessionManager,
 
     public async Task SendPartyStatusUpdateAsync(UserSession session, byte statusType, bool applied)
     {
+        await session.Client.SendPacket(ZoneChangePacketWriter.UserStatus(statusType, applied));
         if (!session.IsInParty)
             return;
 
@@ -125,6 +148,18 @@ public class CombatNotificationService(SessionManager sessionManager,
 
         var packet = PartyPacketWriter.StatusEffect(session.CharacterId, statusType, applied);
         await SendToPartyAsync(party, packet);
+    }
+
+    public async Task SendPartyBuffsAsync(UserSession session)
+    {
+        if (!session.IsInParty)
+            return;
+
+        var party = sessionManager.Parties.GetParty(session.PartyIndex);
+        if (party == null || party.FindMember((short)session.CharacterId) < 0)
+            return;
+
+        await SendToPartyAsync(party, PartyPacketWriter.MemberBuffs(session.CharacterId, session.LiveBuffIds()));
     }
 
     public async Task SendToPartyAsync(PartyGroup party, Packet packet)
@@ -142,6 +177,7 @@ public class CombatNotificationService(SessionManager sessionManager,
 
     private enum DeathNoticeType : byte
     {
-        WithCoordinates = 0
+        WithCoordinates = 0,
+        VanguardSlain = 3,
     }
 }

@@ -33,6 +33,23 @@ public enum DurationExpiredCode : byte
     Summon = 93,
 }
 
+public static class MagicFailCode
+{
+    public const int Slot = 3;
+    public const int Casting = -100;
+    public const int KillFlying = -101;
+    public const int NoEffect = -103;
+    public const int AttackZero = -104;
+    public const int NotEnoughMp = -106;
+
+    public static int ForStage(MagicProcessOpcode stage) => stage switch
+    {
+        MagicProcessOpcode.Casting => Casting,
+        MagicProcessOpcode.Flying => KillFlying,
+        _ => NoEffect,
+    };
+}
+
 public static class MagicProcessPacketWriter
 {
     private const int PayloadSlotCount = 7;
@@ -68,8 +85,8 @@ public static class MagicProcessPacketWriter
     public static Packet CreateCancel(int skillId, int casterId, int targetId) =>
         Create(MagicProcessOpcode.Cancel, skillId, casterId, targetId);
 
-    public static Packet CreateFail(int skillId, int casterId) =>
-        Create(MagicProcessOpcode.Fail, skillId, casterId, 0);
+    public static Packet CreateFail(int skillId, int casterId, int code = MagicFailCode.NoEffect) =>
+        Create(MagicProcessOpcode.Fail, skillId, casterId, 0, [0, 0, 0, code]);
 
     public static Packet CreateDurationExpired(DurationExpiredCode code) =>
         CreateDurationExpired((byte)code);

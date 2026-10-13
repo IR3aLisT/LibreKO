@@ -15,6 +15,7 @@ public partial class Net
 
     public const int MailSubjectMax = 64;
     public const int MailBodyMax = 512;
+    public const int MailInboxMax = 50;
     public const int MailItemAttachmentsMax = 4;
     private const int MailAttachmentWireSize = sizeof(byte) + sizeof(int) * 3;
 

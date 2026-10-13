@@ -1,4 +1,5 @@
-﻿using LibreKO.Common.Domain.Entities;
+﻿using System.Collections.Concurrent;
+using LibreKO.Common.Domain.Entities;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Common.Infrastructure.Persistence;
 using LibreKO.Game.Protocol.Writers;
@@ -13,6 +14,7 @@ public interface ISocialPacketCoordinator
 {
     Task HandleChatTargetAsync(IClient client, Packet packet);
     Task HandleFriendProcessAsync(IClient client, Packet packet);
+    Task NotifyFriendLoggedInAsync(UserSession session);
 }
 
 public class SocialPacketCoordinator(
@@ -21,6 +23,10 @@ public class SocialPacketCoordinator(
     ILogger<SocialPacketCoordinator> logger) : ISocialPacketCoordinator
 {
     private const int MaxFriendNameLength = 20;
+    public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
+    private const byte RequestAccepted = 1;
+
+    private readonly ConcurrentDictionary<(int Target, int Requester), DateTime> _pendingRequests = new();
 
     public async Task HandleChatTargetAsync(IClient client, Packet packet)
     {
@@ -37,7 +43,37 @@ public class SocialPacketCoordinator(
             case ChatTargetPacketWriter.TypeBlockToggle:
                 session.BlockPrivateChat = packet.ReadByte() != 0;
                 break;
+
+            case ChatTargetPacketWriter.TypeClanAdmission when packet.RemainingBytes >= 1:
+                await RequestClanConsultationAsync(session, packet);
+                break;
         }
+    }
+
+    private const byte ConsultClan = 0;
+
+    private async Task RequestClanConsultationAsync(UserSession session, Packet packet)
+    {
+        UserSession? target = null;
+        if (packet.ReadByte() == ConsultClan)
+        {
+            if (packet.RemainingBytes >= 2 && sessionManager.Knights.GetClan(packet.ReadShort()) is { } clan)
+                target = sessionManager.GetByName(clan.Chief)
+                    ?? sessionManager.GetAll().FirstOrDefault(s => s.KnightsId == clan.Id && ClanRules.CanInvite(s.KnightsFame));
+        }
+        else if (packet.RemainingBytes >= 2)
+        {
+            target = sessionManager.GetByName(packet.ReadString());
+        }
+
+        if (target == null || target == session || target.BlockPrivateChat || session.BlockPrivateChat)
+        {
+            await session.Client.SendPacket(ChatTargetPacketWriter.ClanAdmissionFailed());
+            return;
+        }
+
+        await session.Client.SendPacket(ChatTargetPacketWriter.ClanAdmissionRequestSent(target.Name));
+        await target.Client.SendPacket(ChatTargetPacketWriter.ClanAdmissionRequestReceived(session.Name));
     }
 
     private async Task SelectWhisperTargetAsync(IClient client, UserSession session, Packet packet)
@@ -49,7 +85,11 @@ public class SocialPacketCoordinator(
         var target = sessionManager.GetByName(targetName);
 
         Packet writer;
-        if (target == null || target == session)
+        if (session.BlockPrivateChat)
+        {
+            writer = ChatTargetPacketWriter.WhisperSenderBlocked(targetName);
+        }
+        else if (target == null || target == session)
         {
             writer = ChatTargetPacketWriter.WhisperTargetNotFound();
         }
@@ -83,14 +123,31 @@ public class SocialPacketCoordinator(
                 await HandleFriendReportAsync(client, packet);
                 break;
 
-            case 3:
+            case (byte)FriendSubOpcode.Add:
                 await HandleFriendAddAsync(client, session, packet);
                 break;
 
-            case 4:
+            case (byte)FriendSubOpcode.Remove:
                 await HandleFriendRemoveAsync(client, session, packet);
                 break;
+
+            case (byte)FriendSubOpcode.Request:
+                await HandleFriendAnswerAsync(session, packet);
+                break;
         }
+    }
+
+    public async Task NotifyFriendLoggedInAsync(UserSession session)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var watchers = await db.Friendships
+            .Where(f => f.FriendCharacterId == session.CharacterId)
+            .Select(f => f.CharacterId)
+            .ToListAsync();
+        foreach (var watcherId in watchers)
+            if (sessionManager.GetByCharacterId(watcherId) is { } watcher)
+                await watcher.Client.SendPacket(FriendPacketWriter.LoggedIn(session.Name));
     }
 
     private async Task HandleFriendRequestAsync(IClient client, UserSession session)
@@ -166,62 +223,100 @@ public class SocialPacketCoordinator(
 
     private async Task HandleFriendAddAsync(IClient client, UserSession session, Packet packet)
     {
-        var targetName = packet.ReadSByteString();
-
-        if (string.IsNullOrEmpty(targetName) || targetName.Length > 20 ||
-            targetName.Equals(session.Name, StringComparison.OrdinalIgnoreCase))
+        var targetName = packet.ReadString();
+        var target = string.IsNullOrEmpty(targetName) || targetName.Length > MaxFriendNameLength
+            || targetName.Equals(session.Name, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : sessionManager.GetByName(targetName);
+        if (target == null)
         {
-            await SendFriendModifyResultAsync(client, FriendSubOpcode.Add, (byte)FriendAddResult.Failed, targetName ?? string.Empty);
+            await client.SendPacket(FriendPacketWriter.RequestResult(FriendRequestResult.CannotAdd));
+            return;
+        }
+
+        if (target.Nation != session.Nation)
+        {
+            await client.SendPacket(FriendPacketWriter.RequestResult(FriendRequestResult.NationMismatch));
             return;
         }
 
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        var target = await db.Characters
-            .Where(c => c.Name == targetName)
-            .Select(c => new { c.Id })
-            .FirstOrDefaultAsync();
-        if (target == null)
+        if (await FriendAddRefusalAsync(db, session.CharacterId, target.CharacterId) is { } refusal)
         {
-            await SendFriendModifyResultAsync(client, FriendSubOpcode.Add, (byte)FriendAddResult.Failed, targetName);
+            await client.SendPacket(FriendPacketWriter.RequestResult(refusal));
             return;
         }
 
-        var alreadyFriends = await db.Friendships
-            .AnyAsync(f => f.CharacterId == session.CharacterId && f.FriendCharacterId == target.Id);
-        if (alreadyFriends)
+        var key = (target.CharacterId, session.CharacterId);
+        if (_pendingRequests.TryGetValue(key, out var askedAt) && DateTime.UtcNow - askedAt < RequestTimeout)
         {
-            await SendFriendModifyResultAsync(client, FriendSubOpcode.Add, (byte)FriendAddResult.Failed, targetName);
+            await client.SendPacket(FriendPacketWriter.RequestResult(FriendRequestResult.InProgress));
             return;
         }
 
-        var count = await db.Friendships.CountAsync(f => f.CharacterId == session.CharacterId);
-        if (count >= Friendship.MaxFriends)
+        _pendingRequests[key] = DateTime.UtcNow;
+        await target.Client.SendPacket(FriendPacketWriter.Request(session.Name));
+        logger.LogDebug("{Name} asked {FriendName} to be friends", session.Name, target.Name);
+    }
+
+    private async Task HandleFriendAnswerAsync(UserSession session, Packet packet)
+    {
+        var requesterName = packet.ReadString();
+        var accepted = packet.RemainingBytes >= 1 && packet.ReadByte() == RequestAccepted;
+        var requester = string.IsNullOrEmpty(requesterName) ? null : sessionManager.GetByName(requesterName);
+        if (requester == null || !_pendingRequests.TryRemove((session.CharacterId, requester.CharacterId), out var askedAt))
+            return;
+
+        if (DateTime.UtcNow - askedAt >= RequestTimeout)
         {
-            await SendFriendModifyResultAsync(client, FriendSubOpcode.Add, (byte)FriendAddResult.ListFull, targetName);
+            await requester.Client.SendPacket(FriendPacketWriter.RequestResult(FriendRequestResult.Expired));
+            return;
+        }
+
+        if (!accepted)
+        {
+            await requester.Client.SendPacket(FriendPacketWriter.RequestResult(FriendRequestResult.Denied));
+            return;
+        }
+
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        if (await FriendAddRefusalAsync(db, requester.CharacterId, session.CharacterId) is { } refusal)
+        {
+            await requester.Client.SendPacket(refusal == FriendRequestResult.ListFull
+                ? FriendPacketWriter.AddResult(FriendAddResult.ListFull)
+                : FriendPacketWriter.AddResult(FriendAddResult.Failed));
             return;
         }
 
         db.Friendships.Add(new Friendship
         {
-            CharacterId = session.CharacterId,
-            FriendCharacterId = target.Id,
+            CharacterId = requester.CharacterId,
+            FriendCharacterId = session.CharacterId,
             AddedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        logger.LogDebug("{Name} added friend {FriendName}", session.Name, targetName);
+        logger.LogDebug("{Name} added friend {FriendName}", requester.Name, session.Name);
+        await requester.Client.SendPacket(FriendPacketWriter.AddResult(FriendAddResult.Succeeded, FriendStatus(session.Name)));
+    }
 
-        await SendFriendModifyResultAsync(client, FriendSubOpcode.Add, (byte)FriendAddResult.Succeeded, targetName);
+    private static async Task<FriendRequestResult?> FriendAddRefusalAsync(AppDbContext db, int characterId, int friendId)
+    {
+        if (await db.Friendships.AnyAsync(f => f.CharacterId == characterId && f.FriendCharacterId == friendId))
+            return FriendRequestResult.AlreadyRegistered;
+        if (await db.Friendships.CountAsync(f => f.CharacterId == characterId) >= Friendship.MaxFriends)
+            return FriendRequestResult.ListFull;
+        return null;
     }
 
     private async Task HandleFriendRemoveAsync(IClient client, UserSession session, Packet packet)
     {
-        var targetName = packet.ReadSByteString();
+        var targetName = packet.ReadString();
 
-        if (string.IsNullOrEmpty(targetName) || targetName.Length > 20)
+        if (string.IsNullOrEmpty(targetName) || targetName.Length > MaxFriendNameLength)
         {
-            await SendFriendModifyResultAsync(client, FriendSubOpcode.Remove, (byte)FriendRemoveResult.Failed, targetName ?? string.Empty);
+            await client.SendPacket(FriendPacketWriter.RemoveResult(FriendRemoveResult.Failed, targetName ?? string.Empty));
             return;
         }
 
@@ -236,7 +331,7 @@ public class SocialPacketCoordinator(
             .FirstOrDefaultAsync();
         if (friendship == null)
         {
-            await SendFriendModifyResultAsync(client, FriendSubOpcode.Remove, (byte)FriendRemoveResult.NotOnTheList, targetName);
+            await client.SendPacket(FriendPacketWriter.RemoveResult(FriendRemoveResult.NotOnTheList, targetName));
             return;
         }
 
@@ -244,13 +339,7 @@ public class SocialPacketCoordinator(
         await db.SaveChangesAsync();
         logger.LogDebug("{Name} removed friend {FriendName}", session.Name, targetName);
 
-        await SendFriendModifyResultAsync(client, FriendSubOpcode.Remove, (byte)FriendRemoveResult.Succeeded, targetName);
-    }
-
-    private async Task SendFriendModifyResultAsync(IClient client, FriendSubOpcode sub, byte resultCode, string friendName)
-    {
-        await client.SendPacket(FriendPacketWriter.ModifyResult(
-            sub, resultCode, friendName, FriendStatus(friendName)));
+        await client.SendPacket(FriendPacketWriter.RemoveResult(FriendRemoveResult.Succeeded, targetName));
     }
 
     private FriendPacketWriter.Status FriendStatus(string friendName)

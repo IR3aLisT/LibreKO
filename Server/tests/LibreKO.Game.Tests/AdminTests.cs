@@ -6,6 +6,7 @@ using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Common.Infrastructure.Persistence;
 using LibreKO.Game.Protocol;
+using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -196,6 +197,38 @@ public class AdminTests : GameTestBase
         targetCharacter.Hp.Should().Be(77);
         targetCharacter.X.Should().Be(15);
         targetCharacter.Z.Should().Be(25);
+    }
+
+    [Fact]
+    public async Task AdminPacketCoordinator_HandleGmCommandAsync_NoticeIsFramedAndSentToEveryone()
+    {
+        using var provider = CreateProvider(_ => { });
+
+        var gmClient = Substitute.For<IClient>();
+        gmClient.Id.Returns(Guid.NewGuid());
+        gmClient.SendPacket(Arg.Any<Packet>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var otherClient = Substitute.For<IClient>();
+        otherClient.Id.Returns(Guid.NewGuid());
+        Packet? sentPacket = null;
+        otherClient.SendPacket(Arg.Do<Packet>(packet => sentPacket = packet), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var gmSession = sessionManager.CreateSession(gmClient, characterId: 300, accountId: 310);
+        gmSession.Name = "GM";
+        gmSession.IsGM = true;
+        var otherSession = sessionManager.CreateSession(otherClient, characterId: 301, accountId: 311);
+        otherSession.Name = "Other";
+
+        await provider.GetRequiredService<IAdminPacketCoordinator>().HandleGmCommandAsync(gmSession, "+notice Siege at nine");
+
+        sentPacket.Should().NotBeNull();
+        sentPacket!.ResetOffset();
+        sentPacket.GetOpcode().Should().Be((byte)GameOpcodes.GS_NOTICE);
+        sentPacket.ReadByte().Should().Be(NoticePacketWriter.ScreenNotice);
+        sentPacket.ReadByte().Should().Be(1);
+        sentPacket.ReadSByteString().Should().Be("#### NOTICE : Siege at nine ####");
     }
 
     [Fact]

@@ -7,8 +7,14 @@ public partial class Net
     public event Action<int, int>? SkillPointChangeEvent;
 
     public event Action<bool, int, int>? SkillResetEvent;
-
     public event Action<byte, int>? ResetRefusedEvent;
+
+    public const byte ClassChangeOpen = 1;
+    public const byte ClassChangeEligibility = 2;
+    public const byte ClassChangeStatReset = 3;
+    public const byte ClassChangeSkillReset = 4;
+    public const byte ClassChangeResetCost = 5;
+    public const byte ClassChangePromotion = 6;
 
     public event Action<bool, int, int[], int, int, int, int>? StatResetEvent;
 
@@ -40,14 +46,14 @@ public partial class Net
         byte sub = p.ReadByte();
         switch (sub)
         {
-            case 1: ClassChangeNpcEvent?.Invoke(); break;
-            case 2: ParseStatReset(p); break;
-            case 3: ParseSkillReset(p); break;
-            case 4: ResetCostEvent?.Invoke(p.RemainingBytes >= 4 ? p.ReadInt() : 0); break;
-            case 5: ClassEligibilityEvent?.Invoke(p.RemainingBytes >= 1 ? p.ReadByte() : 0); break;
+            case ClassChangeOpen: ClassChangeNpcEvent?.Invoke(); break;
+            case ClassChangeEligibility: ClassEligibilityEvent?.Invoke(p.RemainingBytes >= 1 ? p.ReadByte() : 0); break;
+            case ClassChangeStatReset: ParseStatReset(p); break;
+            case ClassChangeSkillReset: ParseSkillReset(p); break;
+            case ClassChangeResetCost: ResetCostEvent?.Invoke(p.RemainingBytes >= 4 ? p.ReadInt() : 0); break;
             // Two shapes share sub 6: the job-change panel answers [byte result], the quest promotion
             // (ScriptCharacterService.ApplyPromotion) sends [short newClass][int charId].
-            case 6:
+            case ClassChangePromotion:
                 if (p.RemainingBytes >= 6)
                 {
                     int newClass = p.ReadShort();
@@ -110,21 +116,30 @@ public partial class Net
 
     public void SendSkillPointChange(int treeType) => SendClassByte(GameOpcodes.GS_SKILLPT_CHANGE, (byte)treeType);
 
-    public void SendStatReset() => SendClassByte(GameOpcodes.GS_CLASS_CHANGE, 2);
+    public void SendStatReset() => SendClassByte(GameOpcodes.GS_CLASS_CHANGE, ClassChangeStatReset);
 
-    public void SendSkillReset() => SendClassByte(GameOpcodes.GS_CLASS_CHANGE, 3);
+    public void SendSkillReset() => SendClassByte(GameOpcodes.GS_CLASS_CHANGE, ClassChangeSkillReset);
 
     public const byte ClassChangeRebirthStat = 7;
+    public const byte ClassChangeRebirthReset = 8;
+    private const int RebirthStatBytes = 5;
 
     public bool SendRebirthStatChange(byte[] picks)
     {
         if (_rebirthPending || !Domain.RebirthPick.IsAllocation(picks)) return false;
         _rebirthPending = true;
-        var p = new Packet(GameOpcodes.GS_CLASS_CHANGE);
-        p.WriteByte(ClassChangeRebirthStat);
-        foreach (byte picked in picks) p.WriteByte(picked);
-        _conn.Send(p);
+        SendRebirthPicks(ClassChangeRebirthStat, picks);
         return true;
+    }
+
+    public void SendRebirthStatReset(byte[] picks) => SendRebirthPicks(ClassChangeRebirthReset, picks);
+
+    private void SendRebirthPicks(byte sub, byte[] picks)
+    {
+        var p = new Packet(GameOpcodes.GS_CLASS_CHANGE);
+        p.WriteByte(sub);
+        for (int i = 0; i < RebirthStatBytes; i++) p.WriteByte(i < picks.Length ? picks[i] : (byte)0);
+        _conn.Send(p);
     }
 
     private void ResetRebirth()
@@ -139,12 +154,12 @@ public partial class Net
     public void SendResetCostQuery(byte kind)
     {
         var p = new Packet(GameOpcodes.GS_CLASS_CHANGE);
-        p.WriteByte(4);
+        p.WriteByte(ClassChangeResetCost);
         p.WriteByte(kind);
         _conn.Send(p);
     }
 
-    public void SendClassEligibilityQuery() => SendClassByte(GameOpcodes.GS_CLASS_CHANGE, 1);
+    public void SendClassEligibilityQuery() => SendClassByte(GameOpcodes.GS_CLASS_CHANGE, ClassChangeOpen);
 
     private void SendClassByte(GameOpcodes opcode, byte sub)
     {

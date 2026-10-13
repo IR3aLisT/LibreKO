@@ -61,7 +61,8 @@ public partial class World
             var e = kv.Value;
             bool hostile = e.IsNpc
                 ? Net.I.IsKnownAttackable(kv.Key)
-                : info.IsHostilePlayer(Net.I.Nation, e.Nation);
+                : Net.I.IsHostilePlayer(e.Nation, e.KnightsId, e.AllianceId)
+                  || (Net.I.EnemyClanId > 0 && e.KnightsId == Net.I.EnemyClanId);
 
             if (hostile == e.Attackable) continue;
 

@@ -18,11 +18,11 @@ public partial class World
         var (koX, koZ) = WorldToKo(stop);
         var data = BlinkPath.Data(koX, stop.Y, koZ);
 
-        bool instant = SpendInstantMagic(s);
+        bool skipCooldown = SpendInstantMagic(s);
         _blinkWarpUntil = Now() + BlinkWarpWindow;
-        Net.I.SendMagic(MagicSub.Casting, s.Id, _myId, data);
-        QueuePendingStage(s.Id, _myId, PendingEffecting, instant ? 0 : CastDelay(s), data);
-        BeginLocalCast(s, instant);
+        SendCastingStage(s, _myId, data);
+        QueuePendingStage(s.Id, _myId, PendingEffecting, CastDelay(s), data);
+        BeginLocalCast(s, skipCooldown);
     }
 
     private Vector3 BlinkDestination(float reach)

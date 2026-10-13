@@ -40,6 +40,15 @@ internal static class KingPacketConstants
     public const byte EventWeather = 5;
     public const byte EventNotice = 6;
 
+    public const short EventOk = 1;
+    public const short EventNotKing = -1;
+    public const short EventBadValue = -2;
+    public const short EventTreasuryShort = -3;
+    public const short PrizeNoTarget = -2;
+    public const short PrizeBadAmount = -3;
+    public const short PrizeTreasuryShort = -4;
+    public const byte RoyalOrderFromKing = 1;
+
     public const byte ElectionListSenator = 3;
     public const byte ElectionListCandidate = 4;
 

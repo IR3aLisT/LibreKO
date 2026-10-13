@@ -34,6 +34,9 @@ public partial class HudWindow : PanelContainer
 
     private readonly bool _pluginHidden;
     private readonly WindowHost? _host;
+    private readonly LibreKO.Plugins.WindowFrame? _frame;
+
+    public bool PluginFramed => _frame != null;
 
     public override void _Notification(int what)
     {
@@ -48,6 +51,10 @@ public partial class HudWindow : PanelContainer
             case NotificationVisibilityChanged:
                 if (_pluginHidden && Visible) { Visible = false; break; }
                 if (_opensCentred && Visible) _centreSettlesAt = Time.GetTicksMsec() + CentreSettleMsec;
+                if (_frame != null)
+                {
+                    if (Visible) _frame.RaiseShown(); else _frame.RaiseHidden();
+                }
                 if (_host == null) break;
                 if (Visible) _host.RaiseShown(); else _host.RaiseHidden();
                 break;
@@ -63,17 +70,29 @@ public partial class HudWindow : PanelContainer
 
     public void SetBackgroundAlpha(float alpha)
     {
-        if (PluginReplaced) return;
+        if (PluginReplaced || _frame != null) return;
         AddThemeStyleboxOverride("panel", UiTheme.WindowPanel(alpha: alpha));
     }
 
     public event System.Action? Closed;
 
+    public void SetCloseVisible(bool visible)
+    {
+        if (_closeButton != null) _closeButton.Visible = visible;
+    }
+
     private static Vector2 HeaderButtonSize => Platform.Pick(new Vector2(20, 20), new Vector2(46, 46));
 
     public event System.Action<bool>? MinimizedChanged;
 
-    public string Title { set => _titleLbl.Text = value; }
+    public string Title
+    {
+        set
+        {
+            _titleLbl.Text = value;
+            _frame?.SetTitle(value);
+        }
+    }
 
     public bool Minimized { get; private set; }
 
@@ -125,6 +144,23 @@ public partial class HudWindow : PanelContainer
         _headerBar.AddChild(_dockPin);
         if (_closeButton != null) _headerBar.MoveChild(_dockPin, _closeButton.GetIndex());
         SetDocked(true);
+    }
+
+    public Button? AddHeaderIcon(string iconId, string tooltip, System.Action pressed)
+    {
+        if (PluginReplaced || _headerBar == null) return null;
+        var button = UiTheme.IconButton(UiIcons.Get(iconId), tooltip);
+        button.CustomMinimumSize = HeaderButtonSize;
+        button.AddThemeConstantOverride("icon_max_width", Platform.Pick(12, 22));
+        button.AddThemeColorOverride("icon_hover_color", UiTheme.TextHi);
+        button.AddThemeStyleboxOverride("normal", new StyleBoxEmpty());
+        button.AddThemeStyleboxOverride("hover", PinChip(DockPinHoverAlpha));
+        button.AddThemeStyleboxOverride("pressed", PinChip(DockPinHoverAlpha));
+        button.Pressed += pressed;
+        _headerBar.AddChild(button);
+        Control? before = (Control?)_minimizeBtn ?? _closeButton;
+        if (before != null) _headerBar.MoveChild(button, before.GetIndex());
+        return button;
     }
 
     public void SetDocked(bool docked)
@@ -350,6 +386,16 @@ public partial class HudWindow : PanelContainer
             }
             if (!PluginReplaced)
                 foreach (var extend in rule.Extenders) extend(Body);
+        }
+        if (!_pluginHidden && !PluginReplaced && PluginHost.Ui.FrameFor(id) is { } frameBuild)
+        {
+            root.RemoveChild(content);
+            margin.Visible = false;
+            AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
+            _frame = new LibreKO.Plugins.WindowFrame(id, title, content, closable, CloseFromPlugin);
+            var chrome = frameBuild(_frame);
+            AddChild(chrome);
+            dragHandle = _frame.DragHandle ?? chrome;
         }
 
         Layout = HudLayout.Attach(

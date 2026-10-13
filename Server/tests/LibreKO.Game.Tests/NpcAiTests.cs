@@ -409,6 +409,15 @@ public class NpcAiTests : GameTestBase
     }
 
     [Fact]
+    public void NpcInstance_AttackDistance_CapsAHugeBossBodyAtTheClientBodyRadius()
+    {
+        var snakeQueen = new NpcInstance { IsMonster = true, AttackRange = 5, DirectAttack = 0, Bulk = 1000, Size = 220 };
+
+        snakeQueen.BulkRadius.Should().BeApproximately(22f, 0.001f);
+        snakeQueen.AttackDistance.Should().Be(NpcInstance.MeleeAttackRange + NpcInstance.MaxReachRadius);
+    }
+
+    [Fact]
     public void NpcAiTargetingService_FindTarget_ScarecrowNeverAggrosNearbyUser()
     {
         using var provider = CreateProvider(_ => { });

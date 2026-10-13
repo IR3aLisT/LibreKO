@@ -39,7 +39,7 @@ public class MagicExecutionService(
     private async Task ExecuteExtendedEffectAsync(
         UserSession caster, MagicData magic, int skillId, int targetId, int[] data)
     {
-        if (magic.PrimaryType is not (MagicSkillType.Melee or MagicSkillType.Ranged or MagicSkillType.OverTime))
+        if (magic.PrimaryType is not (MagicSkillType.Melee or MagicSkillType.Ranged or MagicSkillType.OverTime or MagicSkillType.Warp))
             return;
 
         var extendedId = skillId + ExtendedEffectOffset;

@@ -1,0 +1,7 @@
+Bind Npc 31524 Zone 21
+
+On topics
+    Topic "Disassembling" goto disassemble
+
+On disassemble
+    Open disassemble window

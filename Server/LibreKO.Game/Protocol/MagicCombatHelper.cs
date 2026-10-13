@@ -209,7 +209,7 @@ internal static class MagicCombatHelper
         if (kurian && !caster.WeaponsDisabled)
             weaponDamage += (leftHand?.Damage ?? 0) + (rightHand?.Damage ?? 0) + UserSessionMagicState.WeaponDamageBonus(caster);
 
-        if (kurian && defender.IsPlayer && IsDevil(caster) && IsHeavyWeapon(rightHand) && leftHand != null)
+        if (kurian && defender.IsPlayer && DevilForms.Active(caster) && IsHeavyWeapon(rightHand) && leftHand != null)
         {
             var strength = caster.Strength + caster.Stats.StrBonus;
             return (int)(Scaled(weaponDamage, WeaponLevelDivisor, caster.Level)
@@ -228,9 +228,6 @@ internal static class MagicCombatHelper
 
     private static ItemData? ItemAt(UserSession caster, int slot, IGameDataService gameData) =>
         caster.Inventory[slot] is { IsEmpty: false } item ? gameData.GetItem(item.ItemId) : null;
-
-    private static bool IsDevil(UserSession caster) =>
-        caster.ActiveBuffs.Values.Any(buff => buff.BuffType == BuffType.DevilTransform && !buff.IsExpired);
 
     private static bool IsHeavyWeapon(ItemData? item) => item?.Category is ItemKind.SwordOneHand
         or ItemKind.SwordTwoHand or ItemKind.AxeOneHand or ItemKind.AxeTwoHand or ItemKind.Mace

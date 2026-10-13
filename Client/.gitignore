@@ -5,6 +5,12 @@
 # Per-user settings (server host/port), auto-created on first run
 settings.cfg
 
+# Written by the game at runtime
+keys.cfg
+presets.cfg
+windows.cfg
+_capture/
+
 # Export presets are per developer; Godot writes them when you create one under Project > Export
 export_presets.cfg
 export_credentials.cfg
@@ -38,3 +44,6 @@ assets/terrain/*/*
 /plugins/*
 !/plugins/PUT_PLUGINS_HERE.txt
 !/plugins/.gdignore
+override.cfg
+lootfilter.cfg
+*.csproj.old

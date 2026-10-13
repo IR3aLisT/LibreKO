@@ -1,0 +1,19 @@
+Bind Npc 18004 Zone 21
+
+On topics
+    If player rebirth level >= 1
+        Topic "Rebirth Stat Redistribution" goto event_1010
+
+On event_1010
+    Say "Welcome. Would you like to redistribute your rebirth stats? If you are using WAR Premium or Switching Premium, you can redistribute rebirth stats for free."
+    Topic "Next" goto event_1011
+
+On event_1011
+    Say "If you are using neither WAR Premium nor Switching Premium, fee is 100,000,000 Noah. Would like to continue?"
+    Topic "Yes" do
+        If player premium == 12 or player premium == 13 or player gold >= 100000000
+            Open rebirth reset panel
+        Else
+            Say "You don't have 100,000,000 Noah. Please re-check your inventory."
+            Topic "OK." goto close
+    Topic "No" goto close

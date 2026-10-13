@@ -74,6 +74,89 @@ public class VisibilityWireTests
         packet.ReadInt().Should().Be(UserInfoPacketWriter.NoTransform);
     }
 
+    [Theory]
+    [InlineData(true, UserInfoPacketWriter.SeekingParty)]
+    [InlineData(false, UserInfoPacketWriter.NotSeekingParty)]
+    public void TheSeekingPartyByteUsesTheRetailValues(bool seeking, byte expected)
+    {
+        var visuals = Enumerable.Range(0, 17)
+            .Select(i => new UserInfoPacketWriter.VisualItem(0, 0, 0))
+            .ToArray();
+
+        var packet = new Packet(GameOpcodes.GS_USER_INOUT);
+        UserInfoPacketWriter.WriteRecord(packet, new UserInfoPacketWriter.UserState(
+            Name: "Aurelia", Nation: 1, KnightsId: 0, KnightsFame: 0, Clan: null,
+            NoClanNationCode: 93, Level: 62, Race: 1, Class: 105,
+            X: 5430, Z: 3770, Y: 120, Face: 2, Hair: 7,
+            Pose: (byte)UserPoseState.Standing,
+            NeedParty: seeking, IsGameMaster: false, IsPartyLeader: false, Invisibility: 0,
+            Direction: 90, ZoneId: 21, IsHidingHelmet: false, DisplayTitleId: 0, Visuals: visuals));
+
+        packet.ResetOffset();
+        packet.ReadSByteString();
+        packet.ReadBytes(1 + 3 + 2 + 1 + 14 + 1 + 1 + 2 + 2 + 2 + 2 + 1 + 4 + 1 + 1 + 4);
+
+        packet.ReadByte().Should().Be(expected);
+    }
+
+    [Fact]
+    public void ATransformedPlayerComesIntoViewWithTheTransformationSkill()
+    {
+        const int transformSkill = 450003;
+        var visuals = Enumerable.Range(0, 17)
+            .Select(i => new UserInfoPacketWriter.VisualItem(0, 0, 0))
+            .ToArray();
+
+        var packet = new Packet(GameOpcodes.GS_USER_INOUT);
+        UserInfoPacketWriter.WriteRecord(packet, new UserInfoPacketWriter.UserState(
+            Name: "Aurelia", Nation: 1, KnightsId: 0, KnightsFame: 0, Clan: null,
+            NoClanNationCode: 93, Level: 62, Race: 1, Class: 105,
+            X: 5430, Z: 3770, Y: 120, Face: 2, Hair: 7,
+            Pose: (byte)UserPoseState.Standing,
+            NeedParty: false, IsGameMaster: false, IsPartyLeader: false, Invisibility: 0,
+            Direction: 90, ZoneId: 21, IsHidingHelmet: false, DisplayTitleId: 0, Visuals: visuals,
+            TransformSkillId: transformSkill));
+
+        packet.ResetOffset();
+        packet.ReadSByteString();
+        packet.ReadBytes(1 + 3 + 2 + 1 + 14 + 1 + 1 + 2 + 2 + 2 + 2 + 1 + 4);
+
+        packet.ReadByte().Should().Be((byte)UserPoseState.Standing);
+        packet.ReadByte().Should().Be((byte)PlayerAppearanceState.Normal);
+        packet.ReadInt().Should().Be(transformSkill);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void TheUserRecordCarriesTheGenieFlagAfterTheHelmetAndCospreFlags(bool hunting, bool cospreHidden)
+    {
+        const int bytesAfterGenieFlag = 1 + 2 + 4 + 1 + 1 + 1 + 2;
+        var visuals = Enumerable.Range(0, 17)
+            .Select(i => new UserInfoPacketWriter.VisualItem(0, 0, 0))
+            .ToArray();
+
+        var packet = new Packet(GameOpcodes.GS_USER_INOUT);
+        UserInfoPacketWriter.WriteRecord(packet, new UserInfoPacketWriter.UserState(
+            Name: "Aurelia", Nation: 1, KnightsId: 0, KnightsFame: 0, Clan: null,
+            NoClanNationCode: 93, Level: 62, Race: 1, Class: 105,
+            X: 5430, Z: 3770, Y: 120, Face: 2, Hair: 7,
+            Pose: (byte)UserPoseState.Standing,
+            NeedParty: false, IsGameMaster: false, IsPartyLeader: false, Invisibility: 0,
+            Direction: 90, ZoneId: 21, IsHidingHelmet: true, DisplayTitleId: 0, Visuals: visuals,
+            IsGenieActive: hunting, IsHidingCospre: cospreHidden));
+
+        packet.ResetOffset();
+        var record = packet.ReadBytes(packet.RemainingBytes);
+        int genie = record.Length - bytesAfterGenieFlag - 1;
+
+        record[genie - 2].Should().Be(1, because: "the helmet-hidden flag comes first");
+        record[genie - 1].Should().Be(cospreHidden ? (byte)1 : (byte)0, because: "the cospre-hidden flag sits between the two");
+        record[genie].Should().Be(hunting ? (byte)1 : (byte)0);
+    }
+
     [Fact]
     public void AStateChangeCarriesAFourByteValue()
     {

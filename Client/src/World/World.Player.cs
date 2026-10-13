@@ -7,9 +7,8 @@ namespace LibreKO;
 public partial class World
 {
     private const float WalkSpeed = 1.5f;
-    private const float RunSpeed = 6.0f;
+    private const float RunSpeed = 4.5f;
     private const float GmSpeedMult = 5.0f;
-    private const float SendHz = 10.0f;
 
     private const float CapsuleHalf = 1.0f;
     private const uint WorldCollisionLayer = 1;
@@ -18,8 +17,6 @@ public partial class World
     private const float PlayerCapsuleHeight = 1.3f;
     private const float PlayerCapsuleOffsetY = 1.15f;
     private const float BlockedProgressFraction = 0.25f;
-    private const double BlockedIdleAfter = 0.15;
-    private const double BlockedGiveUpTargetAfter = 0.7;
     private Node3D _self = null!;
     private CharacterBody3D? _selfBody;
     private Node3D _selfVisual = null!;
@@ -37,11 +34,10 @@ public partial class World
     private bool _selfMoving;
     private bool _selfMovingBackward;
     private bool _selfDead;
-    private double _blockedFor;
 
     private float _myKoX, _myKoZ, _myKoY;
     private float _lastKoX, _lastKoZ;
-    private double _sendAccum;
+    private readonly MoveSendClock _moveClock = new();
     private bool _moveSent;
     private float _lastSentHeading = float.NaN;
     private bool _running = true;
@@ -61,6 +57,16 @@ public partial class World
         _walkKeyHeld = false;
 
         if (_selfDead) { _selfMoving = false; _moveSent = false; return; }
+        if (TickSelfDash()) return;
+        if (TradeHoldsInput)
+        {
+            _selfMoving = false;
+            _hasMoveTarget = false;
+            _terrainMoveHeld = false;
+            _autoMoveForward = false;
+            SendMoveStop();
+            return;
+        }
         bool typing = GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit or SpinBox;
         if (typing && !WhisperInputHasFocus() && !Chat.IsActive) { _selfMoving = false; SendMoveStop(); return; }
 
@@ -84,6 +90,7 @@ public partial class World
         if (_selfMoving) CloseInteractionDialogs();
         if (wish == Vector3.Zero && !_turning)
         {
+            SettleSelfFall(delta);
             SendMoveStop();
             return;
         }
@@ -93,34 +100,32 @@ public partial class World
         speed *= MoveSpeedMultiplier();
         if (GmSpeedHeld)
             speed *= GmSpeedMult;
-        if (IsRootedByCast() || IsStunned()) speed = 0f;
+        if (IsRootedByCast() || IsStunned() || TouchLocked()) speed = 0f;
 
         var wasAt = _self.Position;
         if (_selfBody != null)
         {
-            _selfBody.Velocity = wish * speed;
+            _selfBody.Velocity = wish * speed * MoveAndSlideScale(delta);
             _selfBody.MoveAndSlide();
         }
         else
             _self.Position += wish * speed * (float)delta;
 
         var resolved = _self.Position;
-        var (koX, koZ) = WorldToKo(resolved);
-        var grounded = GroundPos(koX, koZ, resolved.Y - _selfLift, _selfLift);
-        float objY = ObjectFloorY(grounded, resolved.Y - _selfLift);
-        if (objY > grounded.Y || (_zone == JuraidZone && objY > float.NegativeInfinity / 2f)) grounded.Y = objY + _selfLift;
-        _self.Position = grounded;
+        var grounded = SelfGroundAt(resolved);
+        grounded.Y = FallToward(resolved.Y, grounded.Y, delta);
+        _self.Position = BlockedByUnits(wasAt, grounded) ? wasAt : grounded;
 
         if (CapsuleOverlaps() && !StepOffLedge(grounded, resolved.Y))
             _self.Position = _lastFreePos;
         else
             _lastFreePos = _self.Position;
 
-        (koX, koZ) = WorldToKo(_self.Position);
+        var (koX, koZ) = WorldToKo(_self.Position);
         _myKoX = koX; _myKoZ = koZ; _myKoY = _self.Position.Y - _selfLift;
 
         if (!IsRootedByCast() && (_selfMoving || _turning))
-            _self.RotationDegrees = new Vector3(0, 180f - Coord.KoHeading(-_faceDir.X, _faceDir.Z), 0);
+            SnapSelfToFaceDir();
 
         if (TrackBlockedProgress(wasAt, speed, delta))
         {
@@ -129,33 +134,80 @@ public partial class World
         }
 
         bool travelling = _selfMoving && speed > 0f;
-        _sendAccum += delta;
+        _moveClock.Tick((float)delta);
         if (!travelling && _moveSent)
-        {
             SendMoveStop();
-            SendHeadingIfChanged(koX, koZ);
-        }
-        else if (_sendAccum >= 1.0 / SendHz)
+        else if (travelling)
         {
-            _sendAccum = 0;
-            if (travelling)
+            float signedSpeed = _selfMovingBackward ? -speed : speed;
+            var koPos = new Vector2(koX, koZ);
+            var facing = KoFacing(koX, koZ);
+            if (!_moveSent || _moveClock.MoveDue(koPos, _myKoY, _selfMovingBackward ? -facing : facing))
             {
-                Net.I.SendMove(koX, koZ, _myKoY, _selfMovingBackward ? -speed : speed,
-                               _moveSent ? Net.MoveEchoMove : Net.MoveEchoStart);
+                var lead = MoveSendClock.Lead(koPos, facing, signedSpeed);
+                Net.I.SendMove(lead.X, lead.Y, _myKoY, signedSpeed,
+                    _moveSent ? Net.MoveEchoMove : Net.MoveEchoStart, koX, koZ, _myKoY);
+                _moveClock.Sent(koPos, lead, _myKoY);
                 _moveSent = true;
             }
             _lastKoX = koX; _lastKoZ = koZ;
-            SendHeadingIfChanged(koX, koZ);
         }
+        SendRotateWhenDue(koX, koZ);
+    }
+
+    private Vector2 KoFacing(float koX, float koZ)
+    {
+        var (faceX, faceZ) = WorldToKo(_self.Position + _faceDir);
+        return new Vector2(faceX - koX, faceZ - koZ);
+    }
+
+    private void SendRotateWhenDue(float koX, float koZ)
+    {
+        var facing = KoFacing(koX, koZ);
+        float koHeading = Coord.KoHeading(facing.X, facing.Y);
+        if (!_moveClock.RotateDue(koHeading, _lastSentHeading)) return;
+        Net.I.SendRotate(koHeading);
+        _lastSentHeading = koHeading;
+        _moveClock.Rotated();
+    }
+
+    private float MoveAndSlideScale(double step)
+    {
+        double frame = GetProcessDeltaTime();
+        return frame > 0 ? (float)(step / frame) : 1f;
     }
 
     private void SendMoveStop()
     {
         if (!_moveSent) return;
         _moveSent = false;
-        _sendAccum = 0;
+        _moveClock.Stopped();
         Net.I.SendMove(_myKoX, _myKoZ, _myKoY, 0f, Net.MoveEchoFinish);
     }
+
+    private float _selfFallSpeed;
+
+    private Vector3 SelfGroundAt(Vector3 resolved)
+    {
+        var (koX, koZ) = WorldToKo(resolved);
+        var grounded = GroundPos(koX, koZ, resolved.Y - _selfLift, _selfLift);
+        float objY = ObjectFloorY(grounded, resolved.Y - _selfLift);
+        if (objY > grounded.Y || (_zone == JuraidZone && objY > float.NegativeInfinity / 2f)) grounded.Y = objY + _selfLift;
+        return grounded;
+    }
+
+    private void SettleSelfFall(double delta)
+    {
+        if (_selfFallSpeed <= 0f || _self == null) return;
+        var at = _self.Position;
+        at.Y = FallToward(at.Y, SelfGroundAt(at).Y, delta);
+        _self.Position = at;
+        _lastFreePos = at;
+        _myKoY = at.Y - _selfLift;
+    }
+
+    private float FallToward(float y, float groundY, double delta) =>
+        Fall.Step(ref _selfFallSpeed, y, groundY, (float)delta);
 
     private bool StepOffLedge(Vector3 below, float edgeY)
     {
@@ -169,19 +221,11 @@ public partial class World
         var moved = new Vector2(_self.Position.X - wasAt.X, _self.Position.Z - wasAt.Z);
         if (!_selfMoving || speed <= 0f
             || moved.Length() >= speed * (float)delta * BlockedProgressFraction)
-        {
-            _blockedFor = 0;
             return false;
-        }
 
-        _blockedFor += delta;
-        if (_blockedFor >= BlockedGiveUpTargetAfter)
-        {
-            _hasMoveTarget = false;
-            _autoMoveForward = false;
-            _terrainMoveHeld = false;
-        }
-        return _blockedFor >= BlockedIdleAfter;
+        _hasMoveTarget = false;
+        _autoMoveForward = false;
+        return true;
     }
 
     private const float HeadingResendRadians = 0.2f;
@@ -195,6 +239,7 @@ public partial class World
             return;
         Net.I.SendRotate(koHeading);
         _lastSentHeading = koHeading;
+        _moveClock.Rotated();
     }
 
     private bool SeatedMoveIntent() =>
@@ -204,7 +249,7 @@ public partial class World
     private void OnWarp(float koX, float koZ)
     {
         if (_self == null) return;
-        var pos = GroundPos(koX, koZ, _self.Position.Y - _selfLift, _selfLift);
+        var pos = EntityGroundPos(koX, koZ, NoServerHeight, _selfLift);
         float objY = ObjectFloorY(pos, pos.Y - _selfLift);
         if (objY > pos.Y || (_zone == JuraidZone && objY > float.NegativeInfinity / 2f)) pos.Y = objY + _selfLift;
         _self.Position = pos;
@@ -245,10 +290,13 @@ public partial class World
     {
         if (!_isGm) return;
         _collisionsOff = !on;
+        Net.I.GmCollisionsOff = _collisionsOff;
         ApplyCollisionPolicy();
         RefreshAdminCollisionSwitch();
         CombatNotice(on ? "Collision enabled." : "Collision disabled — you now walk through everything.");
     }
+
+    private const string VaultCommand = "vault";
 
     private bool RunLocalCommand(string command)
     {
@@ -264,6 +312,22 @@ public partial class World
                 return true;
             }
         }
+
+        if (CommanderOrders.SlashSlot(parts[0], ItemData.Text) is var commanderSlot and not CommanderOrders.NoSlot)
+        {
+            if (AmCommander) UseCommanderSlot(commanderSlot);
+            return true;
+        }
+
+        if (parts[0].Equals(VaultCommand, System.StringComparison.OrdinalIgnoreCase))
+        {
+            OpenVipVaultByCommand();
+            return true;
+        }
+
+        if (CommandCatalog.Find(parts[0], ItemData.Text) is { } catalogCommand
+            && RunCatalogCommand(catalogCommand, command[parts[0].Length..].Trim()))
+            return true;
 
         if (!parts[0].Equals("collision", System.StringComparison.OrdinalIgnoreCase))
             return false;

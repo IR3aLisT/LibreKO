@@ -10,6 +10,7 @@ public partial class World
     private Panel _clanPremiumDot = null!;
     private Label _clanPremiumLabel = null!;
     private bool _clanPremiumInClan;
+    private const double ClanPremiumRefreshSeconds = 60.0;
 
     private void ClanPremiumInit()
     {
@@ -32,7 +33,7 @@ public partial class World
         _clanPremiumLayer = new CanvasLayer { Layer = 66 };
         AddChild(_clanPremiumLayer);
 
-        _clanPremiumChip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _clanPremiumChip = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Pass };
         _clanPremiumChip.AddThemeStyleboxOverride("panel", UiTheme.Chip());
 
         _clanPremiumChip.AnchorLeft = 1; _clanPremiumChip.AnchorRight = 1;
@@ -61,6 +62,9 @@ public partial class World
         row.AddChild(_clanPremiumLabel);
 
         SetClanPremiumDot(UiTheme.TextDim);
+        var refresh = new Godot.Timer { WaitTime = ClanPremiumRefreshSeconds, Autostart = true };
+        refresh.Timeout += RefreshClanPremiumChip;
+        _clanPremiumLayer.AddChild(refresh);
         HudLayout.Attach(
             _clanPremiumChip,
             "hud_clan_premium",
@@ -75,7 +79,14 @@ public partial class World
         _clanPremiumDot.AddThemeStyleboxOverride("panel", sb);
     }
 
-    private void OnClanPremiumStatus(bool active) => RefreshClanPremiumChip();
+    private void OnClanPremiumStatus(bool active)
+    {
+        RefreshClanPremiumChip();
+        RefreshPremiumSeller();
+    }
+
+    private void RefreshPremiumSeller() =>
+        ItemData.PremiumSeller = (Net.I.PremiumAccountStatus != 0 && Net.I.PremiumHours > 0) || Net.I.ClanPremiumActive;
 
     private void OnClanPremiumClanInfo(MyClanInfo info)
     {
@@ -88,9 +99,13 @@ public partial class World
         _clanPremiumChip.Visible = _clanPremiumInClan;
         if (!_clanPremiumInClan) return;
 
+        long left = Net.I.ClanPremiumEndsAt - System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        _clanPremiumChip.TooltipText = Net.I.ClanPremiumActive && Net.I.ClanPremiumEndsAt > 0
+            ? "Clan premium ends " + System.DateTimeOffset.FromUnixTimeSeconds(Net.I.ClanPremiumEndsAt).LocalDateTime.ToString("yyyy-MM-dd HH:mm")
+            : "";
         if (Net.I.ClanPremiumActive)
         {
-            _clanPremiumLabel.Text = "Clan Premium";
+            _clanPremiumLabel.Text = left > 0 ? $"Clan Premium · {DurationText.Short(left)}" : "Clan Premium";
             _clanPremiumLabel.AddThemeColorOverride("font_color", UiTheme.GoldBright);
             SetClanPremiumDot(UiTheme.Gold);
         }

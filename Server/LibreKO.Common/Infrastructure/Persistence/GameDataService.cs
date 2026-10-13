@@ -18,6 +18,9 @@ public class GameDataService(IServiceScopeFactory scopeFactory, ILogger<GameData
     public ILookup<int, SpecialAuctionLotData> SpecialAuctionLotsByRow { get; private set; } = Enumerable.Empty<SpecialAuctionLotData>().ToLookup(x => x.Row);
     public IReadOnlyList<ItemCombineRecipeData> ItemCombineRecipes { get; private set; } = [];
     public ILookup<int, ItemCombineMaterialData> ItemCombineMaterialsByRecipe { get; private set; } = Enumerable.Empty<ItemCombineMaterialData>().ToLookup(x => x.RecipeId);
+    public IReadOnlyDictionary<int, ItemSmashClassData> ItemSmashClassesByGrade { get; private set; } = new Dictionary<int, ItemSmashClassData>();
+    public ILookup<int, ItemSmashRewardData> ItemSmashRewardsByBand { get; private set; } = Enumerable.Empty<ItemSmashRewardData>().ToLookup(x => x.Band);
+    public IReadOnlyDictionary<int, int> ItemGradeBonuses { get; private set; } = new Dictionary<int, int>();
     public IReadOnlyDictionary<short, CoefficientData> CoefficientTable { get; private set; } = new Dictionary<short, CoefficientData>();
     public IReadOnlyDictionary<short, StartPositionData> StartPositionTable { get; private set; } = new Dictionary<short, StartPositionData>();
     public IReadOnlyDictionary<int, ItemData> ItemTable { get; private set; } = new Dictionary<int, ItemData>();
@@ -71,6 +74,7 @@ public class GameDataService(IServiceScopeFactory scopeFactory, ILogger<GameData
     public IReadOnlyList<MonsterSummonData> MonsterSummonTable { get; private set; } = [];
     public IReadOnlyDictionary<short, ZoneInfoData> ZoneInfoTable { get; private set; } = new Dictionary<short, ZoneInfoData>();
     public ILookup<byte, GameEventData> GameEventsByZone { get; private set; } = Enumerable.Empty<GameEventData>().ToLookup(x => x.ZoneNum);
+    public ILookup<short, MapObjectData> MapObjectsByZone { get; private set; } = Enumerable.Empty<MapObjectData>().ToLookup(x => x.ZoneId);
     public SiegeWarfareData? SiegeWarfare { get; private set; }
     public bool IsLoaded { get; private set; }
 
@@ -215,6 +219,7 @@ public class GameDataService(IServiceScopeFactory scopeFactory, ILogger<GameData
         {
             PremiumPropertyType.Noah => premium.NoahPercent,
             PremiumPropertyType.Drop => premium.DropPercent,
+            PremiumPropertyType.Loyalty => premium.BonusLoyalty,
             PremiumPropertyType.RepairDiscount => premium.RepairDiscountPercent,
             PremiumPropertyType.ItemSell => premium.ItemSellPercent,
             _ => 0
@@ -252,6 +257,10 @@ public class GameDataService(IServiceScopeFactory scopeFactory, ILogger<GameData
             ItemCombineRecipes = (await LoadListAsync(db.ItemCombineRecipes, "item combine recipes", cancellationToken)).OrderBy(x => x.Id).ToList();
             var combineMaterials = await LoadListAsync(db.ItemCombineMaterials, "item combine materials", cancellationToken);
             ItemCombineMaterialsByRecipe = combineMaterials.ToLookup(x => x.RecipeId);
+            ItemSmashClassesByGrade = (await LoadListAsync(db.ItemSmashClasses, "item smash classes", cancellationToken))
+                .GroupBy(x => x.GradeClass).ToDictionary(x => x.Key, x => x.First());
+            ItemSmashRewardsByBand = (await LoadListAsync(db.ItemSmashRewards, "item smash rewards", cancellationToken)).ToLookup(x => x.Band);
+            ItemGradeBonuses = await LoadDictionaryAsync(db.ItemGradeBonuses, x => x.Id, x => x.Bonus, "item grade bonuses", cancellationToken);
             CoefficientTable = await LoadDictionaryAsync(db.Coefficients, x => x.ClassId, "coefficient entries", cancellationToken);
             StartPositionTable = await LoadDictionaryAsync(db.StartPositions, x => x.ZoneId, "start position entries", cancellationToken);
             ItemTable = await LoadDictionaryAsync(db.Items, x => x.Num, "item entries", cancellationToken);
@@ -323,6 +332,7 @@ public class GameDataService(IServiceScopeFactory scopeFactory, ILogger<GameData
                 cancellationToken);
             ZoneInfoTable = await LoadDictionaryAsync(db.ZoneInfos, x => x.ZoneNo, "zone info entries", cancellationToken);
             GameEventsByZone = await LoadLookupAsync(db.GameEvents, x => x.ZoneNum, "game events", cancellationToken);
+            MapObjectsByZone = await LoadLookupAsync(db.MapObjects, x => x.ZoneId, "map objects", cancellationToken);
             CollectionRaceTable = await LoadDictionaryAsync(db.CollectionRaces, x => x.Id, "collection races", cancellationToken);
             CollectionRaceObjectivesByRace = await LoadLookupAsync(db.CollectionRaceObjectives.OrderBy(x => x.Ordinal), x => x.RaceId, "collection race objectives", cancellationToken);
             CollectionRaceRewardsByRace = await LoadLookupAsync(db.CollectionRaceRewards, x => x.RaceId, "collection race rewards", cancellationToken);

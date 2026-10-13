@@ -12,6 +12,9 @@ public sealed class PartyBbsPacketWriter
 
     public const byte EntrySeeker = 2;
     public const byte EntryWantedParty = 3;
+    public const byte RangeByLevel = 0;
+    public const byte SubInvite = 8;
+    public const byte SubInviteAccept = 9;
 
     public readonly record struct BoardEntry(
         string Name,
@@ -43,8 +46,8 @@ public sealed class PartyBbsPacketWriter
             packet.WriteString(entry.Name);
             packet.WriteInt(entry.Class);
             packet.WriteByte(entry.Level);
+            packet.WriteByte(RangeByLevel);
             packet.WriteByte(entry.Type);
-            packet.WriteByte(0);
             packet.WriteSByteString(entry.Message);
             packet.WriteShort(entry.ZoneId);
             packet.WriteByte(entry.MemberCount);
@@ -52,6 +55,15 @@ public sealed class PartyBbsPacketWriter
             packet.WriteByte(0);
         }
 
+        return packet;
+    }
+
+    public static Packet BoardInvite(byte mode, string inviterName, byte inviterLevel, short inviterClass)
+    {
+        var packet = Result(mode, SubInvite, Succeeded);
+        packet.WriteString(inviterName);
+        packet.WriteByte(inviterLevel);
+        packet.WriteShort(inviterClass);
         return packet;
     }
 

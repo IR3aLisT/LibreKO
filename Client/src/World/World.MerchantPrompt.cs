@@ -61,6 +61,9 @@ public partial class World
         _amountCount = UiTheme.NumberBox(1, 9_999, 1, 120);
         _amountCount.ValueChanged += _ => RefreshAmountTotal();
         _amountCountRow.AddChild(_amountCount);
+        var most = UiTheme.SmallButton("Max", "Use the largest amount");
+        most.Pressed += () => _amountCount.Value = _amountCount.MaxValue;
+        _amountCountRow.AddChild(most);
 
         _amountPriceRow = new HBoxContainer();
         _amountPriceRow.AddThemeConstantOverride("separation", 8);

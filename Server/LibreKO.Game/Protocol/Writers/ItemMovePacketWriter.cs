@@ -17,6 +17,7 @@ public sealed class ItemMovePacketWriter
         public short TotalHit { get; set; }
         public short TotalAc { get; set; }
         public int MaxWeight { get; set; }
+        public bool HealStrikesEnemies { get; set; }
         public short MaxHp { get; set; }
         public short MaxMp { get; set; }
         public short StrengthBonus { get; set; }
@@ -56,7 +57,7 @@ public sealed class ItemMovePacketWriter
     public static ItemMovePacketWriter ArrangeRefused() =>
         new() { Command = (byte)ItemMoveSubOpcode.ArrangeInventory, SubCommand = (byte)ArrangeResult.Failed };
 
-    public ItemMovePacketWriter AddInventorySlot(int itemId, short durability, ushort count, byte flag)
+    public ItemMovePacketWriter AddInventorySlot(int itemId, short durability, ushort count, byte flag, long expiresAt = 0)
     {
         _inventory.Add(new InventoryEntry(
             itemId,
@@ -65,7 +66,7 @@ public sealed class ItemMovePacketWriter
             flag,
             RentalMinutes: 0,
             Serial: 0,
-            ExpiresAt: 0));
+            ExpiresAt: ItemRecordWriter.ExpiryOnWire(expiresAt)));
 
         return this;
     }
@@ -98,7 +99,7 @@ public sealed class ItemMovePacketWriter
         packet.WriteShort(Stats.TotalHit);
         packet.WriteShort(Stats.TotalAc);
         packet.WriteInt(Stats.MaxWeight);
-        packet.WriteByte(0);
+        packet.WriteByte(Stats.HealStrikesEnemies ? (byte)1 : (byte)0);
         packet.WriteByte(0);
         packet.WriteShort(Stats.MaxHp);
         packet.WriteShort(Stats.MaxMp);

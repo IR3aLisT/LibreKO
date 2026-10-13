@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Globalization;
 using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -55,6 +56,8 @@ public static class Config
 
     public static float NamePlateScale { get; private set; } = 1.25f;
 
+
+
     public const float StickSensitivityMin = 0.5f;
     public const float StickSensitivityMax = 2.0f;
     public const float StickSensitivityStep = 0.05f;
@@ -66,11 +69,26 @@ public static class Config
     public enum UpscaleMode { Off, Fsr1, Fsr2 }
     public enum UpscaleLevel { UltraQuality, Quality, Balanced, Performance, UltraPerformance }
     public enum FpsCap { Unlimited, Fps30, Fps60, Fps120, Fps144, Fps240 }
-    public static bool Shadows { get; private set; } = true;
-    public static bool Ssao { get; private set; } = true;
+    public enum RenderDriver { Direct3D12, Vulkan }
+    public const int CurrentScreen = -1;
+    public static QualityLevel ShadowQuality { get; private set; } = QualityLevel.Medium;
+    public static QualityLevel SsaoQuality { get; private set; } = QualityLevel.Medium;
+    public static bool Shadows => ShadowQuality != QualityLevel.Off;
+    public static bool Ssao => SsaoQuality != QualityLevel.Off;
+    public static RenderDriver Renderer { get; private set; } = RenderDriver.Direct3D12;
+    public static int Screen { get; private set; } = CurrentScreen;
+    public static bool ShowTitles { get; private set; } = true;
+    public static bool QuestNotices { get; private set; } = true;
+    public static CospreKinds HiddenCospre { get; private set; } = CospreKinds.None;
+    public static event System.Action? PlatesChanged;
+    public static int UiAlpha { get; private set; } = LibreKO.Domain.UiOpacityRules.Opaque;
+    public static event System.Action? UiAlphaChanged;
+    public static event System.Action? CospreChanged;
     public static bool VolumetricFog { get; private set; } = false;
     public static bool Bloom { get; private set; } = true;
     public static bool FxLayer { get; private set; } = true;
+    public static LibreKO.Domain.CrowdMode Crowd { get; private set; } = LibreKO.Domain.CrowdMode.Balanced;
+    public static LibreKO.Domain.ShineStyle Shine { get; private set; } = LibreKO.Domain.ShineStyle.Glow;
     public static bool Clouds { get; private set; } = true;
     public static bool Capes { get; private set; } = true;
 
@@ -80,6 +98,10 @@ public static class Config
     public const FpsCap FpsMobileDefault = FpsCap.Fps30;
 
     public static float ViewDistance { get; private set; } = 1f;
+    public static int Brightness { get; private set; } = LightRange.Neutral;
+    public static int Contrast { get; private set; } = LightRange.Neutral;
+    public static int NightBrightness { get; private set; } = LightRange.Neutral;
+    public static int Fog { get; private set; } = LightRange.Neutral;
 
     public const float FsrSharpness = 0.2f;
 
@@ -113,6 +135,14 @@ public static class Config
     public const float CamEdgePanSpeedRetail = 114.6f;
     public static float CamTurnSpeed { get; private set; } = 360f;
     public static bool CamEdgePan { get; private set; } = true;
+    public static bool CameraShake { get; private set; } = true;
+    public static bool DestroyWellLocked { get; private set; }
+    public static WhisperSize WhisperSize { get; private set; } = WhisperLook.DefaultSize;
+    public static float WhisperAlpha { get; private set; } = WhisperLook.DefaultAlpha;
+    public static byte PartyRowMeter { get; private set; } = PartyWarBoard.ModeOff;
+    public static byte PartyBoardMode { get; private set; } = PartyWarBoard.ModeOff;
+    public static float PartyBoardAlpha { get; private set; } = 1f;
+    public static event System.Action? WhisperLookChanged;
     public static float CamEdgePanSpeed { get; private set; } = CamEdgePanSpeedRetail;
 
 
@@ -151,11 +181,28 @@ public static class Config
     public static float SfxVolume { get; private set; } = 0.9f;
     public static float UiVolume { get; private set; } = 0.7f;
     public static float VoiceVolume { get; private set; } = 0.9f;
+    public static float VoiceChatVolume { get; private set; } = 0.9f;
+    public static float VoiceThreshold { get; private set; } = 0.35f;
+    public static bool VoicePushToTalk { get; private set; }
+    public static string VoiceInputDevice { get; private set; } = DefaultAudioDevice;
+    public const string DefaultAudioDevice = "Default";
+    public static bool OtherPlayersSounds { get; private set; } = true;
+    public static int DailyRankLastViewDay { get; private set; }
+    public static int TimedItemsHiddenDay { get; private set; }
+    public static int ChaosGuideHiddenDay { get; private set; }
+    public static int FullMoonCaptionHiddenDay { get; private set; }
+    public static bool QuestTrackerCollapsed { get; private set; }
+    public const float EffectSoundDistanceMin = 20f;
+    public const float EffectSoundDistanceMax = 48f;
+    public static float EffectSoundDistance { get; private set; } = EffectSoundDistanceMax;
 
     public static bool HotbarLocked { get; private set; } = false;
     public static bool HotbarVertical { get; private set; } = false;
     public static int HotbarExtraBars { get; private set; } = 0;
-    private static readonly int[] _hotbarExtraPages = { 1, 2 };
+    public static float HotbarScale { get; private set; } = HotbarLayout.ScaleDefault;
+    public static int HotbarGap { get; private set; } = HotbarLayout.GapDefault;
+    public static event System.Action? HotbarLookChanged;
+    private static readonly int[] _hotbarExtraPages = System.Linq.Enumerable.Range(1, HotbarLayout.MaxBars - 1).ToArray();
 
     public static int HotbarExtraPage(int extraBar) =>
         extraBar >= 0 && extraBar < _hotbarExtraPages.Length ? _hotbarExtraPages[extraBar] : 0;
@@ -166,8 +213,8 @@ public static class Config
     private static readonly Color[] DefaultTooltipColors =
     {
         Argb(0xFFFFFFFF), Argb(0xFFADFF2F), Argb(0xFFF15F5F), Argb(0xFF5CD1E5),
-        Argb(0xFF86E57F), Argb(0xFF1E90FF), Argb(0xFFEAF50C), Argb(0xFFADFF2F),
-        Argb(0xFFCDC300), Argb(0xFFFFFF00), Argb(0xFFFFFF00), Argb(0xFF7FFF00),
+        Argb(0xFF86E57F), Argb(0xFF1E90FF), Argb(0xFFADFF2F), Argb(0xFFCDC300),
+        Argb(0xFFEAF50C), Argb(0xFFFFFF00), Argb(0xFFFFFF00), Argb(0xFF7FFF00),
         Argb(0xFFFFFFFF), Argb(0xFFFF0000),
         Argb(0xFFFFFFFF), Argb(0xFFD68CFF), Argb(0xFFFFCC33), Argb(0xFFFF66CC), Argb(0xFFFF9933),
         Argb(0xFF87CEEB), Argb(0xFFFFFF00), Argb(0xFF7FFF00), Argb(0xFF00BFFF), Argb(0xFF00FFCC),
@@ -202,6 +249,7 @@ public static class Config
     public static event System.Action? GraphicsChanged;
 
     public static event System.Action? AudioChanged;
+    public static event System.Action? VoiceChatChanged;
 
     public static event System.Action? EffectsChanged;
 
@@ -229,7 +277,7 @@ public static class Config
             GD.PushWarning($"[config] '{InstallDir()}' is not writable — preferences go to {SettingsSavePath}. " +
                            "Server settings still come from the install directory.");
 
-        if (!haveInstall && InstallDirWritable)
+        if ((!haveInstall || _hostMigrated) && InstallDirWritable)
             Save();
 
         ApplyCommandLineOverrides();
@@ -239,6 +287,8 @@ public static class Config
     }
 
     private static ConfigFile? _shippedDefaults;
+    private static bool _hostMigrated;
+    private static string _retiredHost = "";
 
     public static void PinShippedDefaults()
     {
@@ -258,7 +308,10 @@ public static class Config
 
         if (server)
         {
-            ServerHost = cfg.GetValue("server", "host", ServerHost).AsString();
+            string host = cfg.GetValue("server", "host", ServerHost).AsString();
+            if (shipped) _retiredHost = cfg.GetValue("server", "retired_host", "").AsString();
+            ServerHost = shipped ? host : ServerHosts.Migrate(host, _retiredHost, ServerHost);
+            if (!shipped && ServerHost != host) _hostMigrated = true;
             ServerPort = cfg.GetValue("server", "login_port", ServerPort).AsInt32();
             GamePort = cfg.GetValue("server", "game_port", GamePort).AsInt32();
             ServerVersion = cfg.GetValue("server", "version", ServerVersion).AsInt32();
@@ -279,6 +332,7 @@ public static class Config
         Language = ReadEnum(cfg, "game", "language", Language);
         WinWidth = cfg.GetValue("video", "width", WinWidth).AsInt32();
         WinHeight = cfg.GetValue("video", "height", WinHeight).AsInt32();
+        UiScaleChosen = cfg.HasSectionKey("video", "ui_scale");
         UiScale = Mathf.Clamp((float)cfg.GetValue("video", "ui_scale",
                               Platform.TouchUi ? UiScaleMobileDefault : UiScale).AsDouble(),
                               UiScaleMin, UiScaleMax);
@@ -290,11 +344,19 @@ public static class Config
         LookStickSensitivity = Mathf.Clamp(
             (float)cfg.GetValue("controls", "look_stick", LookStickSensitivity).AsDouble(),
             StickSensitivityMin, StickSensitivityMax);
-        Shadows = cfg.GetValue("graphics", "shadows", Shadows).AsBool();
-        Ssao = cfg.GetValue("graphics", "ssao", Ssao).AsBool();
+        ShadowQuality = ReadLevel(cfg, "shadow_quality", "shadows", ShadowQuality);
+        SsaoQuality = ReadLevel(cfg, "ssao_quality", "ssao", SsaoQuality);
+        Renderer = ReadEnum(cfg, "graphics", "renderer", Renderer);
+        Screen = cfg.GetValue("video", "screen", Screen).AsInt32();
+        ShowTitles = cfg.GetValue("hud", "show_titles", ShowTitles).AsBool();
+        QuestNotices = cfg.GetValue("hud", "quest_notices", QuestNotices).AsBool();
+        UiAlpha = LibreKO.Domain.UiOpacityRules.Clamp(cfg.GetValue("hud", "ui_alpha", UiAlpha).AsInt32());
+        HiddenCospre = (CospreKinds)cfg.GetValue("graphics", "hidden_cospre", (int)HiddenCospre).AsInt32();
         VolumetricFog = cfg.GetValue("graphics", "volumetric_fog", VolumetricFog).AsBool();
         Bloom = cfg.GetValue("graphics", "bloom", Bloom).AsBool();
         FxLayer = cfg.GetValue("graphics", "fx_layer", FxLayer).AsBool();
+        Crowd = ReadEnum(cfg, "graphics", "crowd_mode", Crowd);
+        Shine = ReadEnum(cfg, "effects", "item_shine", Shine);
         Clouds = cfg.GetValue("graphics", "clouds", Clouds).AsBool();
         Capes = cfg.GetValue("graphics", "capes", Capes).AsBool();
         AntiAlias = ReadEnum(cfg, "graphics", "aa", AntiAlias);
@@ -312,6 +374,13 @@ public static class Config
         CamTurnSpeed = Mathf.Clamp((float)cfg.GetValue("controls", "cam_turn_speed", CamTurnSpeed).AsDouble(),
             CamTurnSpeedMin, CamTurnSpeedMax);
         CamEdgePan = cfg.GetValue("controls", "cam_edge_pan", CamEdgePan).AsBool();
+        CameraShake = cfg.GetValue("controls", "camera_shake", CameraShake).AsBool();
+        DestroyWellLocked = cfg.GetValue("inventory", "destroy_locked", DestroyWellLocked).AsBool();
+        WhisperSize = WhisperLook.SizeFrom(cfg.GetValue("whisper", "size", (int)WhisperSize).AsInt32());
+        WhisperAlpha = WhisperLook.ClampAlpha((float)cfg.GetValue("whisper", "alpha", WhisperAlpha).AsDouble());
+        PartyRowMeter = PartyWarBoard.SavedMode(cfg.GetValue("party", "row_meter", (int)PartyRowMeter).AsInt32(), PartyRowMeter);
+        PartyBoardMode = PartyWarBoard.SavedMode(cfg.GetValue("party", "board_mode", (int)PartyBoardMode).AsInt32(), PartyBoardMode);
+        PartyBoardAlpha = PartyWarBoard.SavedAlpha((float)cfg.GetValue("party", "board_alpha", PartyBoardAlpha).AsDouble());
         CamEdgePanSpeed = Mathf.Clamp((float)cfg.GetValue("controls", "cam_edge_pan_speed", CamEdgePanSpeed).AsDouble(),
             CamEdgePanSpeedMin, CamEdgePanSpeedMax);
         FxAmbient = cfg.GetValue("effects", "ambient", FxAmbient).AsBool();
@@ -344,6 +413,10 @@ public static class Config
         ViewDistance = Mathf.Clamp((float)cfg.GetValue("graphics", "view_distance",
             Platform.TouchUi ? ViewDistanceMobileDefault : ViewDistance).AsDouble(),
             ViewDistanceMin, ViewDistanceMax);
+        Brightness = LightSliders.Brightness.Clamp(cfg.GetValue("graphics", "brightness", Brightness).AsInt32());
+        Contrast = LightSliders.Contrast.Clamp(cfg.GetValue("graphics", "contrast", Contrast).AsInt32());
+        NightBrightness = LightSliders.NightBrightness.Clamp(cfg.GetValue("graphics", "night_brightness", NightBrightness).AsInt32());
+        Fog = LightSliders.Fog.Clamp(cfg.GetValue("graphics", "fog", Fog).AsInt32());
         DamageNumbers = cfg.GetValue("effects", "damage_numbers", DamageNumbers).AsBool();
         CombatLog = cfg.GetValue("hud", "combat_log", CombatLog).AsBool();
         AudioEnabled = cfg.GetValue("audio", "enabled", AudioEnabled).AsBool();
@@ -353,8 +426,22 @@ public static class Config
         SfxVolume = Vol(cfg, "sfx", SfxVolume);
         UiVolume = Vol(cfg, "ui", UiVolume);
         VoiceVolume = Vol(cfg, "voice", VoiceVolume);
+        VoiceChatVolume = Mathf.Clamp((float)cfg.GetValue("voice_chat", "volume", VoiceChatVolume).AsDouble(), 0f, 1f);
+        VoiceThreshold = Mathf.Clamp((float)cfg.GetValue("voice_chat", "threshold", VoiceThreshold).AsDouble(), 0f, 1f);
+        VoicePushToTalk = cfg.GetValue("voice_chat", "push_to_talk", VoicePushToTalk).AsBool();
+        VoiceInputDevice = cfg.GetValue("voice_chat", "input_device", VoiceInputDevice).AsString();
+        OtherPlayersSounds = cfg.GetValue("audio", "other_players", OtherPlayersSounds).AsBool();
+        DailyRankLastViewDay = cfg.GetValue("dailyrank", "last_view_day", DailyRankLastViewDay).AsInt32();
+        TimedItemsHiddenDay = cfg.GetValue("itemlist", "item_time", TimedItemsHiddenDay).AsInt32();
+        ChaosGuideHiddenDay = cfg.GetValue("chaos", "view_caption", ChaosGuideHiddenDay).AsInt32();
+        FullMoonCaptionHiddenDay = cfg.GetValue("fullmoon", "view_caption", FullMoonCaptionHiddenDay).AsInt32();
+        QuestTrackerCollapsed = cfg.GetValue("quest", "tracker_collapsed", QuestTrackerCollapsed).AsBool();
+        EffectSoundDistance = Mathf.Clamp((float)cfg.GetValue("audio", "effect_distance", EffectSoundDistance).AsDouble(),
+            EffectSoundDistanceMin, EffectSoundDistanceMax);
         HotbarLocked = cfg.GetValue("hotbar", "locked", HotbarLocked).AsBool();
         HotbarVertical = cfg.GetValue("hotbar", "vertical", HotbarVertical).AsBool();
+        HotbarScale = HotbarLayout.ClampScale((float)cfg.GetValue("hotbar", "scale", HotbarScale).AsDouble());
+        HotbarGap = HotbarLayout.ClampGap(cfg.GetValue("hotbar", "gap", HotbarGap).AsInt32());
         HotbarExtraBars = Mathf.Clamp(cfg.GetValue("hotbar", "extra_bars", HotbarExtraBars).AsInt32(),
                                       0, HotbarLayout.MaxBars - 1);
         for (int i = 0; i < _hotbarExtraPages.Length; i++)
@@ -365,6 +452,7 @@ public static class Config
         TooltipBack = cfg.GetValue("fontstate", "tooltipback", TooltipBack).AsBool();
         for (int i = 0; i < _tooltipColors.Length; i++)
             _tooltipColors[i] = ReadTooltipColor(cfg, i);
+        RestoreRotatedTooltipColors();
         return true;
     }
 
@@ -388,15 +476,24 @@ public static class Config
         cfg.SetValue("video", "mode", (int)WindowMode);
         cfg.SetValue("video", "width", WinWidth);
         cfg.SetValue("video", "height", WinHeight);
-        cfg.SetValue("video", "ui_scale", UiScale);
+        if (UiScaleChosen) cfg.SetValue("video", "ui_scale", UiScale);
+        else if (cfg.HasSectionKey("video", "ui_scale")) cfg.EraseSectionKey("video", "ui_scale");
         cfg.SetValue("video", "name_plate_scale", NamePlateScale);
         cfg.SetValue("game", "language", (int)Language);
         cfg.SetValue("video", "touch_ui", (int)TouchUi);
-        cfg.SetValue("graphics", "shadows", Shadows);
-        cfg.SetValue("graphics", "ssao", Ssao);
+        cfg.SetValue("graphics", "shadow_quality", (int)ShadowQuality);
+        cfg.SetValue("graphics", "ssao_quality", (int)SsaoQuality);
+        cfg.SetValue("graphics", "renderer", (int)Renderer);
+        cfg.SetValue("video", "screen", Screen);
+        cfg.SetValue("hud", "show_titles", ShowTitles);
+        cfg.SetValue("hud", "quest_notices", QuestNotices);
+        cfg.SetValue("hud", "ui_alpha", UiAlpha);
+        cfg.SetValue("graphics", "hidden_cospre", (int)HiddenCospre);
         cfg.SetValue("graphics", "volumetric_fog", VolumetricFog);
         cfg.SetValue("graphics", "bloom", Bloom);
         cfg.SetValue("graphics", "fx_layer", FxLayer);
+        cfg.SetValue("graphics", "crowd_mode", (int)Crowd);
+        cfg.SetValue("effects", "item_shine", (int)Shine);
         cfg.SetValue("graphics", "clouds", Clouds);
         cfg.SetValue("graphics", "capes", Capes);
         cfg.SetValue("graphics", "aa", (int)AntiAlias);
@@ -411,6 +508,8 @@ public static class Config
         cfg.SetValue("hud", "combat_log_lock", CombatLogLocked);
         cfg.SetValue("hotbar", "locked", HotbarLocked);
         cfg.SetValue("hotbar", "vertical", HotbarVertical);
+        cfg.SetValue("hotbar", "scale", HotbarScale);
+        cfg.SetValue("hotbar", "gap", HotbarGap);
         cfg.SetValue("hotbar", "extra_bars", HotbarExtraBars);
         for (int i = 0; i < _hotbarExtraPages.Length; i++)
             cfg.SetValue("hotbar", $"extra_page_{i}", _hotbarExtraPages[i]);
@@ -418,10 +517,21 @@ public static class Config
         cfg.SetValue("controls", "look_stick", LookStickSensitivity);
         cfg.SetValue("controls", "cam_turn_speed", CamTurnSpeed);
         cfg.SetValue("controls", "cam_edge_pan", CamEdgePan);
+        cfg.SetValue("controls", "camera_shake", CameraShake);
+        cfg.SetValue("inventory", "destroy_locked", DestroyWellLocked);
+        cfg.SetValue("whisper", "size", (int)WhisperSize);
+        cfg.SetValue("whisper", "alpha", WhisperAlpha);
+        cfg.SetValue("party", "row_meter", (int)PartyRowMeter);
+        cfg.SetValue("party", "board_mode", (int)PartyBoardMode);
+        cfg.SetValue("party", "board_alpha", PartyBoardAlpha);
         cfg.SetValue("controls", "cam_edge_pan_speed", CamEdgePanSpeed);
         cfg.SetValue("effects", "ambient", FxAmbient);
         cfg.SetValue("effects", "distance", FxDistance);
         cfg.SetValue("graphics", "view_distance", ViewDistance);
+        cfg.SetValue("graphics", "brightness", Brightness);
+        cfg.SetValue("graphics", "contrast", Contrast);
+        cfg.SetValue("graphics", "night_brightness", NightBrightness);
+        cfg.SetValue("graphics", "fog", Fog);
         cfg.SetValue("effects", "damage_numbers", DamageNumbers);
         cfg.SetValue("hud", "combat_log", CombatLog);
         cfg.SetValue("audio", "enabled", AudioEnabled);
@@ -431,6 +541,17 @@ public static class Config
         cfg.SetValue("audio", "sfx", SfxVolume);
         cfg.SetValue("audio", "ui", UiVolume);
         cfg.SetValue("audio", "voice", VoiceVolume);
+        cfg.SetValue("voice_chat", "volume", VoiceChatVolume);
+        cfg.SetValue("voice_chat", "threshold", VoiceThreshold);
+        cfg.SetValue("voice_chat", "push_to_talk", VoicePushToTalk);
+        cfg.SetValue("voice_chat", "input_device", VoiceInputDevice);
+        cfg.SetValue("audio", "other_players", OtherPlayersSounds);
+        cfg.SetValue("dailyrank", "last_view_day", DailyRankLastViewDay);
+        cfg.SetValue("itemlist", "item_time", TimedItemsHiddenDay);
+        cfg.SetValue("chaos", "view_caption", ChaosGuideHiddenDay);
+        cfg.SetValue("fullmoon", "view_caption", FullMoonCaptionHiddenDay);
+        cfg.SetValue("quest", "tracker_collapsed", QuestTrackerCollapsed);
+        cfg.SetValue("audio", "effect_distance", EffectSoundDistance);
         cfg.SetValue("fontstate", "tooltipheight", TooltipHeight);
         cfg.SetValue("fontstate", "tooltipbold", TooltipBold);
         cfg.SetValue("fontstate", "tooltipback", TooltipBack);
@@ -453,14 +574,14 @@ public static class Config
         Save();
     }
 
-    public static void SetGraphics(bool shadows, bool ssao, bool volumetricFog, bool bloom, bool clouds,
+    public static void SetGraphics(QualityLevel shadows, QualityLevel ssao, bool volumetricFog, bool bloom, bool clouds,
                                    bool capes, AaMode aa, UpscaleMode upscale, UpscaleLevel quality,
                                    FpsCap fps)
     {
         Upscale = upscale;
         UpscaleQuality = quality;
-        Shadows = shadows;
-        Ssao = ssao;
+        ShadowQuality = shadows;
+        SsaoQuality = ssao;
         VolumetricFog = volumetricFog;
         Bloom = bloom;
         Clouds = clouds;
@@ -470,6 +591,125 @@ public static class Config
         ApplyGraphicsToViewport();
         Save();
         GraphicsChanged?.Invoke();
+    }
+
+    public static void SetUiAlpha(int alpha)
+    {
+        alpha = LibreKO.Domain.UiOpacityRules.Clamp(alpha);
+        if (UiAlpha == alpha) return;
+        UiAlpha = alpha;
+        Save();
+        UiAlphaChanged?.Invoke();
+    }
+
+    public static void SetQuestNotices(bool on)
+    {
+        if (QuestNotices == on) return;
+        QuestNotices = on;
+        Save();
+    }
+
+    public static void SetShowTitles(bool show)
+    {
+        if (ShowTitles == show) return;
+        ShowTitles = show;
+        Save();
+        PlatesChanged?.Invoke();
+    }
+
+    public static void SetHiddenCospre(CospreKinds hidden)
+    {
+        if (HiddenCospre == hidden) return;
+        HiddenCospre = hidden;
+        Save();
+        CospreChanged?.Invoke();
+    }
+
+    public static void SetScreen(int screen)
+    {
+        Screen = screen >= 0 && screen < DisplayServer.GetScreenCount() ? screen : CurrentScreen;
+        Save();
+    }
+
+    private const string OverrideFileName = "override.cfg";
+    private const string OverrideSection = "rendering";
+    private const string OverrideDriverKey = "rendering_device/driver.windows";
+    private const string DriverD3D12 = "d3d12";
+    private const string DriverVulkan = "vulkan";
+
+    public static string RunningDriver => RenderingServer.GetCurrentRenderingDriverName();
+
+    public static bool SetRenderer(RenderDriver driver)
+    {
+        if (Renderer == driver) return false;
+        Renderer = driver;
+        Save();
+        var path = Path.Combine(InstallDir(), OverrideFileName);
+        var cfg = new ConfigFile();
+        cfg.Load(path);
+        cfg.SetValue(OverrideSection, OverrideDriverKey, driver == RenderDriver.Vulkan ? DriverVulkan : DriverD3D12);
+        return cfg.Save(path) == Error.Ok;
+    }
+
+    public static bool RendererRunning(RenderDriver driver) =>
+        RunningDriver == (driver == RenderDriver.Vulkan ? DriverVulkan : DriverD3D12);
+
+    private static QualityLevel ReadLevel(ConfigFile cfg, string key, string oldSwitchKey, QualityLevel fallback)
+    {
+        if (cfg.HasSectionKey("graphics", key)) return ReadEnum(cfg, "graphics", key, fallback);
+        if (cfg.HasSectionKey("graphics", oldSwitchKey))
+            return cfg.GetValue("graphics", oldSwitchKey, true).AsBool() ? fallback : QualityLevel.Off;
+        return fallback;
+    }
+
+    private static readonly System.Collections.Generic.Dictionary<string, object?> CompiledDefaults = new();
+
+    static Config()
+    {
+        foreach (var property in typeof(Config).GetProperties(
+                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+            if (property.CanWrite || property.SetMethod != null)
+                CompiledDefaults[property.Name] = property.GetValue(null);
+    }
+
+    public static T DefaultOf<T>(string property, string section, string key)
+    {
+        var shipped = new ConfigFile();
+        object? compiled = CompiledDefaults.TryGetValue(property, out var value) ? value : default(T);
+        if (shipped.Load(DefaultsResPath) != Error.Ok || !shipped.HasSectionKey(section, key))
+            return compiled is T typed ? typed : default!;
+        var raw = shipped.GetValue(section, key);
+        object? converted = typeof(T) switch
+        {
+            var t when t == typeof(bool) => raw.AsBool(),
+            var t when t == typeof(float) => (float)raw.AsDouble(),
+            var t when t == typeof(int) => raw.AsInt32(),
+            var t when t.IsEnum => System.Enum.ToObject(t, raw.AsInt32()),
+            _ => compiled,
+        };
+        return converted is T result ? result : default!;
+    }
+
+    public static void SuspendFxLayer()
+    {
+        if (!FxLayer) return;
+        FxLayer = false;
+        GraphicsChanged?.Invoke();
+    }
+
+    public static void SetShineStyle(LibreKO.Domain.ShineStyle style)
+    {
+        if (Shine == style) return;
+        Shine = style;
+        Save();
+        ItemShine.ApplyStyle();
+    }
+
+    public static void SetCrowdMode(LibreKO.Domain.CrowdMode mode)
+    {
+        if (Crowd == mode) return;
+        Crowd = mode;
+        Save();
     }
 
     public static void SetFxLayer(bool on)
@@ -495,6 +735,58 @@ public static class Config
         VoiceVolume = Mathf.Clamp(voice, 0f, 1f);
         Save();
         AudioChanged?.Invoke();
+    }
+
+    public static void SetVoiceChat(float volume, float threshold, bool pushToTalk, string inputDevice)
+    {
+        VoiceChatVolume = Mathf.Clamp(volume, 0f, 1f);
+        VoiceThreshold = Mathf.Clamp(threshold, 0f, 1f);
+        VoicePushToTalk = pushToTalk;
+        VoiceInputDevice = inputDevice.Length == 0 ? DefaultAudioDevice : inputDevice;
+        Save();
+        VoiceChatChanged?.Invoke();
+    }
+
+    public static void SetDailyRankLastViewDay(int dayKey)
+    {
+        if (DailyRankLastViewDay == dayKey) return;
+        DailyRankLastViewDay = dayKey;
+        Save();
+    }
+
+    public static void SetQuestTrackerCollapsed(bool collapsed)
+    {
+        if (QuestTrackerCollapsed == collapsed) return;
+        QuestTrackerCollapsed = collapsed;
+        Save();
+    }
+
+    public static void SetChaosGuideHiddenDay(int dayKey)
+    {
+        if (ChaosGuideHiddenDay == dayKey) return;
+        ChaosGuideHiddenDay = dayKey;
+        Save();
+    }
+
+    public static void SetFullMoonCaptionHiddenDay(int dayKey)
+    {
+        if (FullMoonCaptionHiddenDay == dayKey) return;
+        FullMoonCaptionHiddenDay = dayKey;
+        Save();
+    }
+
+    public static void SetTimedItemsHiddenDay(int dayKey)
+    {
+        if (TimedItemsHiddenDay == dayKey) return;
+        TimedItemsHiddenDay = dayKey;
+        Save();
+    }
+
+    public static void SetOtherPlayersSounds(bool on)
+    {
+        if (OtherPlayersSounds == on) return;
+        OtherPlayersSounds = on;
+        Save();
     }
 
     public static void SetEffects(bool ambient, int distance, bool damageNumbers, bool combatLog)
@@ -550,6 +842,63 @@ public static class Config
         Save();
     }
 
+    public static void SetWhisperLook(WhisperSize size, float alpha)
+    {
+        float clamped = WhisperLook.ClampAlpha(alpha);
+        if (size == WhisperSize && Mathf.IsEqualApprox(clamped, WhisperAlpha)) return;
+        WhisperSize = size;
+        WhisperAlpha = clamped;
+        Save();
+        WhisperLookChanged?.Invoke();
+    }
+
+    public static void SetPartyRowMeter(byte mode)
+    {
+        if (mode == PartyRowMeter) return;
+        PartyRowMeter = mode;
+        Save();
+    }
+
+    public static void SetPartyBoardMode(byte mode)
+    {
+        if (mode == PartyBoardMode || mode == PartyWarBoard.ModeOff) return;
+        PartyBoardMode = mode;
+        Save();
+    }
+
+    public static void SetPartyBoardAlpha(float alpha)
+    {
+        float clamped = PartyWarBoard.SavedAlpha(alpha);
+        if (Mathf.IsEqualApprox(clamped, PartyBoardAlpha)) return;
+        PartyBoardAlpha = clamped;
+        Save();
+    }
+
+    public static void SetDestroyWellLocked(bool locked)
+    {
+        if (locked == DestroyWellLocked) return;
+        DestroyWellLocked = locked;
+        Save();
+    }
+
+    public static void SetCameraShake(bool on)
+    {
+        if (on == CameraShake) return;
+        CameraShake = on;
+        Save();
+    }
+
+    public static void SetHotbarLook(float scale, int gap)
+    {
+        float clampedScale = HotbarLayout.ClampScale(scale);
+        int clampedGap = HotbarLayout.ClampGap(gap);
+        if (Mathf.IsEqualApprox(clampedScale, HotbarScale) && clampedGap == HotbarGap) return;
+        HotbarScale = clampedScale;
+        HotbarGap = clampedGap;
+        Save();
+        HotbarLookChanged?.Invoke();
+    }
+
     public static void SetHotbarExtraPage(int extraBar, int page)
     {
         if (extraBar < 0 || extraBar >= _hotbarExtraPages.Length) return;
@@ -574,6 +923,7 @@ public static class Config
         if (DisplayServer.GetName() == "headless")
             return;
         ApplyFrameCap();
+        ApplyQualityLevels();
         if (Engine.GetMainLoop() is not SceneTree { Root: { } vp })
             return;
         var upscale = EffectiveUpscale;
@@ -596,6 +946,40 @@ public static class Config
             : Viewport.ScreenSpaceAAEnum.Disabled;
     }
 
+    private const int ShadowAtlasLow = 1024;
+    private const int ShadowAtlasMedium = 2048;
+    private const int ShadowAtlasHigh = 4096;
+    private const float SsaoAdaptiveTarget = 0.5f;
+    private const int SsaoBlurPasses = 2;
+    private const float SsaoFadeoutFrom = 50f;
+    private const float SsaoFadeoutTo = 300f;
+
+    private static void ApplyQualityLevels()
+    {
+        int atlas = ShadowQuality switch
+        {
+            QualityLevel.Low => ShadowAtlasLow,
+            QualityLevel.High => ShadowAtlasHigh,
+            _ => ShadowAtlasMedium,
+        };
+        var filter = ShadowQuality switch
+        {
+            QualityLevel.Low => RenderingServer.ShadowQuality.Hard,
+            QualityLevel.High => RenderingServer.ShadowQuality.SoftMedium,
+            _ => RenderingServer.ShadowQuality.SoftLow,
+        };
+        RenderingServer.DirectionalShadowAtlasSetSize(atlas, true);
+        RenderingServer.DirectionalSoftShadowFilterSetQuality(filter);
+        RenderingServer.PositionalSoftShadowFilterSetQuality(filter);
+        var ssao = SsaoQuality switch
+        {
+            QualityLevel.Low => RenderingServer.EnvironmentSsaoQuality.VeryLow,
+            QualityLevel.High => RenderingServer.EnvironmentSsaoQuality.Medium,
+            _ => RenderingServer.EnvironmentSsaoQuality.Low,
+        };
+        RenderingServer.EnvironmentSetSsaoQuality(ssao, true, SsaoAdaptiveTarget, SsaoBlurPasses, SsaoFadeoutFrom, SsaoFadeoutTo);
+    }
+
     public static bool UpscaleSupported =>
         RenderingServer.GetCurrentRenderingMethod() == "forward_plus";
 
@@ -606,8 +990,25 @@ public static class Config
     {
         if (DisplayServer.GetName() == "headless")
             return;
-        if (Engine.GetMainLoop() is SceneTree { Root: not null } tree)
-            tree.Root.ContentScaleFactor = UiScale * Platform.MenuScale;
+        if (Engine.GetMainLoop() is not SceneTree { Root: not null } tree) return;
+        tree.Root.ContentScaleFactor = EffectiveUiScale * Platform.MenuScale;
+        UiScaleApplied?.Invoke();
+        if (_uiScaleFollowsWindow) return;
+        _uiScaleFollowsWindow = true;
+        tree.Root.SizeChanged += () =>
+        {
+            if (!UiScaleChosen) ApplyUiScale();
+        };
+    }
+
+    public static void SetLighting(int brightness, int contrast, int nightBrightness, int fog)
+    {
+        Brightness = LightSliders.Brightness.Clamp(brightness);
+        Contrast = LightSliders.Contrast.Clamp(contrast);
+        NightBrightness = LightSliders.NightBrightness.Clamp(nightBrightness);
+        Fog = LightSliders.Fog.Clamp(fog);
+        Save();
+        GraphicsChanged?.Invoke();
     }
 
     public static void SetViewDistance(float scale)
@@ -640,10 +1041,28 @@ public static class Config
 
     public static void SetUiScale(float scale)
     {
-        UiScale = Mathf.Clamp(scale, UiScaleMin, UiScaleMax);
+        float clamped = Mathf.Clamp(scale, UiScaleMin, UiScaleMax);
+        if (!UiScaleChosen && Mathf.IsEqualApprox(clamped, EffectiveUiScale)) return;
+        UiScale = clamped;
+        UiScaleChosen = true;
         ApplyUiScale();
         Save();
     }
+
+    public const float UiScaleSmallScreen = 0.8f;
+    public const int SmallScreenHeight = 860;
+    public static bool UiScaleChosen { get; private set; }
+    public static event System.Action? UiScaleApplied;
+    private static bool _uiScaleFollowsWindow;
+
+    public static float EffectiveUiScale =>
+        UiScaleChosen || Platform.TouchUi ? UiScale : AutoUiScale(WindowHeight());
+
+    public static float AutoUiScale(int windowHeight) =>
+        windowHeight > 0 && windowHeight < SmallScreenHeight ? UiScaleSmallScreen : UiScale;
+
+    private static int WindowHeight() =>
+        DisplayServer.GetName() == "headless" ? 0 : DisplayServer.WindowGetSize().Y;
 
     public static void SetNamePlateScale(float scale)
     {
@@ -659,6 +1078,8 @@ public static class Config
     {
         if (DisplayServer.GetName() == "headless")
             return;
+        if (Screen >= 0 && Screen < DisplayServer.GetScreenCount() && DisplayServer.WindowGetCurrentScreen() != Screen)
+            DisplayServer.WindowSetCurrentScreen(Screen);
         switch (WindowMode)
         {
             case VideoMode.Fullscreen:
@@ -670,8 +1091,10 @@ public static class Config
             default:
                 DisplayServer.WindowSetMode(DisplayServer.WindowMode.Windowed);
                 DisplayServer.WindowSetSize(new Vector2I(WinWidth, WinHeight));
-                var screen = DisplayServer.ScreenGetSize(DisplayServer.WindowGetCurrentScreen());
-                DisplayServer.WindowSetPosition((screen - new Vector2I(WinWidth, WinHeight)) / 2);
+                int current = DisplayServer.WindowGetCurrentScreen();
+                var screen = DisplayServer.ScreenGetSize(current);
+                DisplayServer.WindowSetPosition(DisplayServer.ScreenGetPosition(current)
+                    + (screen - new Vector2I(WinWidth, WinHeight)) / 2);
                 break;
         }
         DisplayServer.WindowSetVsyncMode(VSync
@@ -683,6 +1106,7 @@ public static class Config
     private const string WindowsFileName = "windows.cfg";
     private const string KeysFileName = "keys.cfg";
     private const string PresetsFileName = "presets.cfg";
+    private const string LootFilterFileName = "lootfilter.cfg";
     private const string DefaultsResPath = "res://settings.default.cfg";
 
     public static string SettingsSavePath { get; private set; } = "";
@@ -742,6 +1166,16 @@ public static class Config
         cfg.EraseSectionKey("pos", id);
         ReportWindowsSave(cfg.Save(WindowsPath()));
     }
+
+    public static void ForgetAllWindowLayouts()
+    {
+        var cfg = WindowsCfg();
+        foreach (string section in WindowLayoutSections)
+            if (cfg.HasSection(section)) cfg.EraseSection(section);
+        ReportWindowsSave(cfg.Save(WindowsPath()));
+    }
+
+    private static readonly string[] WindowLayoutSections = ["pos", "size"];
 
     public static void ForgetWindowPositionsOnce(string migration, System.Collections.Generic.IEnumerable<string> ids)
     {
@@ -878,11 +1312,68 @@ public static class Config
         GD.PushError($"[config] could not write {PresetsPath()}: {err} — stat presets will not persist");
     }
 
+    private static ConfigFile? _lootFilterCfg;
+
+    private static ConfigFile LootFilterCfg()
+    {
+        if (_lootFilterCfg != null) return _lootFilterCfg;
+        _lootFilterCfg = new ConfigFile();
+        _lootFilterCfg.Load(LootFilterPath());
+        return _lootFilterCfg;
+    }
+
+    public static LibreKO.Domain.LootFilter LoadLootFilter(string character)
+    {
+        var cfg = LootFilterCfg();
+        var filter = new LibreKO.Domain.LootFilter();
+        if (!cfg.HasSection(character)) return filter;
+        filter.Enabled = cfg.GetValue(character, "enabled", false).AsBool();
+        filter.MinSellPrice = cfg.GetValue(character, "min_price", 0).AsInt32();
+        Fill(filter.Groups, cfg.GetValue(character, "groups", new int[0]).AsInt32Array(), g => (LibreKO.Domain.LootGroup)g);
+        Fill(filter.Grades, cfg.GetValue(character, "grades", new int[0]).AsInt32Array(), g => g);
+        Fill(filter.Always, cfg.GetValue(character, "always", new int[0]).AsInt32Array(), g => g);
+        Fill(filter.Never, cfg.GetValue(character, "never", new int[0]).AsInt32Array(), g => g);
+        return filter;
+    }
+
+    private static void Fill<T>(HashSet<T> target, int[] stored, Func<int, T> map)
+    {
+        target.Clear();
+        foreach (int value in stored) target.Add(map(value));
+    }
+
+    public static void SaveLootFilter(string character, LibreKO.Domain.LootFilter filter)
+    {
+        var cfg = LootFilterCfg();
+        cfg.SetValue(character, "enabled", filter.Enabled);
+        cfg.SetValue(character, "min_price", filter.MinSellPrice);
+        cfg.SetValue(character, "groups", filter.Groups.Select(g => (int)g).ToArray());
+        cfg.SetValue(character, "grades", filter.Grades.ToArray());
+        cfg.SetValue(character, "always", filter.Always.ToArray());
+        cfg.SetValue(character, "never", filter.Never.ToArray());
+        if (cfg.Save(LootFilterPath()) is var err and not Error.Ok)
+            GD.PushError($"[config] could not write {LootFilterPath()}: {err}");
+    }
+
+    private static string LootFilterPath() => Path.Combine(
+        InstallDirWritable ? InstallDir() : UserDir(), LootFilterFileName);
+
     private static string PresetsPath() => Path.Combine(
         InstallDirWritable ? InstallDir() : UserDir(), PresetsFileName);
 
     public static Color TooltipColor(int idx) =>
         _tooltipColors[Mathf.Clamp(idx, 0, _tooltipColors.Length - 1)];
+
+    private const int RotatedTooltipColorFirst = 6;
+    private static readonly uint[] RotatedTooltipColors = { 0xFFEAF50C, 0xFFADFF2F, 0xFFCDC300 };
+
+    private static void RestoreRotatedTooltipColors()
+    {
+        for (int i = 0; i < RotatedTooltipColors.Length; i++)
+            if ((uint)_tooltipColors[RotatedTooltipColorFirst + i].ToArgb32() != RotatedTooltipColors[i]) return;
+        for (int i = 0; i < RotatedTooltipColors.Length; i++)
+            _tooltipColors[RotatedTooltipColorFirst + i] = DefaultTooltipColors[RotatedTooltipColorFirst + i];
+    }
 
     private static Color ReadTooltipColor(ConfigFile cfg, int idx)
     {

@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Globalization;
 using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -9,10 +10,23 @@ public partial class World : Node3D
     private void InventoryContext(int absSlot)
     {
         if (absSlot < 0 || absSlot >= Inv.Length || Inv[absSlot].IsEmpty) return;
-        if (Input.IsKeyPressed(Key.Shift) && Chat.InsertItemLink(Inv[absSlot].ItemId)) return;
+        if (Input.IsKeyPressed(Key.Shift)
+            && (Chat.InsertItemLink(Inv[absSlot].ItemId) || InsertChatRoomItemLink(Inv[absSlot].ItemId)
+                || InsertWhisperItemLink(Inv[absSlot].ItemId))) return;
         if (_bagCompanion != null && _bagCompanion.Take(absSlot)) return;
+        if (_exShown && ItemMove.RegionOf(absSlot) == ItemMove.Region.Grid)
+        {
+            OfferSlot(absSlot);
+            return;
+        }
+        if (_wishShown && ItemMove.RegionOf(absSlot) is ItemMove.Region.Grid or ItemMove.Region.MagicBag)
+        {
+            WishFromBag(absSlot, -1);
+            return;
+        }
         var def = ItemData.Get(Inv[absSlot].ItemId);
         if (def == null) return;
+        if (ShowSealedCharacterSheet(Inv[absSlot])) return;
 
         if (ItemMove.RegionOf(absSlot) != ItemMove.Region.Grid
             || ItemData.EquipSlotFor(def) >= 0
@@ -22,9 +36,14 @@ public partial class World : Node3D
             InventoryActivate(absSlot);
             return;
         }
+        if (Inv[absSlot].ItemId == ExpSeal.EmptyJar)
+        {
+            OpenExpSeal(absSlot);
+            return;
+        }
         if (IsVipVaultKey(Inv[absSlot].ItemId))
         {
-            Net.I.SendVipVaultUseKey(Inv[absSlot].ItemId);
+            AskVipKey(absSlot);
             return;
         }
         if (def.Effect1 != 0 && SkillData.IsSkill(def.Effect1))
@@ -75,6 +94,7 @@ public partial class World : Node3D
         int eq = Inv.ResolveEquipDest(def.Slot, ItemData.EquipSlotFor(def));
         if (eq < 0) return;
         if (!CanEquipOrNotice(Inv[absSlot].ItemId, def)) return;
+        if (AskBindBeforeEquip(absSlot, () => InventoryActivate(absSlot))) return;
 
         var preClear = Inv.HandsToClear(eq, def.Slot, IsTwoHanded);
         var free2 = Inv.FreeGridSlots();
@@ -102,6 +122,11 @@ public partial class World : Node3D
 
     private bool CanEquipOrNotice(int itemId, ItemData.Item def)
     {
+        if (InChaosZone && ChaosBattle.IsPickaxe(def.Kind))
+        {
+            CombatNotice(ItemData.Text(ChaosBattle.PickaxeEquipText, "Pickaxe cannot be equipped in Chaos Battle."));
+            return false;
+        }
         var who = new EquipStats(_selfClass, _selfRace, Sheet.Level, Sheet.Str, Sheet.Sta, Sheet.Dex, Sheet.Intel, Sheet.Mag);
         var refusal = EquipRules.Check(who, def, ItemData.ExtFor(itemId));
         if (refusal == EquipRefusal.None) return true;
@@ -163,17 +188,23 @@ public partial class World : Node3D
 
     private static bool IsTwoHanded(int itemId) { var d = ItemData.Get(itemId); return d?.Slot is 3 or 4; }
 
-    private void MoveBetween(int from, int to)
+    private void MoveBetween(int from, int to) => MoveBetween(from, to, ItemMove.WholeStack);
+
+    private void MoveBetween(int from, int to, int amount)
     {
         if (InventoryMoveBusy || _selfDead) return;
         if (from == to || from < 0 || to < 0 || from >= Inv.Length || to >= Inv.Length) return;
         if (Inv[from].IsEmpty) return;
+        if (amount < ItemMove.WholeStack || amount > Inv[from].Count) return;
         if (RefuseItemInUse(from, to)) return;
 
         var fromRegion = ItemMove.RegionOf(from);
         var toRegion = ItemMove.RegionOf(to);
         byte dir = ItemMove.DirectionFor(fromRegion, toRegion);
         if (dir == ItemMove.None) return;
+        bool splits = amount != ItemMove.WholeStack && amount != Inv[from].Count;
+        if (splits && !ItemMove.Splits(dir, Inv[from], Inv[to], ItemData.Get(Inv[from].ItemId)?.Countable ?? 0, amount))
+            return;
         if (fromRegion == ItemMove.Region.BagSlot && MagicBagHasItems(from))
         {
             CombatNotice(BagStillHoldsItems);
@@ -185,6 +216,7 @@ public partial class World : Node3D
             var def = ItemData.Get(Inv[from].ItemId);
             if (def == null) return;
             if (!CanEquipOrNotice(Inv[from].ItemId, def)) return;
+            if (fromRegion == ItemMove.Region.Grid && AskBindBeforeEquip(from, () => MoveBetween(from, to))) return;
             var preClear = Inv.HandsToClear(to, def.Slot, IsTwoHanded);
             var free = Inv.FreeGridSlots();
             free.Remove(from);
@@ -200,12 +232,12 @@ public partial class World : Node3D
         Enqueue(dir, Inv[from].ItemId,
                 (byte)ItemMove.PositionIn(fromRegion, from),
                 (byte)ItemMove.PositionIn(toRegion, to),
-                from, to);
+                from, to, splits ? (ushort)amount : ItemMove.WholeStack);
     }
 
-    private void Enqueue(byte dir, int itemId, byte src, byte dst, int from, int to)
+    private void Enqueue(byte dir, int itemId, byte src, byte dst, int from, int to, ushort amount = ItemMove.WholeStack)
     {
-        _moveQueue.Enqueue(new MoveStep { Dir = dir, ItemId = itemId, Src = src, Dst = dst, From = from, To = to, PetPos = NoPetSlot });
+        _moveQueue.Enqueue(new MoveStep { Dir = dir, ItemId = itemId, Src = src, Dst = dst, From = from, To = to, PetPos = NoPetSlot, Amount = amount });
         PumpMoves();
     }
 
@@ -224,13 +256,34 @@ public partial class World : Node3D
         if (_moveInFlight || _moveQueue.Count == 0) return;
         _moveCur = _moveQueue.Dequeue();
         _moveInFlight = true;
-        Net.I.SendItemMove(_moveCur.Dir, _moveCur.ItemId, _moveCur.Src, _moveCur.Dst);
+        Net.I.SendItemMove(_moveCur.Dir, _moveCur.ItemId, _moveCur.Src, _moveCur.Dst, _moveCur.Amount);
     }
+
+    private const int TextArrangeFailed = 30701;
+    private const int TextArrangeAsk = 30700;
+    private Button? _arrangeBtn;
+    private Notice? _arrangeAsk;
+
+    private void AskArrange()
+    {
+        if (_bagCompanion != null || (_arrangeAsk != null && IsInstanceValid(_arrangeAsk))) return;
+        _arrangeAsk = Notice.Confirm(this, ItemData.Text(TextArrangeAsk, "Do you want to arrange it?"),
+            "Yes", "No", Net.I.SendInventoryArrange);
+    }
+
+    private void RefreshArrangeButton()
+    {
+        if (_arrangeBtn != null) _arrangeBtn.Disabled = _bagCompanion != null;
+    }
+
+    private void OnInventoryArrangeFailed() =>
+        CombatNotice(ItemData.Text(TextArrangeFailed, "You have filed to arrange. Please try again later."));
 
     private void OnItemMoveResult(bool ok)
     {
         if (!_moveInFlight) return;
         _moveInFlight = false;
+        GD.Print($"[move] dir {_moveCur.Dir} slot {_moveCur.From} -> {_moveCur.To} item {_moveCur.ItemId} {(ok ? "ok" : "refused")}");
         if (!ok)
         {
             _moveQueue.Clear();
@@ -252,13 +305,16 @@ public partial class World : Node3D
         }
 
         var moved = Inv[_moveCur.From];
-        if (ItemMove.Merges(_moveCur.Dir, moved, Inv[_moveCur.To], ItemData.Get(moved.ItemId)?.Countable ?? 0))
+        if (_moveCur.Amount != ItemMove.WholeStack)
+            Inv.Split(_moveCur.From, _moveCur.To, _moveCur.Amount);
+        else if (ItemMove.Merges(_moveCur.Dir, moved, Inv[_moveCur.To], ItemData.Get(moved.ItemId)?.Countable ?? 0))
         {
             Inv.Stack(_moveCur.To, moved.Count);
             Inv.Consume(_moveCur.From, moved.Count);
         }
         else
             Inv.Swap(_moveCur.From, _moveCur.To);
+        GD.Print($"[move] now slot {_moveCur.From} = {Inv[_moveCur.From].ItemId} x{Inv[_moveCur.From].Count}, slot {_moveCur.To} = {Inv[_moveCur.To].ItemId} x{Inv[_moveCur.To].Count}");
         if (IsVisualSlot(_moveCur.From) || IsVisualSlot(_moveCur.To)) RerenderSelfEquipment();
         AudioItemMove(_moveCur.ItemId, _moveCur.From, _moveCur.To);
         PumpMoves();
@@ -270,7 +326,7 @@ public partial class World : Node3D
         Floaters?.Item(itemId, count);
         if (itemId == Net.GoldItemId) return;
         string name = ItemData.DisplayName(itemId);
-        CombatLogAdd(count > 1 ? $"You obtained {name} x{count:n0}." : $"You obtained {name}.", CombatLogKind.Resource);
+        CombatLogAdd(count > 1 ? $"You obtained {name} x{count:n0}." : $"You obtained {name}.", CombatLogKind.Resource, tab: LogTab.Item);
     }
 
     private void OnInventorySlotUpdate(int absSlot, ItemSlot item)

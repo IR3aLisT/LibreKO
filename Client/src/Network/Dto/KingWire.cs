@@ -80,7 +80,7 @@ public static class KingWire
             p.ReadBytes(p.RemainingBytes);
             return "";
         }
-        return Encoding.ASCII.GetString(p.ReadBytes(length));
+        return Encoding.UTF8.GetString(p.ReadBytes(length));
     }
 
     public static KingSchedule ReadSchedule(Packet p)

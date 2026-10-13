@@ -9,7 +9,10 @@ public class BuffExpiryService(
     IMagicExecutionService magicExecutionService,
     ICombatLifecycleService combatLifecycleService,
     ICombatNotificationService combatNotificationService,
-    ILogger<BuffExpiryService> logger) : BackgroundService
+    IControlStateService controlStateService,
+    IRespawnBlinkService respawnBlinkService,
+    ILogger<BuffExpiryService> logger,
+    IPartyWarBoardService? partyWarBoard = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -37,21 +40,29 @@ public class BuffExpiryService(
                 continue;
 
             await ProcessOverTimeEffectsAsync(session, nowTicks);
+            await respawnBlinkService.ExpireAsync(session, nowTicks);
 
-            if (session.ActiveBuffs.Count == 0)
-                continue;
+            if (session.ActiveBuffs.Count > 0)
+            {
+                var expired = session.ActiveBuffs
+                    .Where(kvp => kvp.Value.IsExpired)
+                    .Select(kvp => kvp.Key)
+                    .ToList();
 
-            var expired = session.ActiveBuffs
-                .Where(kvp => kvp.Value.IsExpired)
-                .Select(kvp => kvp.Key)
-                .ToList();
+                foreach (var skillId in expired)
+                    await magicExecutionService.CancelAsync(session, skillId);
+            }
 
-            foreach (var skillId in expired)
-                await magicExecutionService.CancelAsync(session, skillId);
+            if (session.ActiveBuffs.Count > 0 || session.ControlSignature != 0)
+                await controlStateService.SyncAsync(session);
         }
 
         foreach (var npc in sessionManager.Regions.GetAllNpcs())
+        {
             await ProcessOverTimeEffectsAsync(npc, nowTicks);
+            if (!npc.Debuffs.IsEmpty || npc.ControlSignature != 0)
+                await controlStateService.SyncAsync(npc);
+        }
     }
 
     private async Task ProcessOverTimeEffectsAsync(UserSession session, long nowTicks)
@@ -80,6 +91,8 @@ public class BuffExpiryService(
                     await combatLifecycleService.SendHpChangeAsync(
                         session,
                         killer?.CharacterId ?? -1);
+                    if (killer != null && killer != session)
+                        partyWarBoard?.CountDamage(killer, damage);
 
                     if (session.Hp <= 0)
                     {
@@ -90,8 +103,11 @@ public class BuffExpiryService(
                 }
                 else if (effect.TickAmount > 0)
                 {
+                    var before = session.Hp;
                     session.Hp = (short)Math.Min(session.MaxHp, session.Hp + effect.TickAmount);
                     await combatLifecycleService.SendHpChangeAsync(session);
+                    if (effect.CasterId != session.CharacterId && sessionManager.GetByCharacterId(effect.CasterId) is { } healer)
+                        partyWarBoard?.CountHealing(healer, session.Hp - before);
                 }
 
                 effect.TickCount++;

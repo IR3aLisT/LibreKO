@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -20,6 +21,11 @@ internal sealed class FloaterSystem
         public float Life;
         public float Rise;
         public float Drift;
+        public Kind Kind;
+        public long Amount;
+        public string Prefix = "";
+        public string Suffix = "";
+        public Label? Text;
     }
 
     private const int MaxLive = 40;
@@ -56,7 +62,8 @@ internal sealed class FloaterSystem
 
     internal void WarmText()
     {
-        if (_host == null || !GodotObject.IsInstanceValid(_host) || !GlyphWarmer.Unscaled(_host)) return;
+        if (_host == null || !GodotObject.IsInstanceValid(_host)) return;
+        int level = GlyphWarmer.LevelOf(_host);
         var font = _host.GetThemeDefaultFont();
         int shadowOutline = _host.GetThemeConstant("shadow_outline_size", "Label");
         float ui = UiScaleFor(_host.GetViewportRect().Size.Y);
@@ -69,9 +76,9 @@ internal sealed class FloaterSystem
         }
         for (int size = smallest; size <= largest; size++)
         {
-            GlyphWarmer.Render(font, size, 0, GlyphWarmer.AsciiRange);
-            GlyphWarmer.Render(font, size, OutlineFor(size), GlyphWarmer.AsciiRange);
-            if (shadowOutline > 0) GlyphWarmer.Render(font, size, shadowOutline, GlyphWarmer.AsciiRange);
+            GlyphWarmer.Render(font, size, 0, GlyphWarmer.AsciiRange, level);
+            GlyphWarmer.Render(font, size, OutlineFor(size), GlyphWarmer.AsciiRange, level);
+            if (shadowOutline > 0) GlyphWarmer.Render(font, size, shadowOutline, GlyphWarmer.AsciiRange, level);
         }
     }
 
@@ -90,36 +97,58 @@ internal sealed class FloaterSystem
     internal void Damage(int victimId, int amount)
     {
         if (!Config.DamageNumbers) return;
-        Spawn(Kind.Damage, victimId, $"{amount:n0}", null);
+        SpawnAmount(Kind.Damage, victimId, amount, "", "");
     }
 
     internal void Wound(int amount)
     {
         if (!Config.DamageNumbers) return;
-        Spawn(Kind.Wound, _ctx.SelfCharId, $"-{amount:n0}", null);
+        SpawnAmount(Kind.Wound, _ctx.SelfCharId, amount, "-", "");
     }
 
     internal void Cure(int charId, int amount)
     {
         if (!Config.DamageNumbers) return;
-        Spawn(Kind.Cure, charId, $"+{amount:n0}", null);
+        SpawnAmount(Kind.Cure, charId, amount, "+", "");
     }
 
     internal void RegenHp(int amount)
     {
         if (!Config.DamageNumbers) return;
-        Spawn(Kind.RegenHp, _ctx.SelfCharId, $"+{amount:n0} HP", null);
+        SpawnAmount(Kind.RegenHp, _ctx.SelfCharId, amount, "+", " HP");
     }
 
     internal void RegenMp(int amount)
     {
         if (!Config.DamageNumbers) return;
-        Spawn(Kind.RegenMp, _ctx.SelfCharId, $"+{amount:n0} MP", null);
+        SpawnAmount(Kind.RegenMp, _ctx.SelfCharId, amount, "+", " MP");
     }
 
-    internal void Exp(long amount) => Spawn(Kind.Exp, _ctx.SelfCharId, $"+{amount:n0} EXP", null);
+    internal void Exp(long amount) => SpawnAmount(Kind.Exp, _ctx.SelfCharId, amount, "+", " EXP");
 
-    internal void Gold(long amount) => Spawn(Kind.Gold, _ctx.SelfCharId, $"+{amount:n0} Gold", null);
+    internal void Gold(long amount) => SpawnAmount(Kind.Gold, _ctx.SelfCharId, amount, "+", " Gold");
+
+    private void SpawnAmount(Kind kind, int anchorId, long amount, string prefix, string suffix)
+    {
+        double now = _ctx.Now;
+        for (int i = _live.Count - 1; i >= 0; i--)
+        {
+            var live = _live[i];
+            if (live.Kind != kind || live.AnchorId != anchorId || live.Text == null || !FloaterNumbers.Merges(live.Start, now)) continue;
+            if (!GodotObject.IsInstanceValid(live.Text)) break;
+            live.Amount += amount;
+            live.Text.Text = prefix + FloaterNumbers.Format(live.Amount) + suffix;
+            Refit(live);
+            return;
+        }
+        if (Spawn(kind, anchorId, prefix + FloaterNumbers.Format(amount) + suffix, null) is { } spawned)
+        {
+            spawned.Kind = kind;
+            spawned.Amount = amount;
+            spawned.Prefix = prefix;
+            spawned.Suffix = suffix;
+        }
+    }
 
     internal void Item(int itemId, int count) => Spawn(
         Kind.Item, _ctx.SelfCharId,
@@ -140,10 +169,10 @@ internal sealed class FloaterSystem
         _            => (new Color("ffe488"), 18, 1.95f, false, 4f),
     };
 
-    private void Spawn(Kind kind, int anchorId, string text, Texture2D? icon)
+    private Floater? Spawn(Kind kind, int anchorId, string text, Texture2D? icon)
     {
-        if (_host == null || !GodotObject.IsInstanceValid(_host)) return;
-        if (_ctx.BodyOf(anchorId) is not { } body) return;
+        if (_host == null || !GodotObject.IsInstanceValid(_host)) return null;
+        if (_ctx.BodyOf(anchorId) is not { } body) return null;
 
         var (tint, font, life, overhead, jitter) = Look(kind);
         float head = _ctx.HeadHeight(anchorId);
@@ -152,7 +181,7 @@ internal sealed class FloaterSystem
         var cam = Camera();
 
         float distance = cam != null ? cam.GlobalPosition.DistanceTo(anchor) : 0f;
-        if (distance > CullDistance) return;
+        if (distance > CullDistance) return null;
 
         float ui = UiScaleFor(ViewportSize().Y);
         float near = Mathf.Clamp(1.15f - distance * 0.022f, NearScaleMin, NearScaleMax);
@@ -180,6 +209,8 @@ internal sealed class FloaterSystem
             Life = life,
             Rise = ViewportSize().Y * (overhead ? 0.055f : 0.075f),
             Drift = (float)GD.RandRange(-1.0, 1.0) * jitter,
+            Kind = kind,
+            Text = node.GetChildCount() > 0 ? node.GetChild<Control>(node.GetChildCount() - 1) as Label : null,
         };
         node.Position = rect.Position;
         node.Visible = onScreen;
@@ -190,6 +221,7 @@ internal sealed class FloaterSystem
             if (GodotObject.IsInstanceValid(_live[0].Node)) _live[0].Node.QueueFree();
             _live.RemoveAt(0);
         }
+        return f;
     }
 
     internal void Tick(double now)
@@ -200,7 +232,7 @@ internal sealed class FloaterSystem
             var f = _live[i];
             if (!GodotObject.IsInstanceValid(f.Node)) { _live.RemoveAt(i); continue; }
 
-            float t = (float)((now - f.Start) / f.Life);
+            float t = Mathf.Max(0f, (float)((now - f.Start) / f.Life));
             if (t >= 1f) { f.Node.QueueFree(); _live.RemoveAt(i); continue; }
 
             if (_ctx.BodyOf(f.AnchorId) is { } body)
@@ -266,6 +298,19 @@ internal sealed class FloaterSystem
         label.Size = new Vector2(size.X - gutter, size.Y);
         node.AddChild(label);
         return node;
+    }
+
+    private void Refit(Floater floater)
+    {
+        if (floater.Text == null || !GodotObject.IsInstanceValid(floater.Node)) return;
+        int fontSize = floater.Text.GetThemeFontSize("font_size");
+        float pad = OutlineFor(fontSize) * 0.5f + 3f;
+        var measured = _host.GetThemeDefaultFont().GetStringSize(floater.Text.Text, HorizontalAlignment.Left, -1, fontSize);
+        float width = Mathf.Ceil(measured.X + pad * 2f);
+        if (width <= floater.Node.Size.X) return;
+        floater.Node.Size = new Vector2(width, floater.Node.Size.Y);
+        floater.Node.PivotOffset = floater.Node.Size * 0.5f;
+        floater.Text.Size = new Vector2(width, floater.Text.Size.Y);
     }
 
     private bool Collides(Rect2 probe)

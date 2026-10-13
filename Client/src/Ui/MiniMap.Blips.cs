@@ -17,6 +17,9 @@ public partial class MiniMap
     private static ImageTexture? _rimTexture, _discTexture;
     private readonly BlipBatch _rimmed = new(), _plain = new();
     private readonly List<Blip> _rings = new();
+    private readonly List<Blip> _diamonds = new();
+    private static readonly Color DiamondEdge = new(0f, 0f, 0f, 0.8f);
+    private const float DiamondEdgeWidth = 1f;
 
     private sealed class BlipBatch
     {
@@ -60,12 +63,19 @@ public partial class MiniMap
         _rimmed.Begin();
         _plain.Begin();
         _rings.Clear();
+        _diamonds.Clear();
         foreach (var b in _blips)
         {
             float dx = (b.X - _koX) * pxw;
             float dy = -(b.Z - _koZ) * pxw;
             var p = ctr + new Vector2(dx, dy);
             bool clamped = p.X < min || p.X > maxX || p.Y < min || p.Y > maxY;
+            if (b.Diamond)
+            {
+                p = new Vector2(Mathf.Clamp(p.X, min, maxX), Mathf.Clamp(p.Y, min, maxY));
+                _diamonds.Add(b with { X = p.X, Z = p.Y });
+                continue;
+            }
             if (clamped)
             {
                 p = new Vector2(Mathf.Clamp(p.X, min, maxX), Mathf.Clamp(p.Y, min, maxY));
@@ -79,6 +89,19 @@ public partial class MiniMap
         _rimmed.Draw(c, _rimTexture ??= BlipTexture(rim: true));
         foreach (var ring in _rings)
             c.DrawArc(new Vector2(ring.X, ring.Z), ring.Radius + 1.5f, 0, Mathf.Tau, 20, ring.Color, 2f, true);
+        foreach (var diamond in _diamonds)
+            DrawDiamond(c, new Vector2(diamond.X, diamond.Z), diamond.Radius, diamond.Color);
+    }
+
+    private static void DrawDiamond(Control c, Vector2 at, float radius, Color color)
+    {
+        var points = new[]
+        {
+            at + new Vector2(0f, -radius), at + new Vector2(radius, 0f),
+            at + new Vector2(0f, radius), at + new Vector2(-radius, 0f),
+        };
+        c.DrawColoredPolygon(points, color);
+        c.DrawPolyline(new[] { points[0], points[1], points[2], points[3], points[0] }, DiamondEdge, DiamondEdgeWidth, true);
     }
 
     private static ImageTexture BlipTexture(bool rim)

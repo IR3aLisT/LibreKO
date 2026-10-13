@@ -76,17 +76,9 @@ public partial class World
 
     private int BestPotion(int healTarget)
     {
-        int best = 0, bestHeal = 0;
-        for (int abs = GridStart; abs < Inv.Length; abs++)
-        {
-            int id = Inv[abs].ItemId;
-            if (id == 0) continue;
-            int heal = ItemData.PotionHeal(id, healTarget);
-            if (heal <= bestHeal) continue;
-            best = id;
-            bestHeal = heal;
-        }
-        return best;
+        var ids = new int[Inv.Length - GridStart];
+        for (int abs = GridStart; abs < Inv.Length; abs++) ids[abs - GridStart] = Inv[abs].ItemId;
+        return MaestroPotions.PickStrongest(ids, id => ItemData.PotionHeal(id, healTarget), Sheet.Gold);
     }
 }
 

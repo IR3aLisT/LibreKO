@@ -206,7 +206,7 @@ public partial class World
     private void ToggleMerchantMenu()
     {
         if (_merchantMenuShown) { CloseMerchantMenu(); return; }
-        if (_selfDead) return;
+        if (_selfDead || RefusedInSiegeWar()) return;
         _merchantMenu.Visible = true;
         _merchantMenuShown = true;
     }
@@ -290,6 +290,11 @@ public partial class World
         if (dst < 0) { SetSellStatus($"The stall only holds {StallSlots} items.", true); return; }
 
         var slot = Inv[absSlot];
+        if (UseRefusal(ItemUse.Trade, slot) is not ItemUseRules.Allowed and var refusal)
+        {
+            SetSellStatus(ItemData.Text(refusal, "This item cannot be traded."), true);
+            return;
+        }
         AskStallPrice(slot, absSlot, dst);
     }
 
@@ -351,11 +356,24 @@ public partial class World
         }
     }
 
-    private void OnMerchantSold(int itemId, string buyerName)
+    private const int StallSoldText = 7703;
+    private const int StallOpenedText = 7706;
+    private const int StallClosedText = 7707;
+    private static readonly Color StallLogTint = Color.Color8(255, 102, 0);
+
+    private void StallLog(int textId, string fallback, params object[] extra)
     {
-        string who = buyerName.Length > 0 ? buyerName : "Someone";
-        CombatNotice($"{who} bought {ItemData.DisplayName(itemId)} from your shop.");
+        var now = System.DateTime.Now;
+        var args = new object[extra.Length + 2];
+        args[0] = now.Hour;
+        args[1] = now.Minute;
+        extra.CopyTo(args, 2);
+        CombatLogAdd(TextTemplate.Fill(ItemData.Text(textId, fallback), args), CombatLogKind.Resource, StallLogTint,
+            tab: textId == StallSoldText ? LogTab.Item : LogTab.System);
     }
+
+    private void OnMerchantSold(int itemId, string buyerName) =>
+        StallLog(StallSoldText, "Item Sold: %dh %dm ; Buyer: %s ; Item: %s", buyerName, ItemData.DisplayName(itemId));
 
     private void OnMerchantInserted(bool ok, int charId, string advert, byte flags, int[] itemIds)
     {
@@ -370,18 +388,13 @@ public partial class World
         _merchantAdverts[charId] = advert;
         PlaceStall(charId, isBuying: false, flags, itemIds);
 
-        if (charId != _myId)
-        {
-            if (advert.Length > 0 && _ents.TryGetValue(charId, out var seller))
-                CombatNotice($"{seller.Name}: {advert}");
-            return;
-        }
+        if (charId != _myId) return;
 
         _sellStallShown = false;
         _sellStallPanel.Visible = false;
         HideItemTooltip();
         SetMerchantLock(true);
-        CombatNotice("Your shop is open. You cannot move while it is.");
+        StallLog(StallOpenedText, "Initiated vendor mode at %dhour %dminute.");
     }
 
     private void OnMerchantStallClosed(int charId)
@@ -391,6 +404,7 @@ public partial class World
         if (_shopShown && _shopTargetId == charId) CloseShop();
         if (charId == _myId)
         {
+            StallLog(StallClosedText, "Ended vendor mode at %dhour %dminute.");
             SetMerchantLock(false);
             if (_sellStallShown)
             {

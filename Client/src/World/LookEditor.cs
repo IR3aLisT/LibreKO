@@ -12,6 +12,7 @@ public partial class LookEditor : VBoxContainer
     private readonly Label _faceLbl, _hairLbl;
     private readonly Button[] _faceSteps, _hairSteps;
     private readonly ColorPickerButton _colour;
+    private readonly List<int> _raceOptions = new();
     private bool _locked;
 
     public int Race { get; private set; }
@@ -22,16 +23,19 @@ public partial class LookEditor : VBoxContainer
 
     public event Action? Changed;
 
-    public LookEditor()
+    public LookEditor(bool withRace = true, bool withColour = true)
     {
         AddThemeConstantOverride("separation", 8);
         CustomMinimumSize = new Vector2(230, 0);
-        AddChild(UiTheme.SectionTitle("Race"));
-        _races.AddThemeConstantOverride("separation", 4);
-        AddChild(_races);
+        if (withRace)
+        {
+            AddChild(UiTheme.SectionTitle("Race"));
+            _races.AddThemeConstantOverride("separation", 4);
+            AddChild(_races);
+        }
         AddChild(UiTheme.SectionTitle("Appearance"));
-        (_faceLbl, _faceSteps) = StepperRow("Face", dir => { Face = LookVariant.Step(Face, dir, CharacterPreview.FaceCount(Race)); Changed?.Invoke(); });
-        (_hairLbl, _hairSteps) = StepperRow("Hair", dir => { HairStyle = LookVariant.Step(HairStyle, dir, CharacterPreview.HairCount(Race)); Changed?.Invoke(); });
+        (_faceLbl, _faceSteps) = StepperRow("Face", StepFace);
+        (_hairLbl, _hairSteps) = StepperRow("Hair", StepHair);
 
         var colourRow = new HBoxContainer();
         colourRow.AddThemeConstantOverride("separation", 8);
@@ -47,7 +51,35 @@ public partial class LookEditor : VBoxContainer
         };
         _colour.ColorChanged += _ => { if (!_locked) Changed?.Invoke(); };
         colourRow.AddChild(_colour);
+        colourRow.Visible = withColour;
         AddChild(colourRow);
+    }
+
+    public IReadOnlyList<int> RaceOptions => _raceOptions;
+
+    public void StepFace(int dir)
+    {
+        Face = LookVariant.Step(Face, dir, CharacterPreview.FaceCount(Race));
+        Changed?.Invoke();
+    }
+
+    public void StepHair(int dir)
+    {
+        HairStyle = LookVariant.Step(HairStyle, dir, CharacterPreview.HairCount(Race));
+        Changed?.Invoke();
+    }
+
+    public void StepRace(int dir)
+    {
+        if (_raceOptions.Count < 2) return;
+        int index = Math.Max(0, _raceOptions.IndexOf(Race));
+        PickRace(_raceOptions[Wrap(index + dir, _raceOptions.Count)]);
+    }
+
+    public void SetHairColour(Color colour)
+    {
+        _colour.Color = colour;
+        Changed?.Invoke();
     }
 
     public void Load(IReadOnlyList<int> races, int race, int face, int hair)
@@ -55,6 +87,8 @@ public partial class LookEditor : VBoxContainer
         foreach (var (_, button) in _raceButtons)
             button.QueueFree();
         _raceButtons.Clear();
+        _raceOptions.Clear();
+        _raceOptions.AddRange(races);
         foreach (int option in races)
         {
             int picked = option;
@@ -119,6 +153,12 @@ public partial class LookEditor : VBoxContainer
         foreach (int option in races)
             if (option == race) return true;
         return false;
+    }
+
+    private static int Wrap(int value, int count)
+    {
+        int n = Mathf.Max(1, count);
+        return ((value % n) + n) % n;
     }
 
     private (Label Value, Button[] Steps) StepperRow(string label, Action<int> step)

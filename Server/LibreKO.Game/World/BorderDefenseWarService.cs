@@ -19,6 +19,7 @@ public interface IBorderDefenseWarService
     Task CheckCarrierBaseDeliveryAsync(UserSession session);
     Task OnPlayerLogoutOrLeaveAsync(UserSession session);
     Task FinishAllMatchesAsync();
+    Packet BuildRanking(UserSession session, byte rankType);
     Task CancelAllMatchesAsync();
     Task TickAsync();
 }
@@ -35,6 +36,7 @@ public sealed class BdwMatch
     public int ElmoradScore { get; set; }
     public int KarusKillCount { get; set; }
     public int ElmoradKillCount { get; set; }
+    public Dictionary<int, int> PlayerPoints { get; } = [];
 
     public int TargetScore { get; set; } = 600;
 
@@ -70,6 +72,8 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
     public const int MaxPlayersPerNationPerRoom = 8;
     public const int PointsPerAltarDelivery = 10;
     public const int PointsPerKill = 1;
+    public const int RankRowsPerNation = 8;
+    public const uint NoBonusExp = 0;
 
     public const int HeadcountTier1 = 5;
     public const int HeadcountTier2 = 10;
@@ -105,6 +109,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
     private readonly ILoyaltyService loyaltyService;
     private readonly IPlayerProgressionService playerProgressionService;
     private readonly ICombatNotificationService combatNotificationService;
+    private readonly IPartyLevelProgressService partyLevelProgress;
     private readonly IMagicStatusEffectService magicStatusEffectService;
     private readonly ILogger<BorderDefenseWarService> logger;
 
@@ -123,6 +128,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         ILoyaltyService loyaltyService,
         IPlayerProgressionService playerProgressionService,
         ICombatNotificationService combatNotificationService,
+        IPartyLevelProgressService partyLevelProgress,
         IMagicStatusEffectService magicStatusEffectService,
         ILogger<BorderDefenseWarService> logger)
     {
@@ -136,6 +142,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         this.loyaltyService = loyaltyService;
         this.playerProgressionService = playerProgressionService;
         this.combatNotificationService = combatNotificationService;
+        this.partyLevelProgress = partyLevelProgress;
         this.magicStatusEffectService = magicStatusEffectService;
         this.logger = logger;
 
@@ -264,11 +271,12 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         }
 
         match.KarusPartyIndex = await TempleEventHelpers.FormNationPartyAsync(
-            sessionManager, combatNotificationService, karusGroup, "Border Defense War", roomId, logger);
+            sessionManager, combatNotificationService, partyLevelProgress, karusGroup, "Border Defense War", roomId, logger);
         match.ElmoradPartyIndex = await TempleEventHelpers.FormNationPartyAsync(
-            sessionManager, combatNotificationService, elmoGroup, "Border Defense War", roomId, logger);
+            sessionManager, combatNotificationService, partyLevelProgress, elmoGroup, "Border Defense War", roomId, logger);
 
         await BroadcastScoresToRoomAsync(match);
+        await BroadcastPacketToRoomAsync(match, BifrostPacketWriter.InstanceTimer((ushort)Math.Clamp(durationSeconds, 0, ushort.MaxValue)));
         await SendNoticeToRoomAsync(match, $"### [Border Defense War] Match started! Target score to win: {targetScore} points! ###");
     }
 
@@ -341,6 +349,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         if (teamCount <= 0) teamCount = 1;
 
         int pointsAwarded = PointsPerAltarDelivery * teamCount;
+        AddPlayerPoints(match, session.CharacterId, PointsPerAltarDelivery);
 
         if (session.Nation == AccountNation.Karus)
             match.KarusScore += pointsAwarded;
@@ -381,6 +390,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         {
             int killerTeamCount = killer.Nation == AccountNation.Karus ? match.KarusMembers.Count : match.ElmoradMembers.Count;
             if (killerTeamCount <= 0) killerTeamCount = 1;
+            AddPlayerPoints(match, killer.CharacterId, PointsPerKill);
 
             if (killer.Nation == AccountNation.Karus)
             {
@@ -396,6 +406,54 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
             await BroadcastScoresToRoomAsync(match);
             await CheckWinConditionAsync(match);
         }
+    }
+
+    private static void AddPlayerPoints(BdwMatch match, int characterId, int points) =>
+        match.PlayerPoints[characterId] = match.PlayerPoints.GetValueOrDefault(characterId) + points;
+
+    public Packet BuildRanking(UserSession session, byte rankType)
+    {
+        if (session.ZoneId != BdwZoneId || !_activeMatches.TryGetValue(session.Room, out var match))
+            return RankPacketWriter.BorderDefenseWar(rankType, [], [], 0, NoBonusExp);
+
+        return RankPacketWriter.BorderDefenseWar(
+            rankType,
+            RankRows(match, match.KarusMembers),
+            RankRows(match, match.ElmoradMembers),
+            (uint)Math.Clamp(VictoryExp(session), 0, uint.MaxValue),
+            NoBonusExp);
+    }
+
+    private List<RankPacketWriter.RankEntry> RankRows(BdwMatch match, IEnumerable<int> members)
+    {
+        var rows = new List<RankPacketWriter.RankEntry>();
+        foreach (var charId in members.OrderByDescending(id => match.PlayerPoints.GetValueOrDefault(id)).ThenBy(id => id))
+        {
+            if (rows.Count >= RankRowsPerNation) break;
+            var member = sessionManager.GetByCharacterId(charId);
+            if (member == null || member.Room != match.RoomId || member.ZoneId != BdwZoneId)
+                continue;
+            var clan = member.KnightsId > 0 ? sessionManager.Knights.GetClan(member.KnightsId) : null;
+            rows.Add(new RankPacketWriter.RankEntry(
+                member.Name,
+                (byte)member.Nation,
+                (ushort)Math.Max(0, (int)member.KnightsId),
+                (ushort)Math.Max(0, (int)(clan?.MarkVersion ?? 0)),
+                clan?.Name ?? string.Empty,
+                match.PlayerPoints.GetValueOrDefault(charId)));
+        }
+        return rows;
+    }
+
+    private long VictoryExp(UserSession session)
+    {
+        long baseExp = TempleEventHelpers.CalculateBaseExp(session.Level);
+        return gameDataService.TempleEventRewards
+            .Where(r => r.Event == TempleEvent.BorderDefenseWar
+                && r.Outcome == TempleEventRewardOutcome.Win
+                && r.ExpPercent > 0
+                && ((r.MinLevel == 0 && r.MaxLevel == 0) || (session.Level >= r.MinLevel && (r.MaxLevel == 0 || session.Level <= r.MaxLevel))))
+            .Sum(r => baseExp * r.ExpPercent / 100);
     }
 
     private async Task CheckWinConditionAsync(BdwMatch match)
@@ -425,7 +483,8 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
         match.WinnerNation = winner;
         match.FinishAtUtc = DateTime.UtcNow.AddSeconds(FinishCountdownSeconds);
 
-        var finishPkt = EventPacketWriter.TempleEventFinish((byte)winner, (uint)FinishCountdownSeconds);
+        var finishPkt = EventPacketWriter.TempleEventFinish(
+            TempleEventRules.BorderDefenseWarIndunEvent, (byte)winner, (uint)FinishCountdownSeconds);
         await BroadcastPacketToRoomAsync(match, finishPkt);
 
         var winnerName = winner == AccountNation.Karus ? "Karus" : "El Morad";

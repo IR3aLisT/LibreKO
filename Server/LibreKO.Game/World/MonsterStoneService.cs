@@ -22,6 +22,9 @@ public static class MonsterStoneRules
     public const int MinimumLevel = 20;
     public const int FinishGraceSeconds = 20;
 
+    private const int ExpFactor = 5;
+    private const int ExpBase = 10;
+
     private static readonly Dictionary<byte, short[]> FamiliesByZone = new()
     {
         [(byte)ZoneId.MonsterStone1] = [1, 2, 3, 4],
@@ -49,6 +52,8 @@ public static class MonsterStoneRules
         (74, [10, 11, 12]),
         (int.MaxValue, [13]),
     ];
+
+    public static long ExpFor(int level) => ExpFactor * ((long)level * level * level + ExpBase);
 
     public static bool IsStone(int itemId) => itemId == UniversalStone || ZoneByStone.ContainsKey(itemId);
 
@@ -103,6 +108,7 @@ public static class MonsterStoneRules
 public interface IMonsterStoneService
 {
     Task UseAsync(UserSession session, int itemId);
+    Task ExpAsync(UserSession session, int itemId);
     Task OnNpcKilledAsync(NpcInstance npc);
 }
 
@@ -112,12 +118,26 @@ public sealed class MonsterStoneService(
     IMagicItemUsageService itemUsage,
     IInstanceEntryService instanceEntry,
     InstanceRoomRegistry rooms,
+    IPlayerProgressionService progression,
     ILogger<MonsterStoneService> logger) : IMonsterStoneService
 {
     public static readonly string LevelTooLowNotice =
         $"Only characters of level {MonsterStoneRules.MinimumLevel} and above can enter a monster nest.";
 
     private static readonly ushort RoomSeconds = (ushort)TimeSpan.FromMinutes(GameConstants.InstanceRoomMinutes).TotalSeconds;
+
+    public async Task ExpAsync(UserSession session, int itemId)
+    {
+        if (!MonsterStoneRules.IsStone(itemId) || session.IsWarping || !itemUsage.CanUseItem(session, itemId))
+            return;
+
+        if (!await itemUsage.TryConsumeItemAsync(session, itemId))
+            return;
+
+        var exp = MonsterStoneRules.ExpFor(session.Level);
+        await progression.ChangeExperienceAsync(session, exp);
+        logger.LogInformation("{Name} turned monster stone {Item} into {Exp} EXP", session.Name, itemId, exp);
+    }
 
     public async Task UseAsync(UserSession session, int itemId)
     {
@@ -168,7 +188,7 @@ public sealed class MonsterStoneService(
 
         await session.Client.SendPacket(EventPacketWriter.MonsterStoneEntered(itemId));
         await instanceEntry.EnterAloneAsync(session, nest.ZoneId, nest.Set, 0f, 0f, endsOnBossKill: true);
-        await session.Client.SendPacket(BifrostPacketWriter.NestTimer(RoomSeconds));
+        await session.Client.SendPacket(BifrostPacketWriter.InstanceTimer(RoomSeconds));
         logger.LogInformation("{Name} used monster stone {Item}: zone {Zone} family {Family}",
             session.Name, itemId, nest.ZoneId, nest.Family);
     }

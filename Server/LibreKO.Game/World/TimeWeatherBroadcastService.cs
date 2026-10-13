@@ -41,6 +41,7 @@ public class TimeWeatherBroadcastService(
     public byte CoinEventAmount { get; set; }
     public byte NpEventAmount { get; set; }
     public byte DropEventAmount { get; set; }
+    public byte SantaOrAngel { get; set; }
 
     public long ApplyExpBonus(long baseExp) =>
         ExpEventAmount == 0 ? baseExp : baseExp * (100 + ExpEventAmount) / 100;
@@ -93,6 +94,8 @@ public class TimeWeatherBroadcastService(
                 RollWeather();
                 if (sessionManager.OnlineCount == 0) continue;
                 await BroadcastWeatherAsync();
+                if (SantaOrAngel != 0)
+                    await sessionManager.BroadcastToAll(MiscPacketWriter.SantaState(SantaOrAngel));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

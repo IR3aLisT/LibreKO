@@ -11,7 +11,7 @@ public interface IPlayerInspectService
     Task HandleEquipmentViewAsync(UserSession session, Packet packet);
 }
 
-public class PlayerInspectService(SessionManager sessionManager) : IPlayerInspectService
+public class PlayerInspectService(SessionManager sessionManager, IDailyRankService dailyRank) : IPlayerInspectService
 {
     public async Task HandleUserInformationAsync(UserSession session, Packet packet)
     {
@@ -22,9 +22,10 @@ public class PlayerInspectService(SessionManager sessionManager) : IPlayerInspec
             return;
         }
 
-        var visible = PlayerInspectPacketWriter.VisibleEquipmentSlots
-            .Select(slot => target.Inventory[slot].ItemId)
-            .ToArray();
+        var places = new int[PlayerInspectPacketWriter.RankPlaceCount];
+        for (var board = 0; board < places.Length; board++)
+            if (DailyRankPacketWriter.IsBoard((byte)board))
+                places[board] = dailyRank.PlaceOf((DailyRankBoard)board, target.CharacterId);
 
         await session.Client.SendPacket(PlayerInspectPacketWriter.UserDetail(
             new PlayerInspectPacketWriter.Detail(
@@ -35,7 +36,8 @@ public class PlayerInspectService(SessionManager sessionManager) : IPlayerInspec
                 target.MonthlyLoyalty,
                 ClanOf(target),
                 (byte)target.RebirthLevel,
-                visible)));
+                target.IsInParty ? (short)target.PartyIndex : PlayerInspectPacketWriter.NoParty,
+                places)));
     }
 
     public async Task HandleEquipmentViewAsync(UserSession session, Packet packet)
@@ -97,18 +99,18 @@ public class PlayerInspectService(SessionManager sessionManager) : IPlayerInspec
     private static PlayerInspectPacketWriter.WornItem WornOf(ItemSlot item) =>
         item.IsEmpty
             ? default
-            : new PlayerInspectPacketWriter.WornItem(item.ItemId, item.Durability, item.Flag, 0);
+            : new PlayerInspectPacketWriter.WornItem(item.ItemId, item.Durability, item.Flag, ItemRecordWriter.ExpiryOnWire(item.ExpiresAt));
 
     private PlayerInspectPacketWriter.Clan ClanOf(UserSession target)
     {
         if (target.KnightsId <= 0)
-            return default;
+            return PlayerInspectPacketWriter.NoClan;
 
         var clan = sessionManager.Knights.GetClan(target.KnightsId);
         return clan == null
-            ? default
+            ? PlayerInspectPacketWriter.NoClan
             : new PlayerInspectPacketWriter.Clan(
-                clan.Id, clan.MarkVersion, clan.Flag, clan.Grade, clan.Name, clan.Chief, clan.Grade);
+                clan.Id, clan.MarkVersion, clan.Flag, clan.Grade, clan.Name, clan.Chief, clan.Ranking);
     }
 
     private UserSession? ResolveTarget(

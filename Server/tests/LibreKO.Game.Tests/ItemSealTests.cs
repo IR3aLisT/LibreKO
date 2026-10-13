@@ -14,7 +14,8 @@ public class ItemSealTests : GameTestBase
 {
     private const int KrowazBoots = 208101000;
     private const int SealStone = 810890000;
-    private const string GoodCode = "12345678";
+    private const string GoodCode = "1234";
+    private const string WrongCode = "8765";
 
     [Fact]
     public async Task EveryAnswerCarriesTheItemAndSlotItWasAskedAbout()
@@ -31,7 +32,7 @@ public class ItemSealTests : GameTestBase
     }
 
     [Fact]
-    public async Task SealingRefusesUntilTheAccountHasACode()
+    public async Task SealingRefusesUntilTheVaultHasAPassword()
     {
         var (provider, session, sent) = Open(bound: 0);
         using var _ = provider;
@@ -44,16 +45,16 @@ public class ItemSealTests : GameTestBase
     }
 
     [Fact]
-    public async Task TheWrongCodeIsToldApartFromAWrongItem()
+    public async Task TheWrongVaultPasswordIsToldApartFromAWrongItem()
     {
         var (provider, session, sent) = Open(bound: 0);
         using var _ = provider;
         session.Money = 5_000_000;
-        session.SealCode = GoodCode;
+        session.VipPassword = GoodCode;
 
-        await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, "87654321");
+        await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, WrongCode);
 
-        Read(sent).Result.Should().Be(ItemSealResult.WrongCode);
+        Read(sent).Result.Should().Be(ItemSealResult.WrongVaultPassword);
         session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.Unsealed);
     }
 
@@ -63,7 +64,7 @@ public class ItemSealTests : GameTestBase
         var (provider, session, sent) = Open(bound: 0);
         using var _ = provider;
         session.Money = 5_000_000;
-        session.SealCode = GoodCode;
+        session.VipPassword = GoodCode;
 
         await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, GoodCode);
 
@@ -78,11 +79,45 @@ public class ItemSealTests : GameTestBase
         var (provider, session, sent) = Open(bound: 0);
         using var _ = provider;
         session.Money = 10;
-        session.SealCode = GoodCode;
+        session.VipPassword = GoodCode;
 
         await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, GoodCode);
 
         Read(sent).Result.Should().Be(ItemSealResult.NeedCoins);
+    }
+
+    [Fact]
+    public async Task TheThirdWrongPasswordLocksSealingAndTheVault()
+    {
+        var (provider, session, sent) = Open(bound: 0);
+        using var _ = provider;
+        session.Money = 5_000_000;
+        session.VipPassword = GoodCode;
+
+        await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, WrongCode);
+        await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, WrongCode);
+        await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, WrongCode);
+        Read(sent).Result.Should().Be(ItemSealResult.CodeLockedOut);
+
+        sent.Clear();
+        await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, GoodCode);
+
+        Read(sent).Result.Should().Be(ItemSealResult.CodeLockedOut);
+        session.VipPasswordFailures.Should().Be(VipWarehousePacketCoordinator.PasswordTriesAllowed);
+        session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.Unsealed);
+    }
+
+    [Fact]
+    public async Task UnbindingAsksForTheVaultPassword()
+    {
+        var (provider, session, sent) = Open(bound: 0);
+        using var _ = provider;
+        session.Inventory[InventoryConstants.InventoryStart].Flag = (byte)ItemFlag.Bound;
+
+        await Seal(provider, session, ItemSealType.Unbind, KrowazBoots, 0, string.Empty);
+
+        Read(sent).Result.Should().Be(ItemSealResult.NoCodeSet);
+        session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.Bound);
     }
 
     [Fact]
@@ -112,14 +147,83 @@ public class ItemSealTests : GameTestBase
     }
 
     [Fact]
+    public async Task AStackableItemCannotBeBound()
+    {
+        var (provider, session, sent) = Open(bound: 10);
+        using var _ = provider;
+        Give(session, 1, SealStone, 5);
+
+        await Seal(provider, session, ItemSealType.Bind, SealStone, 1, string.Empty);
+
+        Read(sent).Result.Should().Be(ItemSealResult.Failed);
+        session.Inventory[InventoryConstants.InventoryStart + 1].State.Should().Be(ItemFlag.Unsealed);
+    }
+
+    [Fact]
+    public async Task AnUnboundItemBindsAgainWhenItIsEquipped()
+    {
+        var (provider, session, sent) = Open(bound: 10);
+        using var _ = provider;
+        session.Inventory[InventoryConstants.InventoryStart].Flag = (byte)ItemFlag.NotBound;
+
+        await Seal(provider, session, ItemSealType.Bind, KrowazBoots, 0, "1");
+
+        Read(sent).Result.Should().Be(ItemSealResult.Succeeded);
+        session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.Bound);
+    }
+
+    [Fact]
+    public async Task AnItemThatDoesNotBindOnEquipCannotBeBound()
+    {
+        var (provider, session, sent) = Open(bound: 0);
+        using var _ = provider;
+
+        await Seal(provider, session, ItemSealType.Bind, KrowazBoots, 0, string.Empty);
+
+        Read(sent).Result.Should().Be(ItemSealResult.Failed);
+        session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.Unsealed);
+    }
+
+    [Fact]
+    public async Task ABindOnEquipItemCannotBeSealedBeforeItIsBound()
+    {
+        var (provider, session, sent) = Open(bound: 10);
+        using var _ = provider;
+        session.Money = 5_000_000;
+        session.VipPassword = GoodCode;
+
+        await Seal(provider, session, ItemSealType.Seal, KrowazBoots, 0, GoodCode);
+
+        Read(sent).Result.Should().Be(ItemSealResult.Failed);
+        session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.Unsealed);
+    }
+
+    [Theory]
+    [InlineData(ItemFlag.CharacterSeal)]
+    [InlineData(ItemFlag.Duplicate)]
+    [InlineData(ItemFlag.Sealed)]
+    public async Task AnItemInABlockedStateCannotBeBound(ItemFlag state)
+    {
+        var (provider, session, sent) = Open(bound: 10);
+        using var _ = provider;
+        session.Inventory[InventoryConstants.InventoryStart].Flag = (byte)state;
+
+        await Seal(provider, session, ItemSealType.Bind, KrowazBoots, 0, string.Empty);
+
+        Read(sent).Result.Should().Be(ItemSealResult.Failed);
+        session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(state);
+    }
+
+    [Fact]
     public async Task UnbindingWithoutTheStonesSaysWhichHalfIsMissing()
     {
         var (provider, session, sent) = Open(bound: 10);
         using var _ = provider;
         session.Inventory[InventoryConstants.InventoryStart].Flag = (byte)ItemFlag.Bound;
+        session.VipPassword = GoodCode;
         Give(session, 1, SealStone, 4);
 
-        await Seal(provider, session, ItemSealType.Unbind, KrowazBoots, 0, string.Empty);
+        await Seal(provider, session, ItemSealType.Unbind, KrowazBoots, 0, GoodCode);
 
         Read(sent).Result.Should().Be(ItemSealResult.MissingMaterial);
         session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.Bound);
@@ -134,8 +238,9 @@ public class ItemSealTests : GameTestBase
         session.Inventory[InventoryConstants.InventoryStart].Flag = (byte)ItemFlag.Bound;
         Give(session, 1, SealStone, 6);
         Give(session, 2, SealStone, 6);
+        session.VipPassword = GoodCode;
 
-        await Seal(provider, session, ItemSealType.Unbind, KrowazBoots, 0, string.Empty);
+        await Seal(provider, session, ItemSealType.Unbind, KrowazBoots, 0, GoodCode);
 
         Read(sent).Result.Should().Be(ItemSealResult.Succeeded);
         session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.NotBound);
@@ -149,8 +254,9 @@ public class ItemSealTests : GameTestBase
         var (provider, session, sent) = Open(bound: 0);
         using var _ = provider;
         session.Inventory[InventoryConstants.InventoryStart].Flag = (byte)ItemFlag.Bound;
+        session.VipPassword = GoodCode;
 
-        await Seal(provider, session, ItemSealType.Unbind, KrowazBoots, 0, string.Empty);
+        await Seal(provider, session, ItemSealType.Unbind, KrowazBoots, 0, GoodCode);
 
         Read(sent).Result.Should().Be(ItemSealResult.Succeeded);
         session.Inventory[InventoryConstants.InventoryStart].State.Should().Be(ItemFlag.NotBound);

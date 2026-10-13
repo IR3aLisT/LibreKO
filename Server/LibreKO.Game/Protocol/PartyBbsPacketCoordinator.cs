@@ -1,4 +1,5 @@
-﻿using LibreKO.Common.Infrastructure.Network;
+﻿using LibreKO.Common.Enums;
+using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.World;
 using LibreKO.Game.Protocol.Writers;
 
@@ -9,7 +10,7 @@ public interface IPartyBbsPacketCoordinator
     Task HandleAsync(IClient client, Packet packet);
 }
 
-public class PartyBbsPacketCoordinator(SessionManager sessionManager) : IPartyBbsPacketCoordinator
+public class PartyBbsPacketCoordinator(SessionManager sessionManager, IPartyPacketCoordinator parties) : IPartyBbsPacketCoordinator
 {
     private const byte PartyBbsRegister = 0x01;
     private const byte PartyBbsDelete = 0x02;
@@ -17,6 +18,12 @@ public class PartyBbsPacketCoordinator(SessionManager sessionManager) : IPartyBb
     private const byte PartyBbsWanted = 0x04;
     private const byte PartyBbsList = 0x0B;
     private const int MaxBbsPage = 10;
+    private const int ListRequestBytes = sizeof(short) + 1 + sizeof(short) + 1;
+
+    private readonly record struct BoardFilter(byte State, short Zone, byte Level)
+    {
+        public static readonly BoardFilter None = new(FullMoonRules.AnyState, FullMoonRules.AnyZone, FullMoonRules.AnyLevel);
+    }
 
     public async Task HandleAsync(IClient client, Packet packet)
     {
@@ -32,60 +39,105 @@ public class PartyBbsPacketCoordinator(SessionManager sessionManager) : IPartyBb
         switch (subOpcode)
         {
             case PartyBbsRegister:
-                await RegisterAsync(session);
+                await RegisterAsync(session, mode);
                 break;
 
             case PartyBbsDelete:
-                await DeleteAsync(session);
+                await DeleteAsync(session, mode);
                 break;
 
             case PartyBbsNeeded:
                 if (packet.RemainingBytes >= 2)
-                    await SendNeededPageAsync(session, packet.ReadShort());
+                    await SendNeededPageAsync(session, mode, packet.ReadShort(), BoardFilter.None);
+                break;
+
+            case PartyBbsList:
+                if (packet.RemainingBytes >= ListRequestBytes)
+                {
+                    var page = packet.ReadShort();
+                    var filter = new BoardFilter(packet.ReadByte(), packet.ReadShort(), packet.ReadByte());
+                    await SendNeededPageAsync(session, mode, page, mode == FullMoonRules.FullMoonBoard ? BoardFilter.None : filter);
+                }
                 break;
 
             case PartyBbsWanted:
-                await UpdateWantedAsync(session, packet);
+                await UpdateWantedAsync(session, mode, packet);
+                break;
+
+            case PartyBbsPacketWriter.SubInvite:
+                if (packet.RemainingBytes >= sizeof(short))
+                    await parties.BoardInviteAsync(session, packet.ReadString(), mode);
+                break;
+
+            case PartyBbsPacketWriter.SubInviteAccept:
+                if (packet.RemainingBytes >= sizeof(short))
+                    await parties.BoardAcceptAsync(session, packet.ReadString(), mode);
                 break;
         }
     }
 
-    private static async Task RegisterAsync(UserSession session)
+    private async Task RegisterAsync(UserSession session, byte mode)
     {
         if (!session.IsInParty)
-            session.SeekingParty = true;
+        {
+            session.PartyBoardType = mode;
+            await SetSeekingAsync(session, true);
+        }
 
         var packet = PartyBbsPacketWriter.Result(
-            PartyBbsPacketWriter.ModeNormal,
+            mode,
             PartyBbsRegister,
             session.IsInParty ? PartyBbsPacketWriter.Failed : PartyBbsPacketWriter.Succeeded);
 
         await session.Client.SendPacket(packet);
     }
 
-    private static async Task DeleteAsync(UserSession session)
+    private async Task SetSeekingAsync(UserSession session, bool seeking)
     {
-        session.SeekingParty = false;
+        if (session.SeekingParty == seeking)
+            return;
+        session.SeekingParty = seeking;
+        await sessionManager.Regions.SendToRegion(
+            session,
+            MovementPacketWriter.StateChange(
+                session.CharacterId,
+                (byte)StateChangeType.NeedParty,
+                seeking ? UserInfoPacketWriter.SeekingParty : UserInfoPacketWriter.NotSeekingParty),
+            excludeSender: false);
+    }
+
+    private async Task DeleteAsync(UserSession session, byte mode)
+    {
+        await SetSeekingAsync(session, false);
         session.PartyBbsMessage = string.Empty;
         session.WantedClass = 0;
+        session.PartyBoardType = FullMoonRules.NormalBoard;
 
         var packet = PartyBbsPacketWriter.Result(
-            PartyBbsPacketWriter.ModeNormal, PartyBbsDelete, PartyBbsPacketWriter.Succeeded);
+            mode, PartyBbsDelete, PartyBbsPacketWriter.Succeeded);
         await session.Client.SendPacket(packet);
     }
 
-    private async Task SendNeededPageAsync(UserSession session, short pageIndex)
+    private byte BoardOf(UserSession candidate) =>
+        candidate.IsInParty
+            ? sessionManager.Parties.GetParty(candidate.PartyIndex)?.BoardType ?? FullMoonRules.NormalBoard
+            : candidate.PartyBoardType;
+
+    private async Task SendNeededPageAsync(UserSession session, byte mode, short pageIndex, BoardFilter filter)
     {
         var sanitizedPageIndex = (short)Math.Max(pageIndex, (short)0);
         var entries = sessionManager
             .GetAll()
             .Where(candidate =>
                 candidate.Nation == session.Nation
+                && BoardOf(candidate) == mode
                 && ((candidate.SeekingParty && !candidate.IsInParty)
                     || (candidate.IsPartyLeader && candidate.WantedClass > 0)))
             .Select(candidate => (
                 Player: candidate,
                 Type: (byte)(candidate.IsPartyLeader && candidate.WantedClass > 0 ? 3 : 2)))
+            .Where(item => FullMoonRules.PassesFilter(filter.State, filter.Zone, filter.Level,
+                item.Type == PartyBbsPacketWriter.EntryWantedParty, item.Player.ZoneId, item.Player.Level))
             .ToList();
 
         var totalCount = entries.Count;
@@ -108,17 +160,17 @@ public class PartyBbsPacketCoordinator(SessionManager sessionManager) : IPartyBb
             (byte)item.Player.Nation)).ToList();
 
         var packet = PartyBbsPacketWriter.Page(
-            PartyBbsPacketWriter.ModeNormal, PartyBbsList,
+            mode, PartyBbsList,
             sanitizedPageIndex, (short)totalPages, boardEntries);
         await session.Client.SendPacket(packet);
     }
 
-    private async Task UpdateWantedAsync(UserSession session, Packet packet)
+    private async Task UpdateWantedAsync(UserSession session, byte mode, Packet packet)
     {
         if (!session.IsPartyLeader)
         {
             var fail = PartyBbsPacketWriter.Result(
-                PartyBbsPacketWriter.ModeNormal, PartyBbsWanted, PartyBbsPacketWriter.Failed);
+                mode, PartyBbsWanted, PartyBbsPacketWriter.Failed);
             await session.Client.SendPacket(fail);
             return;
         }
@@ -137,10 +189,10 @@ public class PartyBbsPacketCoordinator(SessionManager sessionManager) : IPartyBb
                 var bytes = new byte[messageLength];
                 for (var i = 0; i < messageLength; i++)
                     bytes[i] = packet.ReadByte();
-                session.PartyBbsMessage = System.Text.Encoding.ASCII.GetString(bytes);
+                session.PartyBbsMessage = System.Text.Encoding.UTF8.GetString(bytes);
             }
         }
 
-        await SendNeededPageAsync(session, pageIndex);
+        await SendNeededPageAsync(session, mode, pageIndex, BoardFilter.None);
     }
 }

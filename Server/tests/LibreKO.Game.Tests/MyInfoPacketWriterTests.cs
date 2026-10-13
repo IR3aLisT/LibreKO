@@ -132,6 +132,29 @@ public class MyInfoPacketWriterTests
     }
 
     [Fact]
+    public void Build_PutsTheKingFlagAfterRankAndTitle()
+    {
+        var packet = new MyInfoPacketWriter { CharacterId = 7, Name = "King", Level = 60, IsKing = true }.Build();
+        packet.ResetOffset();
+        packet.ReadInt();
+        packet.ReadSByteString();
+        packet.ReadShort();
+        packet.ReadShort();
+        packet.ReadShort();
+        packet.ReadByte();
+        packet.ReadByte();
+        packet.ReadShort();
+        packet.ReadByte();
+        packet.ReadInt();
+        packet.ReadByte();
+        packet.ReadByte();
+
+        packet.ReadByte().Should().Be(1);
+        packet.ReadByte().Should().Be(0);
+        packet.ReadByte().Should().Be(60);
+    }
+
+    [Fact]
     public void Build_WritesAuthorityImmediatelyAfterMoney()
     {
         var packet = BuildMinimal();

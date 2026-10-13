@@ -6,18 +6,31 @@ namespace LibreKO;
 
 public partial class World
 {
+    private const int BeautyPreviewWidth = 214;
+    private const int BeautyPreviewHeight = 275;
+    private const int FaceChangeCoupon = 810109000;
+    private const int MakeOverCoupon = 810340000;
+    private const int NoCouponText = 18901;
+    private const int LookChangedText = 18902;
+    private const int LookFailedText = 18903;
+    private const int HairColourText = 200025;
+    private const int HairColourPromptText = 18905;
+    private const string BeautyConfirmText = "Use a Make Over Coupon to change your look?";
+    private const float PaletteGap = 8f;
+
+    private static readonly int[] BeautyCoupons = { FaceChangeCoupon, MakeOverCoupon };
+
     private CanvasLayer _changeHairLayer = null!;
     private HudWindow _changeHairPanel = null!;
-    private Label _changeHairFaceLbl = null!;
-    private Label _changeHairHairLbl = null!;
+    private LookPreview _beautyPreview = null!;
+    private LookEditor _beautyEditor = null!;
     private Label _changeHairStatus = null!;
-    private Button[] _changeHairFaceSteps = null!;
-    private Button[] _changeHairHairSteps = null!;
-    private Button _changeHairApply = null!;
-    private bool _changeHairShown, _changeHairInFlight;
-
-    private int _changeHairFace;
-    private int _changeHairHair;
+    private Button _beautyConfirm = null!;
+    private bool _changeHairShown;
+    private bool _beautyInFlight;
+    private HudWindow? _hairPalette;
+    private ColorPicker _hairPalettePicker = null!;
+    private LookEditor? _hairPaletteTarget;
 
     private void ChangeHairInit()
     {
@@ -41,73 +54,43 @@ public partial class World
         _changeHairPanel.Closed += CloseChangeHair;
         _changeHairLayer.AddChild(_changeHairPanel);
 
-        var r = _changeHairPanel.Body;
-        r.AddThemeConstantOverride("separation", 8);
+        var column = _changeHairPanel.Body;
+        column.AddThemeConstantOverride("separation", 8);
+        _beautyPreview = new LookPreview(BeautyPreviewWidth, BeautyPreviewHeight);
+        column.AddChild(LookPreviewColumn(_beautyPreview, zoom: true));
 
-        r.AddChild(UiTheme.SectionTitle("Restyle Appearance"));
+        _beautyEditor = new LookEditor(withRace: false, withColour: false);
+        _beautyEditor.Changed += ShowBeautyLook;
+        column.AddChild(_beautyEditor);
 
-        var hint = HudStyle.Label(12);
-        hint.Text = "Pick a new hair and face, then Apply.";
-        r.AddChild(hint);
+        var colour = LookActionButton(ItemData.Text(HairColourText, "Change hair color"), () => OpenHairPalette(_beautyEditor));
+        column.AddChild(colour);
 
-        (_changeHairHairLbl, _changeHairHairSteps) = AddChangeHairRow(r, "Hair",
-            () => StepChangeHairHair(-1), () => StepChangeHairHair(1));
-        (_changeHairFaceLbl, _changeHairFaceSteps) = AddChangeHairRow(r, "Face",
-            () => StepChangeHairFace(-1), () => StepChangeHairFace(1));
+        _changeHairStatus = HudStyle.Label(12);
+        _changeHairStatus.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _changeHairStatus.CustomMinimumSize = new Vector2(BeautyPreviewWidth, 0);
+        column.AddChild(_changeHairStatus);
 
-        _changeHairApply = new Button { Text = "Apply", FocusMode = Control.FocusModeEnum.None };
-        _changeHairApply.Pressed += SubmitChangeHair;
-        r.AddChild(_changeHairApply);
-
-        _changeHairStatus = HudStyle.Label(13);
-        r.AddChild(_changeHairStatus);
-    }
-
-    private static (Label Value, Button[] Steps) AddChangeHairRow(VBoxContainer parent, string caption,
-        System.Action onPrev, System.Action onNext)
-    {
-        var row = new HBoxContainer();
-        row.AddThemeConstantOverride("separation", 6);
-
-        var name = HudStyle.Label(13);
-        name.Text = caption;
-        name.CustomMinimumSize = new Vector2(48, 0);
-        row.AddChild(name);
-
-        var prev = new Button { Text = "<", FocusMode = Control.FocusModeEnum.None };
-        prev.Pressed += () => onPrev();
-        row.AddChild(prev);
-
-        var value = HudStyle.Label(14, HorizontalAlignment.Center);
-        value.CustomMinimumSize = new Vector2(60, 0);
-        value.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        row.AddChild(value);
-
-        var next = new Button { Text = ">", FocusMode = Control.FocusModeEnum.None };
-        next.Pressed += () => onNext();
-        row.AddChild(next);
-
-        parent.AddChild(row);
-        return (value, [prev, next]);
+        var actions = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        actions.AddThemeConstantOverride("separation", 8);
+        _beautyConfirm = LookActionButton("OK", SubmitChangeHair);
+        actions.AddChild(_beautyConfirm);
+        actions.AddChild(LookActionButton("Cancel", CloseChangeHair));
+        column.AddChild(actions);
     }
 
     private void OpenChangeHair()
     {
-        if (!_changeHairShown) ToggleChangeHair();
-    }
-
-    private void ToggleChangeHair()
-    {
-        if (_changeHairShown) { CloseChangeHair(); return; }
-        if (_changeHairInFlight) return;
-
-        _changeHairFace = LookVariant.Clamp(_selfFace, CharacterPreview.FaceCount(_selfRace));
-        _changeHairHair = LookVariant.Clamp(HairCode.StyleOf(_selfHair), CharacterPreview.HairCount(_selfRace));
-        RefreshChangeHairLabels();
-
+        if (_changeHairShown) return;
+        var me = Net.I.LastEnter;
+        _beautyInFlight = false;
+        _beautyEditor.Load(new[] { me.Race }, me.Race, _selfFace, _selfHair);
+        ShowBeautyLook();
+        SetChangeHairStatus("", false);
         _changeHairPanel.Visible = true;
         _changeHairShown = true;
-        SetChangeHairStatus("", false);
+        _beautyPreview.AlwaysRender = _changeHairPanel.PluginReplaced;
+        PluginHost.Game.RaiseBeautyShop();
     }
 
     private void CloseChangeHair()
@@ -115,79 +98,117 @@ public partial class World
         if (!_changeHairShown) return;
         _changeHairShown = false;
         _changeHairPanel.Visible = false;
+        _beautyPreview.AlwaysRender = false;
+        _beautyPreview.Clear();
+        CloseHairPalette();
+        PluginHost.Game.RaiseBeautyShop();
     }
 
-    private void StepChangeHairFace(int dir)
+    private void ShowBeautyLook()
     {
-        if (_changeHairInFlight) return;
-        _changeHairFace = LookVariant.Step(_changeHairFace, dir, CharacterPreview.FaceCount(_selfRace));
-        RefreshChangeHairLabels();
+        _beautyEditor.Refresh();
+        _beautyPreview.Show(_beautyEditor.Race, _beautyEditor.Face, _beautyEditor.HairStyle, _beautyEditor.HairColour);
+        _beautyConfirm.Disabled = _beautyInFlight;
+        PluginHost.Game.RaiseBeautyShop();
     }
 
-    private void StepChangeHairHair(int dir)
+    private int BeautyCouponPosition()
     {
-        if (_changeHairInFlight) return;
-        _changeHairHair = LookVariant.Step(_changeHairHair, dir, CharacterPreview.HairCount(_selfRace));
-        RefreshChangeHairLabels();
-    }
-
-    private void RefreshChangeHairLabels()
-    {
-        _changeHairFaceLbl.Text = _changeHairFace.ToString();
-        _changeHairHairLbl.Text = _changeHairHair.ToString();
-        SetChangeHairStepsDisabled(_changeHairFaceSteps, !LookVariant.CanStep(CharacterPreview.FaceCount(_selfRace)));
-        SetChangeHairStepsDisabled(_changeHairHairSteps, !LookVariant.CanStep(CharacterPreview.HairCount(_selfRace)));
-        _changeHairApply.Disabled = _changeHairInFlight;
-    }
-
-    private void SetChangeHairStepsDisabled(Button[] steps, bool unavailable)
-    {
-        foreach (var step in steps)
-            step.Disabled = unavailable || _changeHairInFlight;
+        if (Inv == null) return -1;
+        foreach (int coupon in BeautyCoupons)
+            for (int i = 0; i < InventoryConstants.HaveMax; i++)
+            {
+                int slot = InventoryConstants.InventoryStart + i;
+                if (slot < Inv.Length && Inv[slot].ItemId == coupon && Inv[slot].Count > 0) return i;
+            }
+        return -1;
     }
 
     private void SubmitChangeHair()
     {
-        if (!_changeHairShown || _changeHairInFlight || _selfDead) return;
-        if (!BeautyShop.HasCoupon(Inv))
+        if (_beautyInFlight) return;
+        int position = BeautyCouponPosition();
+        if (position < 0)
         {
-            SetChangeHairStatus(ItemData.Text(BeautyShop.NoCouponText, "You need a Makeover Coupon."), true);
+            Notice.Show(this, ItemData.Text(NoCouponText, "You do not have a Makeover Coupon."));
+            CloseChangeHair();
             return;
         }
-        _changeHairInFlight = true;
-        RefreshChangeHairLabels();
-        SetChangeHairStatus("Applying…", false);
-        if (!Net.I.SendChangeHair(HairCode.Pack(_changeHairHair, HairCode.ColourOf(_selfHair)), _changeHairFace))
-            OnChangeHairResult(false, _changeHairFace, _selfHair);
+        Notice.Confirm(this, BeautyConfirmText, "OK", "Cancel", () =>
+        {
+            _beautyInFlight = true;
+            ShowBeautyLook();
+            Net.I.SendChangeHair((byte)position, _beautyEditor.Face, _beautyEditor.Hair);
+        });
     }
 
     private void OnChangeHairResult(bool ok, int face, int hair)
     {
-        if (!_changeHairInFlight) return;
-        _changeHairInFlight = false;
-        RefreshChangeHairLabels();
-        string text = ItemData.Text(BeautyShop.ResultText(ok), ok ? "Your appearance has changed." : "Your appearance could not be changed.");
-        if (ok)
+        _beautyInFlight = false;
+        if (!ok)
         {
-            _selfHair = hair;
-            _selfFace = face;
-            RerenderSelfEquipment();
-            CombatNotice(text);
-            CloseChangeHair();
+            Notice.Show(this, ItemData.Text(LookFailedText, "Feature modification failed."));
+            if (_changeHairShown) ShowBeautyLook();
+            return;
         }
-        else if (_changeHairShown)
-        {
-            SetChangeHairStatus(text, true);
-        }
-        else
-        {
-            CombatNotice(text);
-        }
+        _selfHair = hair;
+        _selfFace = face;
+        RerenderSelfEquipment();
+        Notice.Show(this, ItemData.Text(LookChangedText, "Feature modification succeeded."));
+        CloseChangeHair();
     }
 
     private void SetChangeHairStatus(string text, bool warn)
     {
         _changeHairStatus.Text = text;
+        _changeHairStatus.Visible = text.Length > 0;
         _changeHairStatus.AddThemeColorOverride("font_color", warn ? new Color("ff6a6a") : Colors.White);
+    }
+
+    private void OpenHairPalette(LookEditor target)
+    {
+        if (_hairPalette == null || !IsInstanceValid(_hairPalette)) BuildHairPalette();
+        _hairPaletteTarget = target;
+        _hairPalettePicker.Color = target.HairColour;
+        _hairPalette!.Visible = true;
+        var beside = target == _genderEditor ? _genderPanel : _changeHairPanel;
+        _hairPalette.Position = beside.Position + new Vector2(beside.Size.X + PaletteGap, 0f);
+    }
+
+    private void CloseHairPalette()
+    {
+        if (_hairPalette != null && IsInstanceValid(_hairPalette)) _hairPalette.Visible = false;
+    }
+
+    private void BuildHairPalette()
+    {
+        _hairPalette = new HudWindow("hairpalette", "Hair Colour", persistLayout: false) { Visible = false };
+        _hairPalette.Closed += CloseHairPalette;
+        _changeHairLayer.AddChild(_hairPalette);
+        var body = _hairPalette.Body;
+        body.AddThemeConstantOverride("separation", 8);
+        var prompt = HudStyle.Label(12);
+        prompt.Text = ItemData.Text(HairColourPromptText, "Please select your hair color.");
+        body.AddChild(prompt);
+        _hairPalettePicker = new ColorPicker
+        {
+            EditAlpha = false,
+            PickerShape = ColorPicker.PickerShapeType.HsvRectangle,
+            ColorMode = ColorPicker.ColorModeType.Rgb,
+            PresetsVisible = false,
+            SamplerVisible = false,
+            ColorModesVisible = false,
+            HexVisible = false,
+        };
+        body.AddChild(_hairPalettePicker);
+        var actions = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        actions.AddThemeConstantOverride("separation", 8);
+        actions.AddChild(LookActionButton("Apply", () =>
+        {
+            (_hairPaletteTarget ?? _beautyEditor).SetHairColour(_hairPalettePicker.Color);
+            CloseHairPalette();
+        }));
+        actions.AddChild(LookActionButton("Cancel", CloseHairPalette));
+        body.AddChild(actions);
     }
 }

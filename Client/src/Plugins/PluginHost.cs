@@ -15,11 +15,17 @@ public partial class PluginHost : Node
     public static IReadOnlyList<PluginInfo> All => _all;
     public static bool RestartRequired { get; private set; }
     public static bool CodePluginsSupported => OS.GetName() != "Android" && OS.GetName() != "iOS";
+    public static PluginInfo? ActiveTheme => _all.FirstOrDefault(p => p.IsLoaded && p.Type == PluginType.UiTheme);
+
+    public static event Action? ThemeChanged;
+    public static bool PersistChoices { get; set; } = true;
 
     private static readonly List<PluginInfo> _all = new();
     private static readonly List<string> _resolveDirs = new();
+    private static readonly Dictionary<string, Assembly> _assemblies = new(StringComparer.OrdinalIgnoreCase);
     private static bool _resolverInstalled;
     private static bool _loadedOnce;
+    private static bool _themeArgSpent;
 
     public override void _Ready()
     {
@@ -33,12 +39,17 @@ public partial class PluginHost : Node
     public override void _ExitTree()
     {
         foreach (var p in _all)
-        {
-            if (p.Instance == null) continue;
-            try { p.Instance.Shutdown(); }
-            catch (Exception ex) { GD.PushWarning($"[plugins] {p.Id} shutdown: {ex.Message}"); }
-            p.Instance = null;
-        }
+            ShutdownInstance(p);
+    }
+
+    private static Assembly? ShutdownInstance(PluginInfo p)
+    {
+        if (p.Instance == null) return null;
+        var assembly = p.Instance.GetType().Assembly;
+        try { p.Instance.Shutdown(); }
+        catch (Exception ex) { GD.PushWarning($"[plugins] {p.Id} shutdown: {ex.Message}"); }
+        p.Instance = null;
+        return assembly;
     }
 
     public static IEnumerable<string> Roots()
@@ -55,6 +66,8 @@ public partial class PluginHost : Node
 
     public static void Discover()
     {
+        var running = _all.Where(p => p.State is PluginState.Loaded or PluginState.Failed)
+            .ToDictionary(p => Path.GetFullPath(p.Directory), StringComparer.OrdinalIgnoreCase);
         _all.Clear();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in Roots())
@@ -66,7 +79,7 @@ public partial class PluginHost : Node
             {
                 string manifestPath = Path.Combine(dir, PluginManifest.FileName);
                 if (!File.Exists(manifestPath)) continue;
-                var info = Inspect(dir, manifestPath);
+                var info = running.TryGetValue(Path.GetFullPath(dir), out var kept) ? kept : Inspect(dir, manifestPath);
                 if (info.Manifest != null && !seen.Add(info.Manifest.Id))
                 {
                     info.State = PluginState.Invalid;
@@ -106,7 +119,7 @@ public partial class PluginHost : Node
         return new PluginInfo(dir, manifest, PluginState.Disabled);
     }
 
-    public static string ThemeOverride() =>
+    public static string ThemeOverride() => _themeArgSpent ? "" :
         OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith(ThemeArgPrefix, StringComparison.Ordinal))?[ThemeArgPrefix.Length..] ?? "";
 
     private static void ApplyEnableStates()
@@ -142,52 +155,88 @@ public partial class PluginHost : Node
     private static void LoadEnabled()
     {
         foreach (var p in _all)
+            if (p.Enabled && p.State == PluginState.Disabled)
+                Load(p);
+    }
+
+    private static void Load(PluginInfo p)
+    {
+        try
         {
-            if (!p.Enabled || p.State != PluginState.Disabled) continue;
-            try
+            var ctx = new PluginContext(p, _all, Ui.ForOwner(p.Id), Game);
+            if (p.Manifest!.HasCode)
             {
-                var ctx = new PluginContext(p, _all, Ui, Game);
-                if (p.Manifest!.HasCode)
-                {
-                    p.Instance = Instantiate(p);
-                    p.Instance.Initialize(ctx);
-                }
-                p.State = PluginState.Loaded;
-                p.Message = "";
-                GD.Print($"[plugins] {p.Id} {p.Version} loaded ({PluginManifest.TypeName(p.Type)})");
+                p.Instance = Instantiate(p);
+                p.Instance.Initialize(ctx);
             }
-            catch (Exception ex)
-            {
-                p.State = PluginState.Failed;
-                p.Message = ex is TargetInvocationException { InnerException: { } inner } ? inner.Message : ex.Message;
-                p.Instance = null;
-                GD.PushError($"[plugins] {p.Id} failed to load: {ex}");
-            }
+            p.State = PluginState.Loaded;
+            p.Message = "";
+            GD.Print($"[plugins] {p.Id} {p.Version} loaded ({PluginManifest.TypeName(p.Type)})");
         }
+        catch (Exception ex)
+        {
+            p.State = PluginState.Failed;
+            p.Message = ex is TargetInvocationException { InnerException: { } inner } ? inner.Message : ex.Message;
+            ShutdownInstance(p);
+            Ui.RemoveOwner(p.Id);
+            GD.PushError($"[plugins] {p.Id} failed to load: {ex}");
+        }
+    }
+
+    private static void Unload(PluginInfo p)
+    {
+        var assembly = ShutdownInstance(p);
+        Ui.RemoveOwner(p.Id);
+        int dropped = assembly != null ? Game.DropHandlersFrom(assembly) : 0;
+        if (dropped > 0) GD.PushWarning($"[plugins] {p.Id} left {dropped} game handler(s) subscribed; removed");
+        p.State = PluginState.Disabled;
+        p.Message = "";
+        GD.Print($"[plugins] {p.Id} unloaded");
+    }
+
+    public static void SwitchTheme(string? id)
+    {
+        var target = id == null ? null : _all.FirstOrDefault(p => p.Type == PluginType.UiTheme && p.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        if (id != null && (target == null || !target.CanEnable)) return;
+        var current = ActiveTheme;
+        if (current == target) return;
+        _themeArgSpent = true;
+        if (current != null) Unload(current);
+        foreach (var p in _all)
+            if (p.Manifest != null && p.Type == PluginType.UiTheme)
+            {
+                if (PersistChoices) Config.SetPluginEnabled(p.Id, p == target);
+                else p.Enabled = p == target;
+            }
+        if (PersistChoices) ApplyEnableStates();
+        if (target is { Enabled: true, State: PluginState.Disabled }) Load(target);
+        ThemeChanged?.Invoke();
     }
 
     private static IPlugin Instantiate(PluginInfo info)
     {
         var manifest = info.Manifest!;
         string dll = Path.GetFullPath(Path.Combine(info.Directory, manifest.Assembly));
-        var alc = AssemblyLoadContext.GetLoadContext(typeof(PluginHost).Assembly) ?? AssemblyLoadContext.Default;
-        InstallResolver(alc, Path.GetDirectoryName(dll)!);
-
-        Assembly asm;
-        using (var dllStream = File.OpenRead(dll))
+        if (!_assemblies.TryGetValue(dll, out var asm))
         {
-            string pdb = Path.ChangeExtension(dll, ".pdb");
-            if (File.Exists(pdb))
+            var alc = AssemblyLoadContext.GetLoadContext(typeof(PluginHost).Assembly) ?? AssemblyLoadContext.Default;
+            InstallResolver(alc, Path.GetDirectoryName(dll)!);
+            using (var dllStream = File.OpenRead(dll))
             {
-                using var pdbStream = File.OpenRead(pdb);
-                asm = alc.LoadFromStream(dllStream, pdbStream);
+                string pdb = Path.ChangeExtension(dll, ".pdb");
+                if (File.Exists(pdb))
+                {
+                    using var pdbStream = File.OpenRead(pdb);
+                    asm = alc.LoadFromStream(dllStream, pdbStream);
+                }
+                else
+                {
+                    asm = alc.LoadFromStream(dllStream);
+                }
             }
-            else
-            {
-                asm = alc.LoadFromStream(dllStream);
-            }
+            RegisterGodotScripts(asm);
+            _assemblies[dll] = asm;
         }
-        RegisterGodotScripts(asm);
 
         Type? type = null;
         if (manifest.Entry.Length > 0)
@@ -239,6 +288,11 @@ public partial class PluginHost : Node
     {
         var target = _all.FirstOrDefault(p => p.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
         if (target?.Manifest == null) return;
+        if (target.Type == PluginType.UiTheme && CodePluginsSupported)
+        {
+            SwitchTheme(enabled ? target.Id : null);
+            return;
+        }
         if (enabled && target.Manifest.Exclusive)
             foreach (var other in _all)
                 if (other != target && other.Manifest != null && other.Type == target.Type && Config.PluginEnabled(other.Id))

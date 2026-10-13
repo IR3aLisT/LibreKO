@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
@@ -22,22 +23,40 @@ public class ItemPacketWriterTests
     }
 
     [Fact]
-    public void ItemGet_FailureIsResultOnly()
+    public void ItemRecord_EndsWithTheSlotsExpiry()
     {
-        var packet = ItemGetPacketWriter.Failed(ItemGetPacketWriter.ResultError);
-        packet.ResetOffset();
+        const long expiresAt = 1_800_000_000;
+        var slot = new ItemSlot { ItemId = 379_022_000, Durability = 1, Count = 1, ExpiresAt = expiresAt };
+        var packet = new Packet(GameOpcodes.GS_MYINFO);
 
-        packet.ReadByte().Should().Be(ItemGetPacketWriter.ResultError);
+        ItemRecordWriter.Write(packet, slot);
+        packet.ResetOffset();
+        packet.ReadBytes(4 + 2 + 2 + 1 + 2 + 4);
+
+        packet.ReadInt().Should().Be((int)expiresAt);
         packet.RemainingBytes.Should().Be(0);
     }
 
     [Fact]
-    public void ItemGet_NoRoomIsAnErrorWithTheNoRoomReasonCode()
+    public void ItemGet_FailureCarriesTheBundleThenTheRetryReason()
     {
-        var packet = ItemGetPacketWriter.NoRoom();
+        var packet = ItemGetPacketWriter.Failed(77);
         packet.ResetOffset();
 
         packet.ReadByte().Should().Be(ItemGetPacketWriter.ResultError);
+        packet.ReadInt().Should().Be(77);
+        packet.ReadInt().Should().Be(ItemGetPacketWriter.FailureRetry);
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void ItemGet_NoRoomCarriesTheBundleThenTheNoRoomReason()
+    {
+        var packet = ItemGetPacketWriter.NoRoom(77);
+        packet.ResetOffset();
+
+        packet.ReadByte().Should().Be(ItemGetPacketWriter.ResultError);
+        packet.ReadInt().Should().Be(77);
         packet.ReadInt().Should().Be(ItemGetPacketWriter.FailureNoRoom);
         packet.RemainingBytes.Should().Be(0);
     }

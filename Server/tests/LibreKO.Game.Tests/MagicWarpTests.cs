@@ -247,15 +247,147 @@ public class MagicWarpTests : GameTestBase
         caster.X.Should().BeApproximately(3315, 0.5f, "the client sends each coordinate as a sign-extended short");
     }
 
+    private const int RushId = 114509;
+    private const int PullId = 115570;
+    private const short DashRange = 10;
+    private const int EffectingResultSlot = 1;
+
+    [Fact]
+    public async Task RushMovesTheCasterBesideAnEnemyAndReportsSuccess()
+    {
+        using var provider = CreateProvider(_ => { }, gameData =>
+            Warp(gameData, RushId, SkillMoral.Enemy, MagicWarpType.Rush, range: DashRange));
+
+        var (sessionManager, caster, client) = CreateCaster(provider);
+        var foe = CreateOther(sessionManager, AccountNation.ElMorad, x: 108, z: 100);
+        InRonarkLand(sessionManager, caster, foe);
+        var sent = Capture(client);
+
+        await Cast(provider, client, RushId, caster, foe.CharacterId, [1069, 0, 1000, 0, 0, 0, 0]);
+
+        caster.X.Should().BeApproximately(106.9f, 0.05f);
+        caster.Z.Should().BeApproximately(100f, 0.05f);
+        EffectingResult(sent, RushId).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RushRefusesALandingAwayFromTheTarget()
+    {
+        using var provider = CreateProvider(_ => { }, gameData =>
+            Warp(gameData, RushId, SkillMoral.Enemy, MagicWarpType.Rush, range: DashRange));
+
+        var (sessionManager, caster, client) = CreateCaster(provider);
+        var foe = CreateOther(sessionManager, AccountNation.ElMorad, x: 108, z: 100);
+        InRonarkLand(sessionManager, caster, foe);
+
+        await Cast(provider, client, RushId, caster, foe.CharacterId, [1080, 0, 1100, 0, 0, 0, 0]);
+
+        caster.X.Should().BeApproximately(100f, 0.05f, "the landing must sit beside the target");
+    }
+
+    [Fact]
+    public async Task RushRefusesAFriendlyTarget()
+    {
+        using var provider = CreateProvider(_ => { }, gameData =>
+            Warp(gameData, RushId, SkillMoral.Enemy, MagicWarpType.Rush, range: DashRange));
+
+        var (sessionManager, caster, client) = CreateCaster(provider);
+        var friend = CreateOther(sessionManager, AccountNation.Karus, x: 108, z: 100);
+        InRonarkLand(sessionManager, caster, friend);
+
+        await Cast(provider, client, RushId, caster, friend.CharacterId, [1069, 0, 1000, 0, 0, 0, 0]);
+
+        caster.X.Should().BeApproximately(100f, 0.05f);
+    }
+
+    [Fact]
+    public async Task PullEitherDragsTheEnemyBesideTheCasterOrReportsFailure()
+    {
+        using var provider = CreateProvider(_ => { }, gameData =>
+            Warp(gameData, PullId, SkillMoral.Enemy, MagicWarpType.Pull, range: DashRange));
+
+        var (sessionManager, caster, client) = CreateCaster(provider);
+        var foe = CreateOther(sessionManager, AccountNation.ElMorad, x: 110, z: 100);
+        InRonarkLand(sessionManager, caster, foe);
+        var sent = Capture(client);
+
+        await Cast(provider, client, PullId, caster, foe.CharacterId, [1011, 0, 1000, 0, 0, 0, 0]);
+
+        var result = EffectingResult(sent, PullId);
+        if (result == 1)
+            foe.X.Should().BeApproximately(101.1f, 0.05f);
+        else
+        {
+            result.Should().Be(0);
+            foe.X.Should().BeApproximately(110f, 0.05f, "a failed pull leaves the target in place");
+        }
+        caster.X.Should().BeApproximately(100f, 0.05f, "the caster never moves on a pull");
+    }
+
+    [Fact]
+    public async Task PullRefusesALandingAwayFromTheCaster()
+    {
+        using var provider = CreateProvider(_ => { }, gameData =>
+            Warp(gameData, PullId, SkillMoral.Enemy, MagicWarpType.Pull, range: DashRange));
+
+        var (sessionManager, caster, client) = CreateCaster(provider);
+        var foe = CreateOther(sessionManager, AccountNation.ElMorad, x: 110, z: 100);
+        InRonarkLand(sessionManager, caster, foe);
+        var sent = Capture(client);
+
+        await Cast(provider, client, PullId, caster, foe.CharacterId, [1090, 0, 1000, 0, 0, 0, 0]);
+
+        foe.X.Should().BeApproximately(110f, 0.05f);
+        sent.Should().NotContain(p => IsEffecting(p, PullId));
+    }
+
+    private static void InRonarkLand(SessionManager sessionManager, params UserSession[] sessions)
+    {
+        foreach (var session in sessions)
+        {
+            sessionManager.Regions.RemoveFromRegion(session);
+            session.ZoneId = (byte)ZoneId.RonarkLand;
+            sessionManager.Regions.AddToRegion(session);
+        }
+    }
+
+    private static List<Packet> Capture(IClient client)
+    {
+        var sent = new List<Packet>();
+        client.SendPacket(Arg.Do<Packet>(sent.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        return sent;
+    }
+
+    private static bool IsEffecting(Packet packet, int skillId)
+    {
+        if (packet.GetOpcode() != (byte)GameOpcodes.GS_MAGIC_PROCESS) return false;
+        packet.ResetOffset();
+        return packet.ReadByte() == (byte)MagicProcessOpcode.Effecting && packet.ReadInt() == skillId;
+    }
+
+    private static int EffectingResult(List<Packet> sent, int skillId)
+    {
+        var packet = sent.Single(p => IsEffecting(p, skillId));
+        packet.ResetOffset();
+        packet.ReadByte();
+        packet.ReadInt();
+        packet.ReadInt();
+        packet.ReadInt();
+        for (var slot = 0; slot < EffectingResultSlot; slot++)
+            packet.ReadInt();
+        return packet.ReadInt();
+    }
+
     private static void Warp(
-        IGameDataService gameData, int skillId, SkillMoral moral, MagicWarpType warpType, short radius = 0)
+        IGameDataService gameData, int skillId, SkillMoral moral, MagicWarpType warpType, short radius = 0,
+        short range = 10000)
     {
         gameData.GetMagic(skillId).Returns(new MagicData
         {
             Id = skillId,
             Type1 = 8,
             Moral = (byte)moral,
-            Range = 10000
+            Range = range
         });
 
         var rows = new Dictionary<int, MagicType8Data>(

@@ -46,7 +46,8 @@ public class KnightsRepository(AppDbContext context) : IKnightsRepository
                 Class = c.Class,
                 Loyalty = c.Loyalty,
                 DonatedPoints = c.KnightsPoints,
-                LastOnlineTime = c.LastOnlineTime
+                LastOnlineTime = c.LastOnlineTime,
+                Memo = c.ClanMemo
             })
             .ToListAsync();
     }
@@ -72,6 +73,8 @@ public class KnightsRepository(AppDbContext context) : IKnightsRepository
         if (character == null)
             return;
 
+        if (character.KnightsId != knightsId)
+            character.ClanMemo = "";
         character.KnightsId = knightsId;
         character.Fame = fame;
 
@@ -81,6 +84,16 @@ public class KnightsRepository(AppDbContext context) : IKnightsRepository
         if (loyalty.HasValue)
             character.Loyalty = loyalty.Value;
 
+        await context.SaveChangesAsync();
+    }
+
+    public async Task SetClanMemoAsync(int characterId, string memo)
+    {
+        var character = await context.Characters.FindAsync(characterId);
+        if (character == null)
+            return;
+
+        character.ClanMemo = memo;
         await context.SaveChangesAsync();
     }
 }

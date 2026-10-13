@@ -14,9 +14,9 @@ public partial class World
         Func<int, BagFit> Fit,
         Func<int, string> Note,
         Action Close,
-        Func<int, int, bool>? IntoBag = null);
+        Func<int, int, int?, bool>? IntoBag = null);
 
-    private bool CompanionIntoBag(int from, int to) => _bagCompanion?.IntoBag?.Invoke(from, to) ?? false;
+    private bool CompanionIntoBag(int from, int to, int? amount) => _bagCompanion?.IntoBag?.Invoke(from, to, amount) ?? false;
 
     private BagCompanion? _bagCompanion;
     private readonly BagPairing<BagCompanion> _bagPairing = new();
@@ -32,6 +32,7 @@ public partial class World
     {
         var previous = _bagPairing.Attach(companion, CharTabOpen());
         _bagCompanion = companion;
+        RefreshArrangeButton();
         previous?.Close();
         if (CharTabOpen()) ApplyBagFit();
         else ShowMainWindow("Inventory");
@@ -41,6 +42,7 @@ public partial class World
     {
         if (_bagCompanion != companion) return;
         _bagCompanion = null;
+        RefreshArrangeButton();
         if (_bagPairing.Detach(companion)) HideMainWindow("Inventory");
         else if (CharTabOpen()) ApplyBagFit();
     }

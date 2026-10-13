@@ -13,6 +13,12 @@ public partial class World
     private string _challengeOpponent = "Player";
 
     private const float ChallengeRange = 20f;
+    private const int TextChallenged = 10950;
+    private const int TextChallengeWaiting = 10951;
+    private const int TextChallengeRejected = 10954;
+    private const int TextChallengeFailed = 10955;
+    private const int TextChallengeZone = 10956;
+    private const int TextChallengeNotLeader = 10957;
 
     private void ChallengeInit()
     {
@@ -89,27 +95,36 @@ public partial class World
     {
         _challengeOpponent = targetName;
         _challengeOutgoing = true;
-        CombatNotice($"Waiting for {targetName} to accept the duel…");
+        CombatNotice(ItemData.Text(TextChallengeWaiting, "Waiting for a response from %s.").Replace("%s", targetName));
     }
 
     private void OnChallengeRejected()
     {
         _challengeOutgoing = false;
-        CombatNotice($"{_challengeOpponent} declined the duel.");
+        ChallengeRefusalLine(TextChallengeRejected, "Your challenge has been rejected.");
     }
 
-    private void OnChallengeError()
+    private void OnChallengeError(byte code)
     {
         _challengeOutgoing = false;
-        CombatNotice("The duel challenge failed (target unavailable).");
+        if (code == Net.ChallengeSubZoneError)
+            ChallengeRefusalLine(TextChallengeZone, "You cannot challenge a character(clan) in this zone.");
+        else if (code == Net.ChallengeSubClanError)
+            ChallengeRefusalLine(TextChallengeNotLeader, "This is not a clan leader.");
+        else
+            ChallengeRefusalLine(TextChallengeFailed, "Challenge request failed.");
     }
+
+    private void ChallengeRefusalLine(int textId, string fallback) =>
+        CombatLogAdd(ItemData.Text(textId, fallback), CombatLogKind.Status, WhRefusalTint);
 
     private void OnChallengeRequest(string challengerName)
     {
         if (_challengeRequestPending || _challengeOutgoing) { Net.I.SendChallengeReject(); return; }
         _challengeOpponent = string.IsNullOrEmpty(challengerName) ? "Someone" : challengerName;
         _challengeRequestPending = true;
-        _challengeAskDialog.DialogText = $"{_challengeOpponent} challenges you to a duel.\nAccept and warp to the arena?";
+        _challengeAskDialog.DialogText = ItemData.Text(TextChallenged,
+            "%s has challenged you into a battle. Press OK and you'll be automatically be teleported to the battlefield.").Replace("%s", _challengeOpponent);
         _challengeAskDialog.PopupCentered();
         CombatNotice($"{_challengeOpponent} challenges you to a duel.");
     }
@@ -138,6 +153,6 @@ public partial class World
             _challengeAskDialog.Hide();
         }
         _challengeOutgoing = false;
-        CombatNotice($"{_challengeOpponent} cancelled the duel challenge.");
+        ChallengeRefusalLine(TextChallengeRejected, "Your challenge has been rejected.");
     }
 }

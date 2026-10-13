@@ -33,6 +33,7 @@ public partial class World
                 CustomMinimumSize = new Vector2(48, 48), FocusMode = Control.FocusModeEnum.None };
             button.AddThemeConstantOverride("icon_max_width", 36);
             button.Pressed += () => OpenGenieScrollPicker(slot);
+            WireGenieScrollSlot(button, slot);
             row.AddChild(button);
             _genieScrollButtons[i] = button;
         }

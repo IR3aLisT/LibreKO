@@ -27,6 +27,7 @@ public static class InventoryConstants
 
     public const int SlotMax = 14;
     public const int HaveMax = 28;
+    public const int CypherRing = 800112000;
     public const int CospreMax = 15;
     public const int BagSlotMax = 3;
     public const int MagicBagMax = 12;

@@ -40,6 +40,29 @@ public static class AchievementData
         _ => $"Tab {(int)tab}",
     };
 
+    public const int AllGroups = -1;
+    public const int GroupsPerTab = 10;
+    private const int CategoryTextBase = 37000;
+    private const int CategoryTextCount = 50;
+    private const int CategoryTextFallback = 37050;
+
+    public static AchievementTab TabOfGroup(int group) => (AchievementTab)(group / GroupsPerTab);
+
+    public static List<int> CategoriesOf(AchievementTab tab)
+    {
+        EnsureLoaded();
+        var groups = new SortedSet<int>();
+        foreach (var info in Table.Values)
+            if (info.Group >= 0 && TabOfGroup(info.Group) == tab) groups.Add(info.Group);
+        return new List<int>(groups);
+    }
+
+    public static string CategoryName(int group)
+    {
+        int textId = group is >= 0 and < CategoryTextCount ? CategoryTextBase + group : CategoryTextFallback;
+        return ItemData.Text(textId, $"Group {group}");
+    }
+
     public static Info? Get(int achievementId)
     {
         EnsureLoaded();
@@ -127,24 +150,35 @@ public static class AchievementData
 
         var parts = new List<string>();
         foreach (var key in bonus.Keys)
-        {
-            string name = BonusLabel(key.AsString());
-            int value = (int)bonus[key];
-            parts.Add(value >= 0 ? $"+{value} {name}" : $"{value} {name}");
-        }
+            parts.Add(BonusLine(key.AsString(), (int)bonus[key]));
         return string.Join(", ", parts);
     }
 
-    private static string BonusLabel(string key) => key switch
+    private const int BonusTextFirst = 37201;
+
+    private static readonly (string Key, string Fallback)[] Bonuses =
     {
-        "str" => "STR", "hp" => "HP", "dex" => "DEX", "int" => "INT", "mp" => "MP",
-        "attack" => "Attack", "defence" => "Defence",
-        "loyalty" => "NP", "exp" => "EXP",
-        "fire" => "Fire", "ice" => "Ice", "light" => "Lightning",
-        "r_fire" => "Fire resist", "r_ice" => "Ice resist", "r_light" => "Lightning resist",
-        "r_magic" => "Magic resist", "r_curse" => "Curse resist", "r_poison" => "Poison resist",
-        _ => key.StartsWith("ac_") ? key[3..] + " defence" : key,
+        ("str", "Strength: %d"), ("hp", "Health: %d"), ("dex", "Dexterity: %d"),
+        ("int", "Intelligence: %d"), ("mp", "Magic Power: %d"), ("attack", "Attack: %d"),
+        ("defence", "Defense: %d"), ("loyalty", "Contribution: %d (Restrictions apply)"),
+        ("exp", "Base EXP for Monster Kills +%d%%"),
+        ("ac_shortsword", "Dagger Defense: %d"), ("ac_jamadar", "Jamadar Defense: %d"),
+        ("ac_sword", "Sword Defense: %d"), ("ac_blow", "Club Defense: %d"), ("ac_axe", "Axe Defense: %d"),
+        ("ac_spear", "Spear Defense: %d"), ("ac_arrow", "Arrow Defense: %d"),
+        ("fire", "Flame Bonus: %d"), ("ice", "Ice Bonus: %d"), ("light", "Electric Shock Bonus: %d"),
+        ("r_fire", "Flame Resistence: %d"), ("r_ice", "Ice Resistence: %d"),
+        ("r_light", "Electric Shock Resistence: %d"), ("r_magic", "Magic Resistence: %d"),
+        ("r_curse", "Spell Resistence: %d"), ("r_poison", "Poison Resistence: %d"),
     };
+
+    private static string BonusLine(string key, int value)
+    {
+        int index = System.Array.FindIndex(Bonuses, bonus => bonus.Key == key);
+        if (index < 0) return $"{key}: {value}";
+        return ItemData.Text(BonusTextFirst + index, Bonuses[index].Fallback)
+            .Replace("%d", value.ToString())
+            .Replace("%%", "%");
+    }
 
     private static int Read(Godot.Collections.Dictionary row, string key) =>
         row.ContainsKey(key) ? (int)row[key] : 0;

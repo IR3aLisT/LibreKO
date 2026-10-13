@@ -27,6 +27,9 @@ public class GameDataSeedRunner(IDataSeeder seeder, ILogger<GameDataSeedRunner> 
         await Seed(new SpecialAuctionLotSeed());
         await Seed(new ItemCombineRecipeSeed());
         await Seed(new ItemCombineMaterialSeed());
+        await Seed(new ItemSmashClassSeed());
+        await Seed(new ItemSmashRewardSeed());
+        await Seed(new ItemGradeBonusSeed());
         await Seed(new CoefficientSeed());
         await Seed(new StartPositionSeed());
         await Seed(new HomeSeed());
@@ -67,6 +70,7 @@ public class GameDataSeedRunner(IDataSeeder seeder, ILogger<GameDataSeedRunner> 
         await Seed(new MonsterSummonSeed());
         await Seed(new ZoneInfoSeed());
         await Seed(new GameEventSeed());
+        await Seed(new MapObjectSeed());
         await Seed(new SiegeWarfareSeed());
         await Seed(new CollectionRaceSeed());
         await Seed(new CollectionRaceObjectiveSeed());

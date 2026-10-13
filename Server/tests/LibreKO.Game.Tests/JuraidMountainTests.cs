@@ -125,6 +125,7 @@ public class JuraidMountainTests
         _userNotificationService,
         _loyaltyService,
         _combatNotificationService,
+        Substitute.For<IPartyLevelProgressService>(),
         _logger);
 
     private UserSession CreateTestSession(int charId, AccountNation nation)
@@ -184,6 +185,28 @@ public class JuraidMountainTests
         // Kill second Stage 1 monster -> Stage 1 cleared! Bridge 1 should open with status 2
         await service.OnNpcKilledAsync(stage1Monsters[1], karusPlayer);
         bridge1.GateOpen.Should().Be(JuraidMountainService.BridgeStatusLowered);
+    }
+
+    [Fact]
+    public async Task PlayerKillsAreCountedPerNationAndSentToTheRoom()
+    {
+        var service = CreateService();
+        var karusPlayer = CreateTestSession(1, AccountNation.Karus);
+        var elmoPlayer = CreateTestSession(2, AccountNation.ElMorad);
+        await service.StartMatchesAsync([karusPlayer.CharacterId, elmoPlayer.CharacterId], 600);
+
+        var sent = new List<Packet>();
+        elmoPlayer.Client.When(c => c.SendPacket(Arg.Any<Packet>(), Arg.Any<CancellationToken>()))
+            .Do(call => sent.Add(call.Arg<Packet>()));
+
+        await service.OnPlayerKilledAsync(elmoPlayer, karusPlayer);
+        await service.OnPlayerKilledAsync(elmoPlayer, karusPlayer);
+
+        var scores = sent.Last(p => p.GetOpcode() == (byte)GameOpcodes.GS_EVENT);
+        scores.ResetOffset();
+        scores.ReadByte().Should().Be((byte)TempleSubOpcode.TempleScreen);
+        scores.ReadInt().Should().Be(2);
+        scores.ReadInt().Should().Be(0);
     }
 
     [Fact]

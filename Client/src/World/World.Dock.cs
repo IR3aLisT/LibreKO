@@ -11,7 +11,7 @@ public partial class World
     private const string CentreOnOpenMigration = "centre_on_open";
     private const double HudSettleSeconds = 0.5;
     private static readonly string[] LeftDocked = { "Character" };
-    private static readonly string[] RightDocked = { "Inventory", "Skills", "Party" };
+    private static readonly string[] RightDocked = { "Inventory", "Skills" };
 
     private readonly List<string> _dockOrder = new();
     private bool _dockQueued;

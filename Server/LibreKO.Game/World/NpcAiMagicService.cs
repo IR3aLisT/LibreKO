@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Entities.GameData;
+﻿using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
@@ -221,9 +221,9 @@ public class NpcAiMagicService(
         var existingKey = target.ActiveBuffs
             .FirstOrDefault(entry => entry.Value.BuffType == buffType && buffType != BuffType.None).Key;
         if (existingKey > 0)
-            target.ActiveBuffs.TryRemove(existingKey, out _);
+            target.RemoveBuff(existingKey);
 
-        target.ActiveBuffs[magic.Id] = new ActiveBuff
+        target.SetBuff(magic.Id, new ActiveBuff
         {
             MagicId = magic.Id,
             CasterId = -npc.UniqueId,
@@ -254,7 +254,7 @@ public class NpcAiMagicService(
             BonusDiseaseR = type4Data.DiseaseR,
             BonusSpeed = type4Data.Speed,
             BonusAttackSpeed = type4Data.AttackSpeed
-        };
+        });
 
         target.RecalculateStatsWithBuffs(gameData);
         await userNotificationService.SendStatUpdateAsync(target);

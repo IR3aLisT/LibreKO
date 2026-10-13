@@ -10,6 +10,8 @@ public sealed class AchievementPacketWriter
     public const sbyte ClaimNotAvailable = 0;
     public const sbyte ClaimInventoryFull = -1;
     public const sbyte ClaimItemMissing = -2;
+    public const short TitleDone = 1;
+    public const short TitleRefused = 0;
 
     public const ushort ScaledTarget = ushort.MaxValue;
 
@@ -72,6 +74,22 @@ public sealed class AchievementPacketWriter
         var packet = Sub(AchievementSubOpcode.TitleChanged);
         packet.WriteInt(characterId);
         packet.WriteUShort((ushort)titleId);
+        return packet;
+    }
+
+    public static Packet TitleSelected(AchievementSubOpcode sub, int titleId, short result)
+    {
+        var packet = Sub(sub);
+        packet.WriteUShort(0);
+        packet.WriteUShort((ushort)titleId);
+        packet.WriteShort(result);
+        return packet;
+    }
+
+    public static Packet TitleReset(AchievementSubOpcode sub, short result)
+    {
+        var packet = Sub(sub);
+        packet.WriteShort(result);
         return packet;
     }
 

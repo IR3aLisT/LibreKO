@@ -12,10 +12,11 @@ public partial class Net
         public readonly bool Online;
         public readonly float KoX, KoZ;
         public readonly int ClanId;
+        public readonly int State;
 
-        public NearbyPlayer(string name, int nation, bool online, float koX, float koZ, int clanId)
+        public NearbyPlayer(string name, int nation, bool online, float koX, float koZ, int clanId, int state = 0)
         {
-            Name = name; Nation = nation; Online = online; KoX = koX; KoZ = koZ; ClanId = clanId;
+            Name = name; Nation = nation; Online = online; KoX = koX; KoZ = koZ; ClanId = clanId; State = state;
         }
     }
 
@@ -44,13 +45,15 @@ public partial class Net
             string name = p.ReadSByteString();
             if (p.RemainingBytes < 15) break;
             int nation = p.ReadByte();
-            bool online = p.ReadShort() != 0;
+            byte signal = p.ReadByte();
+            byte kind = p.ReadByte();
+            bool online = (signal | kind) != 0;
             float koX = p.ReadShort() / 10f;
             float koZ = p.ReadShort() / 10f;
             int clanId = p.ReadInt();
             p.ReadShort();
             p.ReadShort();
-            list.Add(new NearbyPlayer(name, nation, online, koX, koZ, clanId));
+            list.Add(new NearbyPlayer(name, nation, online, koX, koZ, clanId, Domain.UserInfoCard.NearbyState(signal, kind)));
         }
 
         NearbyPlayersEvent?.Invoke(list);

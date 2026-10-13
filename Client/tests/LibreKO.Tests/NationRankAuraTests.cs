@@ -24,4 +24,11 @@ public class NationRankAuraTests
     [InlineData(89, true)]
     public void SomeZonesHideTheAura(int zone, bool hidden) =>
         Assert.Equal(hidden, NationRankAura.HiddenIn(zone));
+
+    [Fact]
+    public void TheKingAlwaysWearsTheGoldAura()
+    {
+        Assert.Equal(NationRankAura.GoldFxId, NationRankAura.FxIdFor(NationRankAura.Unranked, king: true));
+        Assert.Equal(NationRankAura.SilverFxId, NationRankAura.FxIdFor(3, king: false));
+    }
 }

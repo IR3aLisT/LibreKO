@@ -6,24 +6,50 @@ namespace LibreKO;
 
 public partial class World
 {
-    private const string BasicHitFx = "damage0_1";
-    private const string ElementHitFxSuffix = "_sword_target0_1";
+    private static readonly int[] StrikeHands = { InventoryConstants.VisRightHand, InventoryConstants.VisLeftHand };
 
-    private void SpawnHitImpact(Ent victim, int[]? attackerGear)
+    private void SpawnHitImpact(Ent victim, Node3D? attackerBody, int[]? attackerGear, bool npcAttacker, bool transformed, int strikeAnim)
     {
-        if (HitElement(attackerGear) is { } element)
+        var local = StrikeLocalPoint(victim, attackerBody);
+        int weaponFx = transformed ? StrikeEffect.None : WeaponStrikeEffect(attackerGear);
+        if (weaponFx != StrikeEffect.None)
         {
-            float centre = EntityLocalBox(victim).GetCenter().Y;
-            Fx.Spawn(element + ElementHitFxSuffix, victim.Body, new Vector3(0f, centre, 0f), oneShot: true, deferParts: true);
+            if (Fx.NameForId(weaponFx) is { } weaponHit)
+                Fx.Spawn(weaponHit, victim.Body, local, oneShot: true, deferParts: true);
             return;
         }
-        Fx.Spawn(BasicHitFx, this, RandomHitPoint(victim), oneShot: true, deferParts: true);
+        var (right, left, weight) = HandLoadout(attackerGear);
+        int blood = StrikeEffect.Blood(npcAttacker, right, strikeAnim, WeaponAnimation.BreathBase(right, left, weight),
+            n => (int)(GD.Randi() % (uint)n));
+        if (Fx.NameForId(blood) is { } bloodHit)
+            Fx.Spawn(bloodHit, this, victim.Body.GlobalTransform * local, oneShot: true, deferParts: true);
     }
 
-    private static string? HitElement(int[]? gear) =>
-        gear == null ? null
-        : WeaponElement(GearAt(gear, InventoryConstants.VisRightHand))
-          ?? WeaponElement(GearAt(gear, InventoryConstants.VisLeftHand));
+    private static Vector3 StrikeLocalPoint(Ent victim, Node3D? attackerBody)
+    {
+        var box = EntityLocalBox(victim);
+        if (attackerBody == null || !GodotObject.IsInstanceValid(attackerBody)) return box.GetCenter();
+        var toLocal = victim.Body.GlobalTransform.AffineInverse();
+        foreach (var child in attackerBody.GetChildren())
+        {
+            if (child is not WeaponTrail blade || !blade.BladeSegment(out var from, out var to)) continue;
+            if (StrikePoint.Entry(box, toLocal * from, toLocal * StrikePoint.Extended(from, to)) is { } entry) return entry;
+            break;
+        }
+        var attacker = toLocal * (attackerBody.GlobalPosition + Vector3.Up * box.GetCenter().Y);
+        return StrikePoint.Entry(box, attacker, box.GetCenter()) ?? StrikePoint.TowardAttacker(box, attacker);
+    }
+
+    private static int WeaponStrikeEffect(int[]? gear)
+    {
+        if (gear == null) return StrikeEffect.None;
+        foreach (int slot in StrikeHands)
+        {
+            int fx = StrikeEffect.FromGlow(ItemData.ExtFor(GearAt(gear, slot))?.GlowFx ?? 0);
+            if (fx != StrikeEffect.None) return fx;
+        }
+        return StrikeEffect.None;
+    }
 
     private static int GearAt(int[] gear, int slot) => slot < gear.Length ? gear[slot] : 0;
 
@@ -55,20 +81,10 @@ public partial class World
 
         void Walk(Node n)
         {
-            if (n is FxInstance or FxWeaponGlow) return;
+            if (n is FxInstance or FxWeaponGlow or Node3D { TopLevel: true }) return;
             if (n is MeshInstance3D mi) list.Add(mi);
             foreach (var c in n.GetChildren()) Walk(c);
         }
-    }
-
-    private Vector3 RandomHitPoint(Ent e)
-    {
-        var box = EntityLocalBox(e);
-        var p = box.Position + new Vector3(
-            box.Size.X * (0.5f + (GD.Randf() - 0.5f) * 0.55f),
-            box.Size.Y * Mathf.Lerp(0.30f, 0.85f, GD.Randf()),
-            box.Size.Z * (0.5f + (GD.Randf() - 0.5f) * 0.55f));
-        return e.Body.GlobalTransform * p;
     }
 
     private void SpawnFxOn(int id, string fxName, float y)
@@ -79,7 +95,7 @@ public partial class World
     }
 
     private static float ProjectileSpeedFor(string? fxName) =>
-        Mathf.Max(fxName != null ? Fx.AuthoredVelocity(fxName) : 0f, ProjectileFxSpeed);
+        fxName != null && Fx.AuthoredVelocity(fxName) is > 0f and var authored ? authored : ProjectileFxSpeed;
 
     private void LaunchFlight(int casterId, int targetId, SkillData.Skill s, short[] data, bool own)
     {
@@ -87,7 +103,7 @@ public partial class World
         if (s.IsMelee || s.SelfAnim2 != 0)
             PlaySkillAction(casterId, SkillAnim(casterId, s, true), ClipsForCast(s), ActionRankSkill);
         var from = WorldPosOf(casterId);
-        Vector3? impact = targetId < 0 ? AreaImpactPoint(data) : null;
+        Vector3? impact = targetId < 0 ? AreaImpactPoint(data, casterId) : null;
         var aim = impact ?? WorldPosOf(targetId);
         if (own) ClearPendingCast(s.Id);
         if (from == null || aim == null)
@@ -104,7 +120,7 @@ public partial class World
         for (int k = 0; k < offsets.Length; k++)
         {
             bool guided = k == 0 && !area && s.FlightHomes;
-            Vector3 end = area || guided ? aim.Value : from.Value + reach.Rotated(Vector3.Up, offsets[k]) + new Vector3(0f, rise, 0f);
+            Vector3 end = area || guided ? aim.Value : from.Value + StraightArrowSpan(reach, s, own).Rotated(Vector3.Up, offsets[k]) + new Vector3(0f, rise, 0f);
             if (!area && !guided && own && WorldPosOf(FirstHostileAlong(from.Value, end)) is { } struck) end = struck;
             if (s.FlyingFx != null)
                 SpawnFxProjectile(casterId, guided ? targetId : AreaImpactTarget, s.FlyingFx, 0f, guided ? null : end);
@@ -124,6 +140,15 @@ public partial class World
         }
     }
 
+    private Vector3 StraightArrowSpan(Vector3 reach, SkillData.Skill s, bool own)
+    {
+        float distance = reach.Length();
+        if (!own || distance <= 0f) return reach;
+        float range = s.Range > 0 ? s.Range : HandWeaponReach(rightFirst: false) * Mathf.Max(s.AddRange, 0) / ArrowRangePercent;
+        return distance >= range ? reach : reach / distance * range;
+    }
+
+    private const float ArrowRangePercent = 100f;
     private const int AreaImpactTarget = SkillFxTarget.AreaImpactTarget;
     private const float StraightArrowReachSlack = 0.5f;
 
@@ -136,8 +161,12 @@ public partial class World
         return Volley.FirstAlong(from.X, from.Z, to.X, to.Z, candidates);
     }
 
-    private Vector3? AreaImpactPoint(short[] data) =>
-        data.Length > 2 ? GroundPos(data[0], data[2], 0f, 0f) : null;
+    private Vector3? AreaImpactPoint(short[] data, int casterId)
+    {
+        if (data.Length <= 2) return null;
+        if (data[0] == 0 || data[2] == 0) return WorldPosOf(casterId);
+        return GroundPos(data[0], data[2], 0f, 0f);
+    }
 
     private double ProjectileTravelTime(int casterId, int targetId, string? fxName, Vector3? impact = null)
     {
@@ -178,20 +207,22 @@ public partial class World
     }
 
     private bool SpawnFxAtImpact(int casterId, int targetId, string fxName, int targetPart, short[] data,
-        bool areaCast)
+        bool areaCast, bool melee)
     {
         int entityId = targetId == 0 ? casterId : targetId;
-        switch (SkillFxTarget.Placement(targetPart, targetId, areaCast))
+        switch (SkillFxTarget.Placement(targetPart, targetId, areaCast, melee))
         {
             case ImpactFxPlacement.UnderEntity:
                 Node3D? body = entityId == _myId ? _self : (_ents.TryGetValue(entityId, out var e) ? e.Body : null);
                 if (body == null) return false;
-                Fx.Spawn(fxName, this, body.GlobalPosition + new Vector3(0, 0.15f, 0), oneShot: true, deferParts: true);
+                Fx.Spawn(fxName, this, body.GlobalPosition + new Vector3(0, 0.15f, 0), oneShot: true,
+                    sizeScale: TargetFxWorldSize(fxName, casterId, entityId), deferParts: true);
                 return true;
             case ImpactFxPlacement.OnEntity:
-                SpawnOwnedFx(entityId, 0, 3, fxName, targetPart, oneShot: true);
+                SpawnOwnedFx(entityId, 0, 3, fxName, targetPart, oneShot: true,
+                    sizeScale: TargetFxPinnedSize(fxName, casterId, entityId));
                 return true;
-            case ImpactFxPlacement.AtImpactPoint when AreaImpactPoint(data) is { } point:
+            case ImpactFxPlacement.AtImpactPoint when AreaImpactPoint(data, casterId) is { } point:
                 Fx.Spawn(fxName, this, point + new Vector3(0, 0.15f, 0), oneShot: true, deferParts: true);
                 return true;
             default:
@@ -200,18 +231,34 @@ public partial class World
     }
 
     private void SpawnOwnedFx(int entityId, int skillId, int phase, string fxName, int encodedPart,
-        bool oneShot = false)
+        bool oneShot = false, float sizeScale = 1f)
     {
         int value = Mathf.Abs(encodedPart);
         int first = value % 1000;
         int second = value / 1000;
-        SpawnOwnedFxPart(entityId, skillId, phase, fxName, first, encodedPart < 0, oneShot);
+        SpawnOwnedFxPart(entityId, skillId, phase, fxName, first, encodedPart < 0, oneShot, sizeScale);
         if (second > 0)
-            SpawnOwnedFxPart(entityId, skillId, phase, fxName, second, encodedPart < 0, oneShot);
+            SpawnOwnedFxPart(entityId, skillId, phase, fxName, second, encodedPart < 0, oneShot, sizeScale);
+    }
+
+    private float TargetFxWorldSize(string fxName, int casterId, int targetId)
+    {
+        if (targetId == casterId || !Fx.UsesTargetScale(fxName)) return 1f;
+        if (targetId == _myId || !_ents.TryGetValue(targetId, out var e))
+            return FxTargetScale.WorldSize(FxTargetScale.PlayerWidth, FxTargetScale.PlayerWidth, FxTargetScale.PlayerHeight);
+        var size = EntityLocalBox(e).Size * e.Body.Scale;
+        return FxTargetScale.WorldSize(size.X, size.Z, size.Y);
+    }
+
+    private float TargetFxPinnedSize(string fxName, int casterId, int targetId)
+    {
+        float world = TargetFxWorldSize(fxName, casterId, targetId);
+        bool scaled = targetId != casterId && targetId != _myId && Fx.UsesTargetScale(fxName);
+        return scaled && _ents.TryGetValue(targetId, out var e) ? FxTargetScale.ForPinned(world, e.Body.Scale.Y) : world;
     }
 
     private void SpawnOwnedFxPart(int entityId, int skillId, int phase, string fxName, int part,
-        bool worldSentinel, bool oneShot)
+        bool worldSentinel, bool oneShot, float sizeScale = 1f)
     {
         Node3D? body = entityId == _myId ? _self : (_ents.TryGetValue(entityId, out var e) ? e.Body : null);
         if (body == null) return;
@@ -225,7 +272,7 @@ public partial class World
             ownerSkeleton = skel;
         }
         Vector3 offset = Vector3.Zero;
-        var node = Fx.Spawn(fxName, owner, offset, oneShot, deferParts: true);
+        var node = Fx.Spawn(fxName, owner, offset, oneShot, sizeScale: sizeScale, deferParts: true);
         if (node == null)
         {
             if (owner != body) owner.QueueFree();
@@ -247,18 +294,38 @@ public partial class World
         list.Add(node);
     }
 
+    private static readonly int[] SkillFxPhases = { 1, 2, 3 };
+    private const double SkillFxSweepSeconds = 10.0;
+    private double _skillFxSweepAt;
+
     private void StopSkillFx(int casterId, int skillId, int? phase = null)
     {
-        var keys = new List<(int Caster, int Skill, int Phase)>();
-        foreach (var key in _skillFx.Keys)
-            if (key.Caster == casterId && key.Skill == skillId && (!phase.HasValue || key.Phase == phase.Value))
-                keys.Add(key);
-        foreach (var key in keys)
+        if (phase is int one)
         {
-            foreach (var node in _skillFx[key])
-                Fx.Free(node);
-            _skillFx.Remove(key);
+            StopSkillFxKey((casterId, skillId, one));
+            return;
         }
+        foreach (int each in SkillFxPhases) StopSkillFxKey((casterId, skillId, each));
+    }
+
+    private void StopSkillFxKey((int Caster, int Skill, int Phase) key)
+    {
+        if (!_skillFx.Remove(key, out var list)) return;
+        foreach (var node in list) Fx.Free(node);
+    }
+
+    private void SweepSkillFx(double now)
+    {
+        if (now < _skillFxSweepAt) return;
+        _skillFxSweepAt = now + SkillFxSweepSeconds;
+        List<(int Caster, int Skill, int Phase)>? empty = null;
+        foreach (var (key, list) in _skillFx)
+        {
+            list.RemoveAll(node => !GodotObject.IsInstanceValid(node) || node.IsQueuedForDeletion());
+            if (list.Count == 0) (empty ??= new()).Add(key);
+        }
+        if (empty == null) return;
+        foreach (var key in empty) _skillFx.Remove(key);
     }
 
     private void ForgetSkillFx(int casterId)

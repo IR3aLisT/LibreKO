@@ -23,6 +23,8 @@ public partial class Net
     private const byte UpgradeReverseSub = 7;
     private const byte UpgradeSealSub = 8;
     private const int SealRequestNoWindow = -1;
+    private const int BindRequestFromBag = 0;
+    private const string BindRequestCode = "1";
     private const byte UpgradeRequestNormal = 1;
     private const byte UpgradeRequestPreview = 2;
     private const byte UpgradeResultFailed = 0;
@@ -50,6 +52,9 @@ public partial class Net
             case UpgradeSealSub:
                 HandleSealResult(p);
                 break;
+            case CharacterSealWire.Sub:
+                HandleCharacterSeal(p);
+                break;
             case PieceChangeOpenSub:
                 HandlePieceChangeOpen(p);
                 break;
@@ -64,6 +69,9 @@ public partial class Net
                 break;
             case ItemCombineSub:
                 HandleItemCombineReply(p);
+                break;
+            case ItemSmashSub:
+                HandleItemSmashReply(p);
                 break;
             default:
                 NpcWindowEvent?.Invoke(GameOpcodes.GS_ITEM_UPGRADE);
@@ -94,6 +102,18 @@ public partial class Net
         p.WriteInt(itemId);
         p.WriteByte(srcPos);
         p.WriteString(code);
+        _conn.Send(p);
+    }
+
+    public void SendItemBind(int itemId, byte srcPos)
+    {
+        var p = new Packet(GameOpcodes.GS_ITEM_UPGRADE);
+        p.WriteByte(UpgradeSealSub);
+        p.WriteByte((byte)ItemSealType.Bind);
+        p.WriteInt(BindRequestFromBag);
+        p.WriteInt(itemId);
+        p.WriteByte(srcPos);
+        p.WriteString(BindRequestCode);
         _conn.Send(p);
     }
 

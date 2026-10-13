@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Services;
+﻿using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Configuration;
 using LibreKO.Game.Protocol;
@@ -27,6 +27,7 @@ public class PlayerProgressionService(
     IUserNotificationService userNotificationService,
     ICharacterStatePersister characterStatePersister,
     IAchievementProgressService achievementProgressService,
+    IPartyLevelProgressService partyLevelProgress,
     SessionManager sessionManager,
     LibreKO.Game.Scripting.IQuestDefinitionSource? quests = null) : IPlayerProgressionService
 {
@@ -83,9 +84,14 @@ public class PlayerProgressionService(
         }
 
         if (leveledUp)
+        {
             await BroadcastLevelChangeAsync(session);
+            await partyLevelProgress.ProgressChangedAsync(session);
+        }
         else
+        {
             await SendExperienceAsync(session);
+        }
     }
 
     public async Task SetLevelAsync(UserSession session, byte level)
@@ -158,6 +164,10 @@ public class PlayerProgressionService(
         if (premiumExpPercent > 0)
             expGain = expGain * (100 + premiumExpPercent) / 100;
 
+        var clanExpPercent = session.KnightsId > 0 ? ClanOnlineBonus.ExpPercent(session.ClanOnlineCount) : 0;
+        if (clanExpPercent > 0)
+            expGain = expGain * (100 + clanExpPercent) / 100;
+
         var kingExpBonus = kingEventState.GetExpBonus(session.Nation);
         if (kingExpBonus > 0)
             expGain = expGain * (100 + kingExpBonus) / 100;
@@ -206,6 +216,12 @@ public class PlayerProgressionService(
             session.Mp = Math.Min(session.Mp, session.MaxMp);
         }
 
+        if (KurianStamina.Applies(session))
+        {
+            KurianStamina.Refill(session);
+            await session.Client.SendPacket(VitalsPacketWriter.StaminaChange(session.KurianMaxSp, session.KurianSp));
+        }
+
         await achievementProgressService.RefreshAsync(session);
 
         if (broadcast)
@@ -242,26 +258,12 @@ public class PlayerProgressionService(
         await combatNotificationService.SendPartyLevelUpdateAsync(session);
     }
 
-    private static async Task SendExperienceAsync(UserSession session)
+    private async Task SendExperienceAsync(UserSession session)
     {
         await session.Client.SendPacket(ExperiencePacketWriter.Current(session.Experience));
+        await partyLevelProgress.ProgressChangedAsync(session);
     }
 
     private int GetPremiumExpPercent(UserSession session)
-    {
-        if (session.PremiumType == 0)
-            return 0;
-
-        foreach (var entry in gameDataService.PremiumItemExpTable)
-        {
-            if (entry.Type == session.PremiumType
-                && session.Level >= entry.MinLevel
-                && session.Level <= entry.MaxLevel)
-            {
-                return entry.Percent;
-            }
-        }
-
-        return 0;
-    }
+        => PremiumBonusList.ExperiencePercent(gameDataService.PremiumItemExpTable, session.PremiumType, session.Level);
 }

@@ -15,7 +15,8 @@ public partial class World : Node3D
 
     private const int InvCols = 7;
     private const int InvMinVisibleRows = 4;
-    private const float InvWindowFixedHeight = 540f;
+    private const float InvWindowFixedHeight = 576f;
+    private LineEdit? _invSearch;
     private const int ArrangeIconSize = 16;
     private const float InvCellSize = 40f;
     private const float InvCellGap = 4f;
@@ -25,8 +26,7 @@ public partial class World : Node3D
 
     private CanvasLayer _invLayer = null!;
     private Control _invContent = null!;
-    private PanelContainer _itemTipPanel = null!;
-    private VBoxContainer _itemTipLines = null!;
+    private ItemTipView _itemTipPanel = null!;
     private ItemCell? _hoverCell;
     private readonly Dictionary<int, ItemCell> _invCells = new();
     private readonly List<ItemCell> _invBagCells = new();
@@ -41,10 +41,14 @@ public partial class World : Node3D
     private TrashSlot _invTrash = null!;
 
     private PanelContainer _invDelPanel = null!;
-    private TextureRect _invDelIcon = null!;
-    private Label _invDelName = null!;
-    private int _invDelSlot = -1;
-    private int _invDelItemId;
+    private Label _invDelTitle = null!;
+    private VBoxContainer _invDelList = null!;
+    private ScrollContainer _invDelScroll = null!;
+    private readonly DestroyQueue _invDelQueue = new();
+    private const int DestroyRowsShown = 6;
+    private const float DestroyRowHeight = 30f;
+    private const float DestroyIconSize = 26f;
+    private static readonly Color DestroyNameTint = new(1f, 0.62f, 0.55f);
 
     private static readonly (int Slot, string Label, float Angle)[] DollOuterRing =
     {
@@ -87,18 +91,29 @@ public partial class World : Node3D
 
     private readonly struct TooltipLine
     {
+        public const int NoGauge = -1;
+
         public readonly string Text;
-        public readonly int Color;
+        public readonly Color Tint;
         public readonly HorizontalAlignment Align;
         public readonly bool Divider;
+        public readonly int Gauge;
 
-        public TooltipLine(string text, int color,
-            HorizontalAlignment align = HorizontalAlignment.Left, bool divider = false)
+        public TooltipLine(string text, int color, HorizontalAlignment align = HorizontalAlignment.Left)
+            : this(text, Config.TooltipColor(color), align)
         {
-            Text = text; Color = color; Align = align; Divider = divider;
         }
 
-        public static TooltipLine Rule() => new("", 0, HorizontalAlignment.Left, true);
+        public TooltipLine(string text, Color tint, HorizontalAlignment align = HorizontalAlignment.Left,
+            bool divider = false, int gauge = NoGauge)
+        {
+            Text = text; Tint = tint; Align = align; Divider = divider; Gauge = gauge;
+        }
+
+        public static TooltipLine Rule() => new("", Colors.White, HorizontalAlignment.Left, divider: true);
+
+        public static TooltipLine Gauged(string text, Color tint, int percent) =>
+            new(text, tint, HorizontalAlignment.Left, gauge: percent);
     }
 
     private struct MoveStep
@@ -110,6 +125,7 @@ public partial class World : Node3D
         public int PetPos;
         public int PetIndex;
         public ItemSlot PetBagItem, PetItem;
+        public ushort Amount;
     }
     private readonly Queue<MoveStep> _moveQueue = new();
     private bool _moveInFlight;
@@ -155,6 +171,7 @@ public partial class World : Node3D
         RefreshInventoryUI();
         GetViewport().SizeChanged += RefreshInventoryUI;
         Net.I.ItemMoveResultEvent += OnItemMoveResult;
+        Net.I.InventoryArrangeFailedEvent += OnInventoryArrangeFailed;
         Net.I.ItemRemoveResultEvent += OnItemRemoveResult;
         Net.I.InventorySlotEvent += OnInventorySlotUpdate;
         Net.I.ItemGainedEvent += OnItemGained;
@@ -190,6 +207,7 @@ public partial class World : Node3D
         _invLower.AddThemeConstantOverride("separation", 8);
         body.AddChild(_invLower);
         _invLower.AddChild(BuildBagRow());
+        _invLower.AddChild(BuildBagSearchRow());
         _invLower.AddChild(BuildInventoryGrid());
         _invLower.AddChild(BuildInventoryFooter());
 
@@ -217,11 +235,11 @@ public partial class World : Node3D
             row.AddChild(cell);
         }
 
-        var pack = UiTheme.IconButton(UiIcons.Get("system/arrange"), "Arrange: sort the bag and close up the gaps");
-        pack.CustomMinimumSize = new Vector2(BagCellSize, BagCellSize);
-        pack.AddThemeConstantOverride("icon_max_width", ArrangeIconSize);
-        pack.Pressed += () => Net.I.SendInventoryArrange();
-        row.AddChild(pack);
+        var vault = UiTheme.IconButton(UiIcons.Get(VaultIcon), "VIP Vault");
+        vault.CustomMinimumSize = new Vector2(BagCellSize, BagCellSize);
+        vault.AddThemeConstantOverride("icon_max_width", ArrangeIconSize);
+        vault.Pressed += OpenVipVaultFromBag;
+        row.AddChild(vault);
 
         row.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
         row.AddChild(UiIcons.Image("system/coins", new Vector2(15, 15), new Color(UiTheme.Gold, 0.9f), "Gold"));
@@ -229,6 +247,82 @@ public partial class World : Node3D
         _invGoldLbl.AddThemeColorOverride("font_color", UiTheme.Gold);
         row.AddChild(_invGoldLbl);
         return row;
+    }
+
+    private const string VaultIcon = "system/key";
+    private const string PremiumCashIcon = "system/gem";
+    private const int BagHeaderGap = 8;
+    private static readonly Color PremiumCashColour = new("4fb8ff");
+    private Button? _invCashBtn;
+
+    private Control BuildBagSearchRow()
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", BagHeaderGap);
+        _invSearch = new LineEdit
+        {
+            PlaceholderText = "Search the bag",
+            ClearButtonEnabled = true,
+            CustomMinimumSize = new Vector2(BagCellSize * InventoryConstants.BagSlotMax + BagHeaderGap * (InventoryConstants.BagSlotMax - 1), BagCellSize),
+        };
+        _invSearch.AddThemeFontSizeOverride("font_size", 13);
+        _invSearch.TextChanged += _ => RefreshBagSearch();
+        row.AddChild(_invSearch);
+
+        _arrangeBtn = UiTheme.IconButton(UiIcons.Get("system/arrange"), "Arrange: sort the bag and close up the gaps");
+        _arrangeBtn.CustomMinimumSize = new Vector2(BagCellSize, BagCellSize);
+        _arrangeBtn.AddThemeConstantOverride("icon_max_width", ArrangeIconSize);
+        _arrangeBtn.Pressed += AskArrange;
+        row.AddChild(_arrangeBtn);
+
+        row.AddChild(new Control { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill });
+        _invCashBtn = new Button
+        {
+            Icon = UiIcons.Get(PremiumCashIcon),
+            Flat = true,
+            FocusMode = Control.FocusModeEnum.None,
+            Alignment = HorizontalAlignment.Right,
+            TooltipText = "Premium cash - open the Power-Up Store",
+            MouseDefaultCursorShape = Control.CursorShape.PointingHand,
+        };
+        _invCashBtn.AddThemeConstantOverride("icon_max_width", ArrangeIconSize);
+        _invCashBtn.AddThemeFontSizeOverride("font_size", 13);
+        foreach (string state in new[] { "font_color", "font_hover_color", "font_pressed_color", "font_focus_color" })
+            _invCashBtn.AddThemeColorOverride(state, PremiumCashColour);
+        foreach (string state in new[] { "icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color" })
+            _invCashBtn.AddThemeColorOverride(state, PremiumCashColour);
+        _invCashBtn.Pressed += ToggleShoppingMall;
+        row.AddChild(_invCashBtn);
+        RefreshInventoryCash();
+        return row;
+    }
+
+    private void RefreshInventoryCash()
+    {
+        if (_invCashBtn == null || !GodotObject.IsInstanceValid(_invCashBtn)) return;
+        _invCashBtn.Text = $"{Sheet.KnightCash:n0}";
+    }
+
+    private void RefreshBagSearch()
+    {
+        string text = _invSearch?.Text ?? "";
+        bool searching = !new ItemQuery(text).IsEmpty;
+        var ids = new int[Inv.Length];
+        for (int i = 0; i < ids.Length; i++) ids[i] = BagSearch.Searchable(i) ? Inv[i].ItemId : 0;
+        var hits = searching ? WarehouseView.Matches(ids, text, ItemData.DisplayName) : new HashSet<int>();
+        foreach (var cell in _invBagCells) MarkSearch(cell, searching, hits);
+        foreach (var cell in _invMagicBagCells) MarkSearch(cell, searching, hits);
+        var bags = BagSearch.BagsHoldingHits(hits);
+        for (int i = 0; i < InventoryConstants.BagSlotMax; i++)
+            if (_invCells.TryGetValue(InventoryConstants.BagSlotFor(i), out var bagCell))
+                bagCell.SearchHit = bags[i] && !BagShown(i);
+    }
+
+    private static void MarkSearch(ItemCell cell, bool searching, HashSet<int> hits)
+    {
+        bool hit = searching && cell.Slot >= 0 && hits.Contains(cell.Slot);
+        cell.SearchHit = hit;
+        cell.SearchMiss = searching && !hit;
     }
 
     private static float InvGridWidth => InvCols * (InvCellSize + InvCellGap) - InvCellGap;
@@ -354,6 +448,16 @@ public partial class World : Node3D
             float x = (i - (DollCenter.Length - 1) / 2f) * 2f * DollCenterOffset;
             board.AddChild(DollCellAt(slot, label, center + new Vector2(x, 0f)));
         }
+        _costumeToggle = LookToggle("game/shoulder", ToggleCostume);
+        _costumeToggle.Position = new Vector2(LookToggleInset, LookToggleInset);
+        board.AddChild(_costumeToggle);
+        _helmetToggle = LookToggle("game/helmet", ToggleHelmet);
+        _helmetToggle.Position = new Vector2(span - LookToggleSize - LookToggleInset, LookToggleInset);
+        board.AddChild(_helmetToggle);
+        _rankAuraToggle = LookToggle(RankAuraToggleIcon, ToggleRankAura);
+        _rankAuraToggle.Position = new Vector2(LookToggleInset, span - LookToggleSize - LookToggleInset);
+        board.AddChild(_rankAuraToggle);
+        RefreshLookToggles();
         return board;
     }
 
@@ -486,6 +590,7 @@ public partial class World : Node3D
     private void RefreshInventoryUI()
     {
         PluginNotifyInventory();
+        RefreshTimedItemsIcon();
         if (_whShown) RefreshWarehouse();
         if (_vipWhShown) RefreshVipWarehouse();
         if (_clanWhShown) RefreshClanWarehouse();
@@ -506,6 +611,7 @@ public partial class World : Node3D
             _invMagicBagCells[i].Bind(open ? slot : -1, open ? SlotAt(slot) : default);
             if (open) shownCells++;
         }
+        ShadeChaosItems();
         int contentRows = Mathf.CeilToInt(shownCells / (float)InvCols);
         _invRowsShown = InvVisibleRows();
         bool scrollbar = contentRows > _invRowsShown;
@@ -515,10 +621,13 @@ public partial class World : Node3D
         _invLower.CustomMinimumSize = new Vector2(lowerWidth, 0f);
         RefreshInventoryFooter();
         RefreshTracker();
+        RefreshBagSearch();
 
-        if (_invDelSlot >= 0
-            && (_invDelSlot >= Inv.Length || Inv[_invDelSlot].ItemId != _invDelItemId))
-            HideDeletePrompt();
+        if (_invDelQueue.Count > 0 && !_invDelQueue.Running)
+        {
+            _invDelQueue.DropStale((slot, itemId) => slot < Inv.Length && Inv[slot].ItemId == itemId);
+            ShowDeleteCard();
+        }
 
         if (_hoverCell != null)
         {
@@ -528,6 +637,17 @@ public partial class World : Node3D
                 ShowItemTooltip(_hoverCell.Slot, _hoverCell.Current, _bagCompanion?.Note(_hoverCell.Slot) ?? "");
         }
         ApplyBagFit();
+    }
+
+    private static readonly Color ChaosShade = new(0.45f, 0.45f, 0.45f);
+
+    private void ShadeChaosItems()
+    {
+        foreach (var cell in _invCells.Values.Concat(_invBagCells).Concat(_invMagicBagCells))
+        {
+            var item = cell.Current.IsEmpty ? null : ItemData.Get(cell.Current.ItemId);
+            cell.Shaded = InChaosZone && item != null && !ChaosBattle.ItemUsable(_zone, item.Kind);
+        }
     }
 
     private ItemSlot SlotAt(int abs) => abs >= 0 && abs < Inv.Length ? _bagHold.Shown(abs, Inv[abs]) : default;
@@ -581,25 +701,16 @@ public partial class World : Node3D
         root.AddThemeConstantOverride("separation", 8);
         margin.AddChild(root);
 
-        var head = new HBoxContainer();
-        head.AddThemeConstantOverride("separation", 8);
-        root.AddChild(head);
-        _invDelIcon = new TextureRect
-        {
-            CustomMinimumSize = new Vector2(30, 30),
-            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-        };
-        head.AddChild(_invDelIcon);
-        var headText = new VBoxContainer { SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
-        headText.AddThemeConstantOverride("separation", 1);
-        head.AddChild(headText);
-        headText.AddChild(UiTheme.Text("Destroy this item?", 13, UiTheme.TextHi));
-        _invDelName = UiTheme.Text("", 12, new Color(1f, 0.62f, 0.55f));
-        _invDelName.AddThemeColorOverride("font_color", new Color(1f, 0.62f, 0.55f));
-        _invDelName.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        _invDelName.CustomMinimumSize = new Vector2(158, 0);
-        headText.AddChild(_invDelName);
+        _invDelTitle = UiTheme.Text("Destroy this item?", 13, UiTheme.TextHi);
+        root.AddChild(_invDelTitle);
+        _invDelScroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+        root.AddChild(_invDelScroll);
+        _invDelList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        _invDelList.AddThemeConstantOverride("separation", 4);
+        _invDelScroll.AddChild(_invDelList);
+        var more = UiTheme.Text("Drop more items on the well to add them.", 11, new Color(UiTheme.TextLo, 0.7f));
+        more.AddThemeColorOverride("font_color", new Color(UiTheme.TextLo, 0.7f));
+        root.AddChild(more);
 
         var buttons = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
         buttons.AddThemeConstantOverride("separation", 8);
@@ -619,25 +730,67 @@ public partial class World : Node3D
     private void AskDeleteItem(int absSlot)
     {
         if (absSlot < 0 || absSlot >= Inv.Length || Inv[absSlot].IsEmpty) return;
-        if (absSlot >= InventoryConstants.CospreStart) return;
+        if (ItemMove.RegionOf(absSlot) is not (ItemMove.Region.Equip or ItemMove.Region.Grid or ItemMove.Region.MagicBag)) return;
         if (RefuseItemInUse(absSlot)) return;
+        if (IsCypherRing(Inv[absSlot]))
+        {
+            CharacterSealLog(CharacterSeal.RingNotDestroyableText, CharacterSealBadColour, "Sealed items cannot be destroyed.");
+            return;
+        }
+        if (!_invDelQueue.Add(absSlot, Inv[absSlot].ItemId)) return;
 
-        _invDelSlot = absSlot;
-        _invDelItemId = Inv[absSlot].ItemId;
-        _invDelIcon.Texture = ItemData.Icon(_invDelItemId);
-        int count = Inv[absSlot].Count;
-        _invDelName.Text = count > 1
-            ? $"{ItemData.DisplayName(_invDelItemId)} ×{count}"
-            : ItemData.DisplayName(_invDelItemId);
-        _invDelPanel.Visible = true;
-        UpdateDeletePrompt();
+        ShowDeleteCard();
         Audio.PlayUi(Sfx.MsgBoxPop);
+    }
+
+    private void ShowDeleteCard()
+    {
+        if (_invDelQueue.Count == 0) { HideDeletePrompt(); return; }
+        _invDelTitle.Text = _invDelQueue.Count == 1 ? "Destroy this item?" : $"Destroy these {_invDelQueue.Count} items?";
+        foreach (var child in _invDelList.GetChildren()) child.QueueFree();
+        foreach (var entry in _invDelQueue.Entries) _invDelList.AddChild(DestroyRow(entry));
+        _invDelScroll.CustomMinimumSize = new Vector2(0,
+            Mathf.Min(_invDelQueue.Count, DestroyRowsShown) * (DestroyRowHeight + 4f) - 4f);
+        _invDelPanel.Visible = true;
+        _invDelPanel.ResetSize();
+        UpdateDeletePrompt();
+    }
+
+    private Control DestroyRow(DestroyQueue.Entry entry)
+    {
+        var row = new HBoxContainer { CustomMinimumSize = new Vector2(0, DestroyRowHeight) };
+        row.AddThemeConstantOverride("separation", 8);
+        row.AddChild(new TextureRect
+        {
+            Texture = ItemData.Icon(entry.ItemId),
+            CustomMinimumSize = new Vector2(DestroyIconSize, DestroyIconSize),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        });
+        int count = entry.Slot < Inv.Length ? Inv[entry.Slot].Count : 0;
+        var name = UiTheme.Text(count > 1 ? $"{ItemData.DisplayName(entry.ItemId)} ×{count}" : ItemData.DisplayName(entry.ItemId),
+            12, DestroyNameTint);
+        name.AddThemeColorOverride("font_color", DestroyNameTint);
+        name.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        name.VerticalAlignment = VerticalAlignment.Center;
+        name.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis;
+        name.CustomMinimumSize = new Vector2(150, 0);
+        row.AddChild(name);
+        var drop = new Button { Text = "✕", Flat = true, FocusMode = Control.FocusModeEnum.None, TooltipText = "Keep this item" };
+        drop.AddThemeFontSizeOverride("font_size", 11);
+        drop.Pressed += () =>
+        {
+            _invDelQueue.Remove(entry.Slot);
+            ShowDeleteCard();
+        };
+        row.AddChild(drop);
+        return row;
     }
 
     private void HideDeletePrompt()
     {
-        _invDelSlot = -1;
-        _invDelItemId = 0;
+        if (!_invDelQueue.Running) _invDelQueue.Clear();
         if (_invDelPanel != null && GodotObject.IsInstanceValid(_invDelPanel))
             _invDelPanel.Visible = false;
     }
@@ -663,20 +816,54 @@ public partial class World : Node3D
 
     private void ConfirmDeleteItem()
     {
-        int slot = _invDelSlot;
-        int itemId = _invDelItemId;
-        HideDeletePrompt();
-        if (slot < 0 || slot >= Inv.Length || Inv[slot].ItemId != itemId) return;
-        if (InventoryMoveBusy || _selfDead) return;
-
-        if (slot < GridStart) Net.I.SendItemRemove(1, (byte)slot, itemId);
-        else Net.I.SendItemRemove(0, (byte)(slot - GridStart), itemId);
+        if (InventoryMoveBusy || _selfDead) { HideDeletePrompt(); return; }
+        _invDelQueue.DropStale((slot, itemId) => slot < Inv.Length && Inv[slot].ItemId == itemId);
+        var first = _invDelQueue.Start();
+        if (_invDelPanel != null && GodotObject.IsInstanceValid(_invDelPanel)) _invDelPanel.Visible = false;
+        if (first is { } entry) SendDestroy(entry);
         Audio.PlayUi(Sfx.UiButton);
     }
 
-    private void OnItemRemoveResult(bool ok)
+    private void SendDestroy(DestroyQueue.Entry entry)
     {
-        if (!ok) { CombatNotice("That item could not be destroyed."); return; }
+        int slot = entry.Slot;
+        if (slot >= Inv.Length || Inv[slot].ItemId != entry.ItemId)
+        {
+            if (_invDelQueue.Advance(ok: true) is { } next) SendDestroy(next);
+            return;
+        }
+        var region = ItemMove.RegionOf(slot);
+        byte source = region switch
+        {
+            ItemMove.Region.Equip => ItemRemove.FromEquipment,
+            ItemMove.Region.MagicBag => ItemRemove.FromMagicBag,
+            _ => ItemRemove.FromInventory,
+        };
+        Net.I.SendItemRemove(source, (byte)ItemMove.PositionIn(region, slot), entry.ItemId);
+    }
+
+    private const int RemoveNoVipPassword = 20;
+    private const int RemoveVipPasswordLocked = 21;
+    private const int RemoveWrongVipPassword = 22;
+    private const int NoVipPasswordText = 32150;
+    private const int WrongVipPasswordText = 15113;
+    private const int SystemErrorText = 16506;
+    private const string VipPasswordLockedText = "The VIP key password was entered wrong three times.";
+
+    private void OnItemRemoveResult(bool ok, int reason)
+    {
+        if (_invDelQueue.Running && _invDelQueue.Advance(ok) is { } next) SendDestroy(next);
+        if (!ok)
+        {
+            Notice.Show(this, reason switch
+            {
+                RemoveNoVipPassword => ItemData.Text(NoVipPasswordText, "Set a VIP key password first."),
+                RemoveVipPasswordLocked => VipPasswordLockedText,
+                RemoveWrongVipPassword => ItemData.Text(WrongVipPasswordText, "Wrong VIP Key Password"),
+                _ => ItemData.Text(SystemErrorText, "System Error"),
+            });
+            return;
+        }
         RefreshInventoryUI();
     }
 
@@ -713,13 +900,20 @@ public partial class World : Node3D
         return gear;
     }
 
-    private void RerenderSelfEquipment()
+    private string? _selfDressKey;
+
+    private void RerenderSelfEquipment(bool force = false)
     {
         if (_self == null) return;
         var gear = SelfGear();
+        string key = DressKey(PlayerRig.LookRace(_selfRace, _selfClass), _selfFace, gear, _selfHair,
+            Net.I.HelmetHidden, Net.I.CostumeHidden);
+        if (key == _selfDressKey && !force) return;
+        _selfDressKey = key;
         RestorePartDefaults(_self, _selfDefaultParts);
-        GraftEquipment(_self, _selfRace, _selfFace, gear, _selfHair, Net.I.HelmetHidden);
-        AttachWeapons(_self, gear);
+        GraftEquipment(_self, PlayerRig.LookRace(_selfRace, _selfClass), _selfFace, gear, _selfHair, Net.I.HelmetHidden,
+            Net.I.CostumeHidden);
+        AttachWeapons(_self, gear, new HandWearer(_selfRace));
         _selfWingAnims = DressAccessories(_self, gear, _selfRace, shineShadow: true);
         System.Array.Clear(_selfWingClips);
         if (_selfSitting)
@@ -736,8 +930,8 @@ public partial class World : Node3D
         public System.Action<int>? OnContext;
         public System.Action<int>? OnClick;
         public System.Action<ItemCell, bool>? OnHoverChanged;
-        public System.Action<int, int>? OnDropItem;
-        public System.Func<int, int, bool>? OnCompanionDrop;
+        public System.Action<int, int, int>? OnDropItem;
+        public System.Func<int, int, int?, bool>? OnCompanionDrop;
         public ItemSlot Current { get; private set; }
         private readonly TextureRect _icon;
         private readonly LockGlyph _lockIcon;
@@ -752,27 +946,63 @@ public partial class World : Node3D
                 if (_locked == value) return;
                 _locked = value;
                 _lockIcon.Visible = value;
-                AddThemeStyleboxOverride("panel", value ? _lockedStyle : _normal);
+                AddThemeStyleboxOverride("panel", RestStyle);
             }
         }
         private readonly Label _count;
         private readonly Label _hint;
         private readonly UpgradeBadge _plus;
+        private readonly IconVeilView _veil;
         private string _emptyHint = "";
         private StyleBoxFlat _normal;
         private StyleBoxFlat _hover;
         private readonly StyleBoxFlat _lockedStyle = LockedStyle();
+        private readonly StyleBoxFlat _hitStyle = UiTheme.Slot(UiTheme.GoldBright);
         private static readonly Color UnfitTint = new(1f, 0.6f, 0.6f, 0.45f);
         private static readonly Color StagedTint = new(1f, 1f, 1f, 0.45f);
+        private static readonly Color SearchMissTint = new(1f, 1f, 1f, 0.32f);
+        private BagFit _fit;
+        private bool _searchMiss;
+        private bool _shaded;
+
+        public bool Shaded
+        {
+            set { if (_shaded == value) return; _shaded = value; ApplyTint(); }
+        }
+        private bool _searchHit;
 
         public BagFit Fit
         {
-            set => Modulate = value switch
+            set { _fit = value; ApplyTint(); }
+        }
+
+        public bool SearchMiss
+        {
+            set { _searchMiss = value; ApplyTint(); }
+        }
+
+        public bool SearchHit
+        {
+            set
+            {
+                if (_searchHit == value) return;
+                _searchHit = value;
+                AddThemeStyleboxOverride("panel", RestStyle);
+            }
+        }
+
+        private StyleBoxFlat RestStyle => _locked ? _lockedStyle : _searchHit ? _hitStyle : _normal;
+
+        private void ApplyTint()
+        {
+            Color tint = _fit switch
             {
                 BagFit.Unfit => UnfitTint,
                 BagFit.Staged => StagedTint,
                 _ => Colors.White,
             };
+            if (_searchMiss) tint *= SearchMissTint;
+            Modulate = _shaded ? tint * ChaosShade : tint;
         }
 
         public ItemCell(int slot, float size = 46f)
@@ -830,6 +1060,7 @@ public partial class World : Node3D
             };
             AddChild(_lockIcon);
 
+            _veil = IconVeilView.Attach(this);
             _plus = UpgradeBadge.Attach(this);
 
             _count = HudStyle.Label(12, HorizontalAlignment.Right);
@@ -855,7 +1086,7 @@ public partial class World : Node3D
             MouseExited += () =>
             {
                 if (_locked) return;
-                AddThemeStyleboxOverride("panel", _normal);
+                AddThemeStyleboxOverride("panel", RestStyle);
                 OnHoverChanged?.Invoke(this, false);
             };
         }
@@ -878,7 +1109,7 @@ public partial class World : Node3D
             {
                 _normal = UiTheme.Slot(value);
                 _hover = UiTheme.Slot(value, hover: true);
-                AddThemeStyleboxOverride("panel", _locked ? _lockedStyle : _normal);
+                AddThemeStyleboxOverride("panel", RestStyle);
             }
         }
 
@@ -921,10 +1152,11 @@ public partial class World : Node3D
                 _icon.Texture = null;
                 _count.Text = "";
                 _plus.Clear();
+                _veil.Clear();
                 _emptyIcon.Visible = _emptyIcon.Texture != null;
                 _hint.Visible = _emptyIcon.Texture == null && _hint.Text.Length > 0;
                 _icon.SelfModulate = Colors.White;
-                if (!_locked) AddThemeStyleboxOverride("panel", _normal);
+                if (!_locked) AddThemeStyleboxOverride("panel", RestStyle);
                 TooltipText = _emptyHint;
                 return;
             }
@@ -935,13 +1167,16 @@ public partial class World : Node3D
             _count.Text = shown > 1 ? shown.ToString() : "";
             TooltipText = "";
             _plus.Set(it.ItemId);
-            if (!_locked) SealLook.Apply(it.State, _icon, this, _normal);
+            _veil.Set(it);
+            _icon.SelfModulate = Colors.White;
+            if (!_locked) AddThemeStyleboxOverride("panel", RestStyle);
         }
 
         public override void _GuiInput(InputEvent ev)
         {
             if (Locked) return;
-            if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right })
+            if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right }
+                || (Platform.TouchUi && ev is InputEventMouseButton { Pressed: true, DoubleClick: true, ButtonIndex: MouseButton.Left }))
             {
                 OnContext?.Invoke(Slot);
                 AcceptEvent();
@@ -956,20 +1191,13 @@ public partial class World : Node3D
         public override Variant _GetDragData(Vector2 atPosition)
         {
             if (Locked || Current.IsEmpty) return default;
-            var preview = new TextureRect
-            {
-                Texture = ItemData.Icon(Current.ItemId),
-                CustomMinimumSize = new Vector2(40, 40),
-                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-            };
-            UpgradeBadge.Show(preview, Current.ItemId);
-            DragLayer.Show(this, GmItemId.Wrap(preview, Current.ItemId));
-            return new Godot.Collections.Dictionary
+            var data = new Godot.Collections.Dictionary
             {
                 { "id", Current.ItemId },
                 { "invFrom", Slot },
             };
+            DragLayer.ShowStack(this, Current, atPosition, data);
+            return data;
         }
 
         public override bool _CanDropData(Vector2 atPosition, Variant data)
@@ -987,8 +1215,9 @@ public partial class World : Node3D
         {
             AddThemeStyleboxOverride("panel", _normal);
             var d = data.AsGodotDictionary();
-            if (d.ContainsKey("companionFrom")) OnCompanionDrop?.Invoke(d["companionFrom"].AsInt32(), Slot);
-            else OnDropItem?.Invoke(d["invFrom"].AsInt32(), Slot);
+            int? amount = DragLayer.ChosenAmount(d);
+            if (d.ContainsKey("companionFrom")) OnCompanionDrop?.Invoke(d["companionFrom"].AsInt32(), Slot, amount);
+            else OnDropItem?.Invoke(d["invFrom"].AsInt32(), Slot, amount ?? ItemMove.WholeStack);
         }
     }
 
@@ -996,6 +1225,14 @@ public partial class World : Node3D
     {
         public System.Action<int>? OnDropItem;
         private bool _hot;
+        private readonly TextureRect _lock;
+        private const string OpenTip = "Drop items here to destroy them · click the lock to lock the well";
+        private const string LockedTip = "The destroy well is locked. Click the lock to open it.";
+        private const float LockButtonSize = 14f;
+        private const float LockHitSlack = 4f;
+        private static readonly Color LockedFill = new(0.16f, 0.16f, 0.18f, 0.5f);
+        private static readonly Color LockTint = new(1f, 0.86f, 0.55f, 0.95f);
+        private static readonly Color UnlockTint = new(0.97f, 0.78f, 0.74f, 0.55f);
         private static readonly Color Fill = new(0.42f, 0.11f, 0.09f, 0.16f);
         private static readonly Color FillHot = new(0.55f, 0.15f, 0.12f, 0.38f);
         private static readonly Color Edge = new(0.78f, 0.30f, 0.25f, 0.75f);
@@ -1007,7 +1244,6 @@ public partial class World : Node3D
         public TrashSlot()
         {
             CustomMinimumSize = new Vector2(64, 52);
-            TooltipText = "Drop an item here to destroy it";
             MouseFilter = MouseFilterEnum.Stop;
 
             var icon = new TextureRect
@@ -1025,14 +1261,34 @@ public partial class World : Node3D
             icon.OffsetBottom = -TrashIconInsetY;
             AddChild(icon);
 
+            _lock = new TextureRect
+            {
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                MouseFilter = MouseFilterEnum.Ignore,
+                AnchorLeft = 1f, AnchorRight = 1f, AnchorTop = 0f, AnchorBottom = 0f,
+                OffsetLeft = -LockButtonSize - 3f, OffsetRight = -3f, OffsetTop = 3f, OffsetBottom = LockButtonSize + 3f,
+            };
+            AddChild(_lock);
+            ApplyLock();
+
             MouseEntered += () => { _hot = true; QueueRedraw(); };
             MouseExited += () => { _hot = false; QueueRedraw(); };
+        }
+
+        private void ApplyLock()
+        {
+            bool locked = Config.DestroyWellLocked;
+            _lock.Texture = UiIcons.Get(locked ? "system/lock" : "system/unlock");
+            _lock.Modulate = locked ? LockTint : UnlockTint;
+            TooltipText = locked ? LockedTip : OpenTip;
+            QueueRedraw();
         }
 
         public override void _Draw()
         {
             var rect = new Rect2(Vector2.Zero, Size).Grow(-1f);
-            DrawRect(rect, _hot ? FillHot : Fill);
+            DrawRect(rect, Config.DestroyWellLocked ? LockedFill : _hot ? FillHot : Fill);
             var edge = _hot ? EdgeHot : Edge;
             var tl = rect.Position;
             var tr = rect.Position + new Vector2(rect.Size.X, 0f);
@@ -1044,8 +1300,18 @@ public partial class World : Node3D
             DrawDashedLine(bl, tl, edge, 1f, DashLength);
         }
 
+        public override void _GuiInput(InputEvent ev)
+        {
+            if (ev is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb) return;
+            if (!_lock.GetRect().Grow(LockHitSlack).HasPoint(mb.Position)) return;
+            Config.SetDestroyWellLocked(!Config.DestroyWellLocked);
+            ApplyLock();
+            AcceptEvent();
+        }
+
         public override bool _CanDropData(Vector2 atPosition, Variant data) =>
-            data.VariantType == Variant.Type.Dictionary && data.AsGodotDictionary().ContainsKey("invFrom");
+            !Config.DestroyWellLocked
+            && data.VariantType == Variant.Type.Dictionary && data.AsGodotDictionary().ContainsKey("invFrom");
 
         public override void _DropData(Vector2 atPosition, Variant data)
         {

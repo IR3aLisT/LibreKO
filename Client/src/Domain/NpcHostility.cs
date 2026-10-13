@@ -8,7 +8,8 @@ public static class NpcHostility
         && e.NpcType != NpcTypes.Pet
         && (e.NpcType == NpcTypes.GuardSummon
             ? IsEnemyNation(e, myNation, npcsAreTargets)
-            : e.IsMonster || e.NpcType == NpcTypes.Scarecrow || IsEnemyNation(e, myNation, npcsAreTargets));
+            : e.IsMonster || e.NpcType is NpcTypes.Scarecrow or NpcTypes.DestroyedArtifact or NpcTypes.BattleMonument
+              || IsEnemyNation(e, myNation, npcsAreTargets));
 
     private static bool IsEnemyNation(EntitySnapshot e, int myNation, bool npcsAreTargets) =>
         e.Nation is Nations.Karus or Nations.ElMorad && e.Nation != myNation && npcsAreTargets;

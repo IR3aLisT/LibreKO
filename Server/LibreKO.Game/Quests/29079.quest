@@ -1,0 +1,54 @@
+include translations/29079_soccer
+
+Bind Npc 29079
+
+On greeting
+    Say "I'm the [Arena Master] in charge of this soccer field. How may I be of service today?"
+    Topic "[Enter a soccer game and select a team]" do
+        Say "You've come to enter a soccer game. I will transfer you to any team you select. The team can be composed of players from any nation. Please keep in mind that once a team has 11 players, you cannot join that team."
+        Topic "[Enter as blue team]" do
+            Join blue soccer team
+        Topic "[Enter as red team]" do
+            Join red soccer team
+        Goto close
+    Topic "[Exchange soccer medal for soccer uniform]" goto event_101
+    Topic "[Start the soccer game]" do
+        Start soccer game
+    Goto close
+
+On event_101
+    If player has > 9 of 900349000
+        Say "You've brought 10 [Goal Pendants]. Would you like to exchange them for a [Soccer Uniform]? Please be aware that once you choose to trade for a soccer uniform, all [Goal Pendants] in your inventory will be collected."
+        Topic "A Type" do
+            If player is Karus
+                Trade 10 of 900349000 for 1 of 900362641 for 1 days
+                Say exchange_complete_i_hope
+                Topic "Confirm" goto close
+            Else
+                Trade 10 of 900349000 for 1 of 900357640 for 1 days
+                Say exchange_complete_i_hope
+                Topic "Confirm" goto close
+            Goto close
+        Topic "B Type" do
+            If player is Karus
+                Trade 10 of 900349000 for 1 of 929001609 for 1 days
+                Say exchange_complete_i_hope
+                Topic "Confirm" goto close
+            Else
+                Trade 10 of 900349000 for 1 of 927001607 for 1 days
+                Say exchange_complete_i_hope
+                Topic "Confirm" goto close
+            Goto close
+        Topic "C Type" do
+            If player is Karus
+                Trade 10 of 900349000 for 1 of 933001634 for 1 days
+                Say exchange_complete_i_hope
+                Topic "Confirm" goto close
+            Else
+                Trade 10 of 900349000 for 1 of 928001608 for 1 days
+                Say exchange_complete_i_hope
+                Topic "Confirm" goto close
+            Goto close
+    Else
+        Say "You need 10 [Goal Pendants]. Please confirm the number of medals in your inventory."
+        Topic "Close" goto close

@@ -9,7 +9,10 @@ public partial class Net
 
     public event Action<int, ItemSlot[]>? WarehouseContentsEvent;
 
-    public event Action<byte, bool>? WarehouseResultEvent;
+    public event Action<byte, byte>? WarehouseResultEvent;
+    public event Action<byte>? WarehouseOpenRefusedEvent;
+
+    public const byte WarehouseOpened = 1;
 
     public const int WarehouseSlots = 192;
 
@@ -24,7 +27,12 @@ public partial class Net
                 break;
             case 1:
             {
-                if (p.RemainingBytes >= 1) p.ReadByte();
+                byte opened = p.RemainingBytes >= 1 ? p.ReadByte() : WarehouseOpened;
+                if (opened != WarehouseOpened)
+                {
+                    WarehouseOpenRefusedEvent?.Invoke(opened);
+                    break;
+                }
                 int money = p.RemainingBytes >= 4 ? p.ReadInt() : 0;
                 var slots = new ItemSlot[WarehouseSlots];
                 for (int i = 0; i < WarehouseSlots && p.RemainingBytes >= 17; i++)
@@ -32,17 +40,17 @@ public partial class Net
                     int itemId = p.ReadInt();
                     short dur = UShortToShort(p.ReadUShort());
                     short count = UShortToShort(p.ReadUShort());
-                    p.ReadByte();
+                    byte flag = p.ReadByte();
                     SkipBytes(p, 8);
-                    slots[i] = itemId == 0 ? default : new ItemSlot { ItemId = itemId, Durability = dur, Count = count };
+                    slots[i] = itemId == 0 ? default : new ItemSlot { ItemId = itemId, Durability = dur, Count = count, Flag = flag };
                 }
                 WarehouseContentsEvent?.Invoke(money, slots);
                 break;
             }
             case 2: case 3: case 4: case 5:
             {
-                bool ok = p.RemainingBytes >= 1 && p.ReadByte() == 1;
-                WarehouseResultEvent?.Invoke(sub, ok);
+                byte result = p.RemainingBytes >= 1 ? p.ReadByte() : (byte)0;
+                WarehouseResultEvent?.Invoke(sub, result);
                 break;
             }
         }

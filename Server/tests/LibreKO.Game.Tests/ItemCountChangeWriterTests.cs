@@ -106,4 +106,17 @@ public class BundleOpenWriterTests
         packet.ReadByte().Should().Be(0);
         packet.RemainingBytes.Should().Be(0);
     }
+
+    [Theory]
+    [InlineData(BundleOpenPacketWriter.ResultGone)]
+    [InlineData(BundleOpenPacketWriter.ResultNotYours)]
+    public void ARefusalCarriesOnlyTheBundleAndItsCode(byte result)
+    {
+        var packet = BundleOpenPacketWriter.Refused(9, result);
+        packet.ResetOffset();
+
+        packet.ReadInt().Should().Be(9);
+        packet.ReadByte().Should().Be(result);
+        packet.RemainingBytes.Should().Be(0);
+    }
 }

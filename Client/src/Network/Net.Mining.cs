@@ -20,8 +20,14 @@ public partial class Net
 
     private void HandleMining(Packet p)
     {
-        if (p.RemainingBytes < 3) return;
+        if (p.RemainingBytes < 1) return;
         int sub = p.ReadByte();
+        if (sub == Domain.Soccer.MiningSub)
+        {
+            HandleSoccer(p);
+            return;
+        }
+        if (p.RemainingBytes < 2) return;
         int code = p.ReadUShort();
 
         switch (sub)

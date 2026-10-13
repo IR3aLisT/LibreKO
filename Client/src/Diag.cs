@@ -28,6 +28,14 @@ public static class Diag
         if (ms >= thresholdMs) GD.Print($"[slow] {what} {ms:0.0}ms");
     }
 
+    public const double HitchMs = 40;
+
+    public static void Hitch(string what, long startedTicks)
+    {
+        double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - startedTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        if (ms >= HitchMs) GD.Print($"[hitch] {what} {ms:0} ms");
+    }
+
     public static void Install()
     {
         lock (Gate)

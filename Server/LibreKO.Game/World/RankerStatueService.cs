@@ -10,6 +10,9 @@ namespace LibreKO.Game.World;
 public interface IRankerStatueService
 {
     Task RefreshAsync(IReadOnlyDictionary<AccountNation, IReadOnlyList<int>> leaders);
+    int RankerOf(byte npcType);
+    string? NameOn(byte npcType);
+    Task RedressAsync(byte npcType, UserSession ranker);
 }
 
 public class RankerStatueService(IServiceScopeFactory scopeFactory, SessionManager sessionManager) : IRankerStatueService
@@ -19,27 +22,57 @@ public class RankerStatueService(IServiceScopeFactory scopeFactory, SessionManag
             ? (AccountNation.ElMorad, npcType - NpcData.TypeRankerElMoradFirst + 1)
             : (AccountNation.Karus, npcType - NpcData.TypeRankerKarusFirst + 1);
 
+    private volatile IReadOnlyDictionary<byte, int> _rankers = new Dictionary<byte, int>();
+
+    public int RankerOf(byte npcType) => _rankers.GetValueOrDefault(npcType);
+
+    public string? NameOn(byte npcType) => Statues()
+        .FirstOrDefault(npc => npc.NpcType == npcType && npc.StatueLook != null)?.StatueLook?.Name;
+
     public async Task RefreshAsync(IReadOnlyDictionary<AccountNation, IReadOnlyList<int>> leaders)
     {
-        var statues = sessionManager.Regions.GetAllNpcs()
-            .Where(npc => NpcSpawnPacketWriter.IsRankerStatue(npc.NpcType))
-            .ToList();
+        var previous = _rankers;
+        var rankers = new Dictionary<byte, int>();
+        for (var type = NpcData.TypeRankerKarusFirst; type < NpcData.TypeRankerElMoradFirst + NpcData.RankerPlaces; type++)
+        {
+            var (nation, place) = PlaceOf(type);
+            if (leaders.TryGetValue(nation, out var ranked) && place <= ranked.Count)
+                rankers[type] = ranked[place - 1];
+        }
+        _rankers = rankers;
+
+        var statues = Statues();
         if (statues.Count == 0) return;
 
         using var scope = scopeFactory.CreateScope();
         var characters = scope.ServiceProvider.GetRequiredService<ICharacterRepository>();
         foreach (var statue in statues)
         {
-            var (nation, place) = PlaceOf(statue.NpcType);
-            NpcSpawnPacketWriter.StatueLook? look = null;
-            if (leaders.TryGetValue(nation, out var ranked) && place <= ranked.Count)
-                look = await LookOfAsync(ranked[place - 1], characters);
-            if (look == statue.StatueLook) continue;
-
-            statue.StatueLook = look;
-            await sessionManager.Regions.BroadcastFromNpc(statue, NpcPacketMapper.BuildInOutPacket(statue, InOutType.Out));
-            await sessionManager.Regions.BroadcastFromNpc(statue, NpcPacketMapper.BuildInOutPacket(statue, InOutType.In));
+            var ranker = rankers.GetValueOrDefault(statue.NpcType);
+            if (statue.StatueLook != null && ranker != 0 && previous.GetValueOrDefault(statue.NpcType) == ranker)
+                continue;
+            var look = ranker != 0 ? await LookOfAsync(ranker, characters) : null;
+            await DressAsync(statue, look);
         }
+    }
+
+    public async Task RedressAsync(byte npcType, UserSession ranker)
+    {
+        var look = LookOf(ranker.Name, ranker.Race, ranker.Class, ranker.Face, ranker.Hair, ranker.GetEquippedItem);
+        foreach (var statue in Statues().Where(npc => npc.NpcType == npcType))
+            await DressAsync(statue, look);
+    }
+
+    private List<NpcInstance> Statues() => sessionManager.Regions.GetAllNpcs()
+        .Where(npc => NpcSpawnPacketWriter.IsRankerStatue(npc.NpcType))
+        .ToList();
+
+    private async Task DressAsync(NpcInstance statue, NpcSpawnPacketWriter.StatueLook? look)
+    {
+        if (look == statue.StatueLook) return;
+        statue.StatueLook = look;
+        await sessionManager.Regions.BroadcastFromNpc(statue, NpcPacketMapper.BuildInOutPacket(statue, InOutType.Out));
+        await sessionManager.Regions.BroadcastFromNpc(statue, NpcPacketMapper.BuildInOutPacket(statue, InOutType.In));
     }
 
     private async Task<NpcSpawnPacketWriter.StatueLook?> LookOfAsync(int characterId, ICharacterRepository characters)

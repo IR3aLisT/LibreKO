@@ -9,12 +9,8 @@ public partial class Net
     public const byte UserInformationSub = 2;
     public const byte EquipmentViewSub = 6;
 
-    public const byte DetailAccepted = 1;
-
     public const int InspectWornSlots =
         InventoryConstants.SlotMax + InventoryConstants.CospreWireMax;
-
-    public const int InspectVisibleEquipment = 7;
 
     public enum EquipmentViewResult : short
     {
@@ -23,29 +19,6 @@ public partial class Net
         CannotChooseYourself = -2,
         NotInSameRegion = -3,
         NoViewEquipmentItem = -4,
-    }
-
-    public readonly struct UserInformation
-    {
-        public readonly string Name;
-        public readonly int Level, Class;
-        public readonly int Loyalty, MonthlyLoyalty;
-        public readonly int ClanId, ClanMarkVersion, ClanFlag, ClanGrade, ClanRanking;
-        public readonly string ClanName, ClanChief;
-        public readonly int RebirthLevel;
-        public readonly int[] VisibleEquipment;
-
-        public UserInformation(string name, int level, int cls, int loyalty, int monthlyLoyalty,
-            int clanId, int clanMarkVersion, int clanFlag, int clanGrade, string clanName,
-            string clanChief, int clanRanking, int rebirthLevel, int[] visibleEquipment)
-        {
-            Name = name; Level = level; Class = cls;
-            Loyalty = loyalty; MonthlyLoyalty = monthlyLoyalty;
-            ClanId = clanId; ClanMarkVersion = clanMarkVersion; ClanFlag = clanFlag;
-            ClanGrade = clanGrade; ClanName = clanName; ClanChief = clanChief;
-            ClanRanking = clanRanking; RebirthLevel = rebirthLevel;
-            VisibleEquipment = visibleEquipment;
-        }
     }
 
     public readonly struct EquipmentView
@@ -80,7 +53,8 @@ public partial class Net
         }
     }
 
-    public event Action<bool, UserInformation>? UserInformationEvent;
+    public event Action<UserInfoReply>? UserInformationEvent;
+    public event Action? UserInformationMissingEvent;
     public event Action<EquipmentViewResult, EquipmentView>? EquipmentViewEvent;
 
     private void HandleUserInfoOpcode(Packet p)
@@ -98,39 +72,9 @@ public partial class Net
 
     private void HandleUserInformation(Packet p)
     {
-        if (p.RemainingBytes < 1) return;
-        if (p.ReadByte() != DetailAccepted)
-        {
-            UserInformationEvent?.Invoke(false, default);
-            return;
-        }
-
-        string name = p.ReadSByteString();
-        int level = p.ReadByte();
-        int cls = p.ReadShort();
-        int loyalty = p.ReadInt();
-        int monthly = p.ReadInt();
-        p.ReadByte();
-
-        int clanId = p.ReadShort();
-        int clanMark = p.ReadShort();
-        int clanFlag = p.ReadByte();
-        int clanGrade = p.ReadByte();
-        string clanName = p.ReadSByteString();
-        string clanChief = p.ReadSByteString();
-        int clanRanking = p.ReadByte();
-
-        int rebirth = p.ReadByte();
-        p.ReadShort();
-
-        var visible = new int[InspectVisibleEquipment];
-        for (int i = 0; i < InspectVisibleEquipment; i++)
-            visible[i] = p.ReadInt();
-
-        UserInformationEvent?.Invoke(true, new UserInformation(
-            name, level, cls, loyalty, monthly,
-            clanId, clanMark, clanFlag, clanGrade, clanName, clanChief, clanRanking,
-            rebirth, visible));
+        var (result, info) = UserInfoReply.Read(p);
+        if (info != null) UserInformationEvent?.Invoke(info);
+        else if (result is UserInfoReply.NoUser or UserInfoReply.NoUserAgain) UserInformationMissingEvent?.Invoke();
     }
 
     private void HandleEquipmentView(Packet p)

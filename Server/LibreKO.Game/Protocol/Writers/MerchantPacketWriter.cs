@@ -247,6 +247,34 @@ public sealed class MerchantPacketWriter
         return packet;
     }
 
+    public const byte ShowcaseChangedSub = 2;
+    private const byte ShowcaseSellingStall = 1;
+
+    public static Packet ShowcaseSlotEmptied(int characterId, byte flags, byte slot)
+    {
+        var packet = ShowcaseChanged(characterId, flags);
+        packet.WriteByte(slot);
+        return packet;
+    }
+
+    public static Packet ShowcaseRefreshed(int characterId, byte flags, IReadOnlyList<int> itemIds)
+    {
+        var packet = ShowcaseChanged(characterId, flags);
+        for (var slot = 0; slot < MerchantPacketConstants.StallDisplaySlotsPremium; slot++)
+            packet.WriteInt(slot < itemIds.Count ? itemIds[slot] : 0);
+        return packet;
+    }
+
+    private static Packet ShowcaseChanged(int characterId, byte flags)
+    {
+        var packet = new Packet(GameOpcodes.GS_MERCHANT_INOUT);
+        packet.WriteByte(ShowcaseChangedSub);
+        packet.WriteInt(characterId);
+        packet.WriteByte(ShowcaseSellingStall);
+        packet.WriteByte(flags);
+        return packet;
+    }
+
     private static Packet InOut(MerchantInOut inOutType)
     {
         var packet = new Packet(GameOpcodes.GS_MERCHANT_INOUT);

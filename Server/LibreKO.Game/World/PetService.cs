@@ -47,8 +47,7 @@ public sealed class PetService(
     public static readonly TimeSpan RegenInterval = TimeSpan.FromSeconds(10);
     public const int RegenPercent = 10;
     private const int PercentScale = 100;
-    private const char FirstNameCharacter = '!';
-    private const char LastNameCharacter = '~';
+    private const int MillisecondsPerTenth = 100;
 
     private readonly ConcurrentDictionary<int, Pet> _pets = new();
 
@@ -56,7 +55,7 @@ public sealed class PetService(
 
     public async Task<IReadOnlyDictionary<int, PetItemInfo>> DescribeAsync(IEnumerable<ItemSlot> slots)
     {
-        var linked = slots.Where(slot => slot.IsLinked).ToArray();
+        var linked = slots.Where(slot => slot.IsPetLink).ToArray();
         await CacheAsync(linked);
         var described = new Dictionary<int, PetItemInfo>();
         foreach (var slot in linked)
@@ -67,7 +66,7 @@ public sealed class PetService(
 
     private async Task CacheAsync(IEnumerable<ItemSlot> slots)
     {
-        var ids = slots.Where(slot => slot.IsLinked).Select(slot => slot.UniqueId)
+        var ids = slots.Where(slot => slot.IsPetLink).Select(slot => slot.UniqueId)
             .Where(id => !_pets.ContainsKey(id)).Distinct().ToArray();
         if (ids.Length == 0)
             return;
@@ -80,7 +79,7 @@ public sealed class PetService(
 
     public PetItemInfo? ItemInfo(UserSession session, ItemSlot slot)
     {
-        if (!slot.IsLinked || !_pets.TryGetValue(slot.UniqueId, out var pet))
+        if (!slot.IsPetLink || !_pets.TryGetValue(slot.UniqueId, out var pet))
             return null;
 
         return PetItemInfo.From(pet, LevelOf(pet.Level));
@@ -334,6 +333,12 @@ public sealed class PetService(
         }
 
         var food = gameData.GetItem(itemId);
+        if (food?.Kind != (byte)ItemKind.PetFood && PotionFor(food) is { } potion)
+        {
+            await DrinkAsync(session, state, bagSlot, itemId, potion.Magic, potion.Heal);
+            return;
+        }
+
         var abs = InventoryConstants.SlotMax + bagSlot;
         short increase = 0;
         short countLeft = 0;
@@ -361,6 +366,46 @@ public sealed class PetService(
 
         await session.Client.SendPacket(PetPacketWriter.Fed(bagSlot, itemId, countLeft, increase));
         await SendSatisfactionAsync(session, state);
+    }
+
+    private (MagicData Magic, int Heal)? PotionFor(ItemData? item)
+    {
+        if (item == null || gameData.GetMagic(item.Effect1) is not { } magic) return null;
+        gameData.MagicType3Table.TryGetValue(magic.Id, out var overTime);
+        int heal = FamiliarPotion.Heal(item, magic, overTime);
+        return heal > 0 ? (magic, heal) : null;
+    }
+
+    private async Task DrinkAsync(UserSession session, PetState state, byte bagSlot, int itemId, MagicData magic, int heal)
+    {
+        var abs = InventoryConstants.SlotMax + bagSlot;
+        var now = DateTime.UtcNow.Ticks;
+        short countLeft = 0;
+        var drunk = state.Npc is { } npc && npc.Hp < npc.MaxHp
+            && (!state.SkillReadyTicks.TryGetValue(magic.Id, out var readyAt) || readyAt <= now)
+            && session.WithLock(s =>
+            {
+                var slot = s.Inventory[abs];
+                if (slot.ItemId != itemId || slot.Count == 0 || slot.State is ItemFlag.Duplicate)
+                    return false;
+                slot.Count--;
+                if (slot.Count == 0)
+                    slot.Clear();
+                countLeft = (short)slot.Count;
+                return true;
+            });
+
+        if (!drunk || state.Npc is not { } healed)
+        {
+            await session.Client.SendPacket(PetPacketWriter.FoodRefused(bagSlot, itemId));
+            return;
+        }
+
+        state.SkillReadyTicks[magic.Id] = now + TimeSpan.FromMilliseconds(magic.ReCastTime * MillisecondsPerTenth).Ticks;
+        healed.Hp = Math.Min(healed.MaxHp, healed.Hp + heal);
+        state.Record.Hp = (short)healed.Hp;
+        await session.Client.SendPacket(PetPacketWriter.Fed(bagSlot, itemId, countLeft, 0));
+        await session.Client.SendPacket(PetPacketWriter.HpChanged((short)healed.MaxHp, (short)healed.Hp, healed.UniqueId));
     }
 
     public async Task TickAsync(UserSession session, long nowTicks)
@@ -632,5 +677,5 @@ public sealed class PetService(
 
     public static bool IsValidName(string name) =>
         name.Length is > 0 and <= Pet.NameMaxLength
-        && name.All(c => c is >= FirstNameCharacter and <= LastNameCharacter);
+        && NameRules.IsPlain(name);
 }

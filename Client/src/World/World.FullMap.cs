@@ -54,6 +54,7 @@ public partial class World
             _fullMapTitle.Text = MapName(_zone);
             _fullMapView.SetMap(_miniMap?.MapTexture, _miniMap?.MapExtent ?? 0f);
             UpdateFullMap();
+            if (InNereid) Net.I.SendMapEvent();
         }
     }
 

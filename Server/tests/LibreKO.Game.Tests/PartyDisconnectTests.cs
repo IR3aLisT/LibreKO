@@ -47,6 +47,36 @@ public class PartyDisconnectTests : GameTestBase
     }
 
     [Fact]
+    public async Task ALeaderLeavingTheGameHandsThePartyToTheNextMember()
+    {
+        using var provider = CreateProvider(db =>
+        {
+            db.Characters.AddRange(
+                new Character { Id = 400, AccountId = 500, Name = "Player400" },
+                new Character { Id = 401, AccountId = 501, Name = "Player401" },
+                new Character { Id = 402, AccountId = 502, Name = "Player402" });
+        });
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var leader = CreateMember(sessionManager, 400, new List<Packet>());
+        var heir = CreateMember(sessionManager, 401, new List<Packet>());
+        var third = CreateMember(sessionManager, 402, new List<Packet>());
+
+        var party = sessionManager.Parties.CreateParty((short)leader.CharacterId);
+        party.MemberIds[1] = (short)heir.CharacterId;
+        party.MemberIds[2] = (short)third.CharacterId;
+        leader.PartyIndex = heir.PartyIndex = third.PartyIndex = party.Index;
+        leader.IsPartyLeader = true;
+
+        await provider.GetRequiredService<ISessionTerminationService>().DisconnectAsync(leader.Client);
+
+        sessionManager.Parties.GetParty(party.Index).Should().NotBeNull();
+        party.LeaderId.Should().Be((short)heir.CharacterId);
+        party.MemberCount.Should().Be(2);
+        heir.IsPartyLeader.Should().BeTrue();
+        third.PartyIndex.Should().Be(party.Index);
+    }
+
+    [Fact]
     public async Task LoggingBackInTakesTheAbandonedSessionOutOfTheParty()
     {
         using var provider = CreateProvider(db =>

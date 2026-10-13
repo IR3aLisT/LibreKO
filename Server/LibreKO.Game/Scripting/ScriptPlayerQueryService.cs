@@ -20,6 +20,7 @@ public class ScriptPlayerQueryService(
     public int GetZoneID(int _uid) => session.ZoneId;
     public int GetPvpMonumentNation(int _uid) =>
         sessionManager.Battle.GetPvpMonumentNation((byte)session.ZoneId);
+    public bool IsKrowazOpen() => sessionManager.Battle.KrowazOpen;
     public double GetX(int _uid) => session.X;
     public double GetY(int _uid) => session.Y;
     public double GetZ(int _uid) => session.Z;

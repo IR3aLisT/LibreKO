@@ -8,5 +8,8 @@ public enum AchievementSubOpcode : byte
     ClaimReward = 6,
     ClaimTitle = 7,
     SelectDisplayTitle = 16,
+    SelectSkillTitle = 17,
+    ResetDisplayTitle = 18,
+    ResetSkillTitle = 19,
     TitleChanged = 32,
 }

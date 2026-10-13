@@ -6,27 +6,19 @@ namespace LibreKO.Game.Protocol.Writers;
 public sealed class PlayerInspectPacketWriter
 {
     public const byte DetailAccepted = 1;
-    public const byte DetailRefusedCode = 0;
+    public const byte DetailNoUser = 2;
+    public const short NoParty = -1;
 
-    public const int VisibleEquipmentCount = 7;
+    public const int RankPlaceCount = 7;
     public const int EquipmentSlotCount =
         InventoryConstants.SlotMax + InventoryConstants.CospreWireMax;
-
-    public static readonly int[] VisibleEquipmentSlots =
-    [
-        InventoryConstants.Head,
-        InventoryConstants.Breast,
-        InventoryConstants.Leg,
-        InventoryConstants.Glove,
-        InventoryConstants.Foot,
-        InventoryConstants.LeftHand,
-        InventoryConstants.RightHand,
-    ];
 
     public readonly record struct WornItem(int ItemId, short Durability, byte Flag, int ExpiresAt);
 
     public readonly record struct Clan(
         short Id, short MarkVersion, byte Flag, byte Grade, string Name, string Chief, byte Ranking);
+
+    public static readonly Clan NoClan = new(0, 0, 0, 0, "", "", 0);
 
     public readonly record struct Detail(
         string Name,
@@ -36,7 +28,8 @@ public sealed class PlayerInspectPacketWriter
         int MonthlyLoyalty,
         Clan Clan,
         byte RebirthLevel,
-        IReadOnlyList<int> VisibleEquipment);
+        short PartyMarker,
+        IReadOnlyList<int> RankPlaces);
 
     public readonly record struct Equipment(
         string Name,
@@ -63,7 +56,7 @@ public sealed class PlayerInspectPacketWriter
     public static Packet DetailRefused()
     {
         var packet = Sub(PlayerInspectSubOpcode.Detail);
-        packet.WriteByte(DetailRefusedCode);
+        packet.WriteByte(DetailNoUser);
         return packet;
     }
 
@@ -87,10 +80,10 @@ public sealed class PlayerInspectPacketWriter
         packet.WriteByte(detail.Clan.Ranking);
 
         packet.WriteByte(detail.RebirthLevel);
-        packet.WriteShort(0);
+        packet.WriteShort(detail.PartyMarker);
 
-        for (var i = 0; i < VisibleEquipmentCount; i++)
-            packet.WriteInt(i < detail.VisibleEquipment.Count ? detail.VisibleEquipment[i] : 0);
+        for (var i = 0; i < RankPlaceCount; i++)
+            packet.WriteInt(i < detail.RankPlaces.Count ? detail.RankPlaces[i] : 0);
 
         packet.WriteByte(0);
         packet.WriteByte(0);

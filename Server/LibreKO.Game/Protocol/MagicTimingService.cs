@@ -20,11 +20,11 @@ public interface IMagicTimingService
 
     MagicTimingVerdict CheckRelease(UserSession session, MagicData magic);
 
-    void OnCastAccepted(UserSession session, MagicData magic);
+    void OnCastAccepted(UserSession session, MagicData magic, bool armCooldown = true);
 
     void OnVolleyAccepted(UserSession session, MagicData magic, int arrows);
     void OnFlightLaunched(UserSession session, MagicData magic);
-    void OnReleaseAccepted(UserSession session, MagicData magic);
+    void OnReleaseAccepted(UserSession session, MagicData magic, bool armCooldown = true);
 
     void OnCastAborted(UserSession session, int skillId);
 }
@@ -88,10 +88,11 @@ public sealed class MagicTimingService(TimeProvider? timeProvider = null) : IMag
             : MagicTimingVerdict.Allowed;
     }
 
-    public void OnCastAccepted(UserSession session, MagicData magic)
+    public void OnCastAccepted(UserSession session, MagicData magic, bool armCooldown = true)
     {
         var now = _time.GetUtcNow().UtcTicks;
-        ArmCooldown(session, magic, now);
+        if (armCooldown)
+            ArmCooldown(session, magic, now);
         session.AcceptedCasts[magic.Id] = now;
         if (session.AcceptedCasts.Count > CooldownEntryPruneThreshold)
             PruneAcceptedCasts(session, now);
@@ -128,7 +129,7 @@ public sealed class MagicTimingService(TimeProvider? timeProvider = null) : IMag
         ClearCast(session);
     }
 
-    public void OnReleaseAccepted(UserSession session, MagicData magic)
+    public void OnReleaseAccepted(UserSession session, MagicData magic, bool armCooldown = true)
     {
         if (session.PendingArrowHits.TryGetValue(magic.Id, out var arrows) && arrows > 1)
         {
@@ -140,7 +141,7 @@ public sealed class MagicTimingService(TimeProvider? timeProvider = null) : IMag
         var releasesAnAcceptedCast = session.AcceptedCasts.TryRemove(magic.Id, out _);
         if (session.CastingSkillId == magic.Id)
             ClearCast(session);
-        else if (!releasesAnAcceptedCast)
+        else if (!releasesAnAcceptedCast && armCooldown)
             ArmCooldown(session, magic, _time.GetUtcNow().UtcTicks);
     }
 

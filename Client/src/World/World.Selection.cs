@@ -184,6 +184,16 @@ public partial class World
 
     private Ent? PickEntityAt(Vector2 mouse, float radius, out int id, out float pixels)
     {
+        if (RayPickEntity(mouse, out id) is { } hit)
+        {
+            pixels = 0f;
+            return hit;
+        }
+        if (Platform.PointerUi)
+        {
+            pixels = radius;
+            return null;
+        }
         Ent? best = null;
         Ent? boxed = null;
         int boxedId = -1;
@@ -525,11 +535,25 @@ public partial class World
         if (best != null) Select(bestId, best);
     }
 
+    private void SelectNearestPartyMember()
+    {
+        Ent? best = null; int bestId = -1; float bestD = float.MaxValue;
+        foreach (var member in Net.I.Party)
+        {
+            if (member.CharId == _myId || !_ents.TryGetValue(member.CharId, out var e) || !Selectable(e)) continue;
+            float d = e.Body.Position.DistanceTo(_self.Position);
+            if (d < bestD) { bestD = d; best = e; bestId = member.CharId; }
+        }
+        if (best == null) return;
+        Select(bestId, best);
+        FaceSelectedWhenStill();
+    }
+
     private void FaceSelectedWhenStill()
     {
         if (_self == null || _selfDead || _selfMoving || IsRootedByCast()) return;
         if (_selectedId < 0 || !_ents.TryGetValue(_selectedId, out var e)) return;
-        FaceSelfToward(e.Body.Position);
+        TurnSelfToward(e.Body.Position);
         SendHeadingIfChanged(_myKoX, _myKoZ);
     }
 
@@ -584,9 +608,14 @@ public partial class World
             _targetName.CustomMinimumSize = new Vector2(TargetHudWidth, 0);
             _targetBox.AddChild(_targetName);
         }
+        _targetBox.AddChild(BuildTargetClanRow());
         _targetHp = new StatBar(new Color("c0392b"),
-                                new Vector2(TargetHudWidth, TargetHudBarHeight));
+                                new Vector2(TargetHudWidth, TargetHudBarHeight)) { Glide = true };
         _targetBox.AddChild(_targetHp);
+        BuildTargetEffectsRow(_targetBox);
+        BuildTargetQuestDrops(_targetBox);
+        BuildDropListUi(_targetBox);
+        BuildTowerButton(_targetBox);
         HudLayout.Attach(_targetBox, "hud_target", _targetName,
             () =>
             {
@@ -600,6 +629,45 @@ public partial class World
             _targetBox.Scale = Vector2.One * HudPlacement.TargetScale;
             _targetBox.PivotOffset = new Vector2(TargetHudWidth * 0.5f, 0f);
         }
+    }
+
+    private const float TargetClanMarkSize = 16f;
+    private HBoxContainer _targetClanRow = null!;
+    private TextureRect _targetClanMark = null!;
+    private Label _targetClanText = null!;
+
+    private Control BuildTargetClanRow()
+    {
+        _targetClanRow = new HBoxContainer
+        {
+            Alignment = BoxContainer.AlignmentMode.Center,
+            CustomMinimumSize = new Vector2(TargetHudWidth, 0),
+            Visible = false,
+        };
+        _targetClanRow.AddThemeConstantOverride("separation", 4);
+        _targetClanMark = new TextureRect
+        {
+            CustomMinimumSize = new Vector2(TargetClanMarkSize, TargetClanMarkSize),
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+        };
+        _targetClanRow.AddChild(_targetClanMark);
+        _targetClanText = HudStyle.Label(12, HorizontalAlignment.Center);
+        _targetClanText.AddThemeColorOverride("font_color", NamePlate.ClanColor);
+        _targetClanRow.AddChild(_targetClanText);
+        return _targetClanRow;
+    }
+
+    private void SyncTargetClanRow(Ent e)
+    {
+        bool clan = !e.IsNpc && e.KnightsId > 0 && e.ClanName.Length > 0;
+        if (_targetClanRow.Visible != clan) _targetClanRow.Visible = clan;
+        if (!clan) return;
+        string text = $"{e.ClanName}  ·  {ClanTypes.Standing(e.ClanFlag, (byte)e.ClanGrade)}";
+        if (_targetClanText.Text != text) _targetClanText.Text = text;
+        var mark = ClanMark(e.KnightsId, e.ClanMarkVersion);
+        if (_targetClanMark.Texture != mark) _targetClanMark.Texture = mark;
+        _targetClanMark.Visible = mark != null;
     }
 
     private Control BuildTargetHead()
@@ -662,13 +730,16 @@ public partial class World
             : (_lastHitId >= 0 && Now() <= _lastHitAt + LastHitHudDur ? _lastHitId : -1);
         if (show >= 0 && _ents.TryGetValue(show, out var e))
         {
-            if (show != _targetHudId || e.Level != _targetHudLevel || e.Name != _targetHudName)
+            string shownName = ShownName(e);
+            if (show != _targetHudId || e.Level != _targetHudLevel || shownName != _targetHudName)
             {
+                if (show != _targetHudId) _targetHp.SnapNext();
                 _targetHudId = show;
                 _targetHudLevel = e.Level;
-                _targetHudName = e.Name;
-                _targetName.Text = e.Level > 0 ? $"{e.Name}   Lv {e.Level}" : e.Name;
+                _targetHudName = shownName;
+                _targetName.Text = e.Level > 0 ? $"{shownName}   Lv {e.Level}" : shownName;
             }
+            SyncTargetClanRow(e);
             if (e.MaxHp > 0) _targetHp.Set(e.Hp, e.MaxHp); else _targetHp.SetFull();
             if (!_targetBoxShown) { _targetBoxShown = true; _targetBox.Visible = true; }
         }
@@ -678,6 +749,10 @@ public partial class World
             _targetHudId = -1;
             _targetBox.Visible = false;
         }
+        SyncDropListButton(_targetHudId);
+        SyncTargetQuestDrops(_selectedId);
+        SyncTowerButton(_targetHudId);
+        TickTargetEffects();
         PluginNotifyTarget();
     }
 }

@@ -10,10 +10,22 @@ public sealed class Vitals
     public int MaxHp { get; private set; }
     public int Mp { get; private set; }
     public int MaxMp { get; private set; }
+    public int Sp { get; private set; }
+    public int MaxSp { get; private set; }
 
     public bool Known => MaxHp > 0;
 
     public bool HasMana(int cost) => cost <= 0 || Mp >= cost;
+
+    public bool HasStamina(int cost) => cost <= 0 || MaxSp <= 0 || Sp >= cost;
+
+    public int ApplySp(int sp, int maxSp)
+    {
+        int old = MaxSp > 0 ? Sp : sp;
+        Sp = sp;
+        MaxSp = maxSp;
+        return sp - old;
+    }
 
     public bool BelowHalfHp => MaxHp > 0 && Hp < MaxHp / 2;
 

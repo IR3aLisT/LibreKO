@@ -39,6 +39,7 @@ public class NpcInstance
     public int NpcId { get; set; }
     public string Name { get; set; } = string.Empty;
     public byte NpcType { get; set; }
+    public int TowerUserId { get; set; }
     public byte Group { get; set; }
     public short Level { get; set; }
     public int MaxHp { get; set; }
@@ -125,8 +126,11 @@ public class NpcInstance
     public const float LostTargetDistance = 75f;
 
     public bool IsAggressive { get; set; }
+    public const float MaxReachRadius = 6f;
     public float BulkRadius => Bulk / 100f * (Size > 0 ? Size / 100f : 1f);
-    public float AttackDistance => DirectAttack == DirectAttackMelee ? MeleeAttackRange + BulkRadius : AttackRange;
+    public float AttackDistance => DirectAttack == DirectAttackMelee
+        ? MeleeAttackRange + Math.Min(BulkRadius, MaxReachRadius)
+        : AttackRange;
     public float ChaseRange(bool targetDamagedMe) => targetDamagedMe ? TracingRange : SearchRange + ChaseRangeSlack;
 
     // AI runtime state
@@ -153,6 +157,7 @@ public class NpcInstance
     public int TopDamagerCharId { get; set; }
     public ConcurrentDictionary<int, ActiveOverTimeEffect> ActiveOverTimeEffects { get; } = new();
     public NpcDebuffs Debuffs { get; } = new();
+    public int ControlSignature { get; set; }
 
     public int TotalAc => Debuffs.ScaleAc(Ac, DateTime.UtcNow.Ticks);
     public int TotalHit => Debuffs.ScaleAttack(Attack1 > 0 ? Attack1 : Attack2, DateTime.UtcNow.Ticks);
@@ -318,21 +323,24 @@ public class NpcInstance
     public bool IsNpc => !IsMonster;
     public bool IsBoss => NpcType == NpcData.TypeBoss;
     public bool IsScarecrow => NpcType == NpcData.TypeScarecrow;
+    public bool RollsToPathEnd => NpcType == NpcData.TypeRollingStone && MoveType == NpcMoveType.ScriptedPath;
     public bool IsGuardSummon => NpcType == NpcData.TypeGuardSummon;
     public bool IsPet => NpcType == NpcData.TypePet;
     public int OwnerCharId { get; set; }
     public string PetOwnerName { get; set; } = string.Empty;
     public NpcSpawnPacketWriter.StatueLook? StatueLook { get; set; }
     public ConcurrentDictionary<int, int> PetDamage { get; } = new();
-    public bool IsAttackable => (IsMonster && !IsGuardSummon) || IsScarecrow; // Anything players can hit
+    public bool IsSoccerBall => NpcType == NpcData.TypeSoccerBall;
+    public bool IsAttackable => ((IsMonster && !IsGuardSummon) || IsScarecrow || NpcType is NpcData.TypeDestroyedArtifact or NpcData.TypeBattleMonument) && !IsSoccerBall; // Anything players can hit
     public bool IsGuard => NpcType is >= NpcData.TypeGuard and <= NpcData.TypeWarGuard;
     public bool IsNationOwned => Nation is EntityNation.Karus or EntityNation.ElMorad;
-    public bool HasAi => IsMonster || IsGuard || IsScarecrow || IsNationOwned || IsPet || FollowsAPath(MoveType);
+    public bool HasAi => !IsSoccerBall && (IsMonster || IsGuard || IsScarecrow || IsNationOwned || IsPet || FollowsAPath(MoveType));
     public EntityNation Nation { get; set; }
     public int GateOpen { get; set; }
     public bool IsGate => NpcType == NpcData.TypeGate;
     public const byte MapObjectType = 1;
     public byte ObjectType { get; set; }
+    public short ObjectEventType { get; set; } = -1;
 
     public short GetPosX => (short)(X * 10);
     public short GetPosZ => (short)(Z * 10);
@@ -549,6 +557,7 @@ public class NpcInstance
             InitMoveType = NpcMoveType.Stationary,
             Waypoints = [],
             ObjectType = MapObjectType,
+            ObjectEventType = evt.Type,
             GateOpen = evt.Status,
             Nation = (EntityNation)npc.Group
         };

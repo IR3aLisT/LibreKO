@@ -11,6 +11,12 @@ public partial class Net
 
     public event Action<byte, string>? FriendRemoveResultEvent;
 
+    public event Action<string>? FriendLoggedInEvent;
+
+    public event Action<string>? FriendRequestEvent;
+
+    public event Action<byte>? FriendRequestResultEvent;
+
     private void HandleFriendProcess(Packet p)
     {
         if (p.RemainingBytes < 1) return;
@@ -52,37 +58,38 @@ public partial class Net
                 FriendListEvent?.Invoke(new List<FriendEntry>(_friendList));
                 break;
             }
-            case 3:
-            {
-                byte code = p.RemainingBytes >= 1 ? p.ReadByte() : (byte)1;
-                string name = p.RemainingBytes > 0 ? p.ReadSByteString().Trim() : "";
-                var status = ReadFriendStatus(p);
-                FriendAddResultEvent?.Invoke(code, name.Length > 0 ? name : status.Name, status);
+            case FriendSubAdd:
+                if (FriendReplies.ReadAdd(p) is { } added)
+                    FriendAddResultEvent?.Invoke(added.Code, added.Added.Name, added.Added);
                 break;
-            }
-            case 4:
-            {
-                byte code = p.RemainingBytes >= 1 ? p.ReadByte() : (byte)1;
-                string name = p.RemainingBytes > 0 ? p.ReadSByteString().Trim() : "";
-                ReadFriendStatus(p);
-                FriendRemoveResultEvent?.Invoke(code, name);
+            case FriendSubRemove:
+                if (FriendReplies.ReadRemove(p) is { } removed)
+                    FriendRemoveResultEvent?.Invoke(removed.Code, removed.Name);
                 break;
-            }
+            case FriendSubLoggedIn:
+                if (p.RemainingBytes >= 2) FriendLoggedInEvent?.Invoke(p.ReadString().Trim());
+                break;
+            case FriendSubRequest:
+                if (p.RemainingBytes >= 2) FriendRequestEvent?.Invoke(p.ReadString().Trim());
+                break;
+            case FriendSubRequestResult:
+                if (p.RemainingBytes >= 1) FriendRequestResultEvent?.Invoke(p.ReadByte());
+                break;
         }
     }
 
     private const byte FriendSubList = 1;
+    private const byte FriendSubAdd = 3;
+    private const byte FriendSubRemove = 4;
+    private const byte FriendSubLoggedIn = 5;
     private const byte FriendSubDetails = 6;
+    private const byte FriendSubRequest = 16;
+    private const byte FriendSubRequestResult = 17;
+    private const int MaxFriendNameLength = 20;
 
     private readonly List<FriendEntry> _friendList = new();
 
-    private static FriendEntry ReadFriendStatus(Packet p)
-    {
-        string name = p.RemainingBytes > 0 ? p.ReadString().Trim() : "";
-        int charId = p.RemainingBytes >= 4 ? p.ReadInt() : -1;
-        byte status = p.RemainingBytes >= 1 ? p.ReadByte() : (byte)0;
-        return new FriendEntry { Name = name, CharId = charId, Status = status };
-    }
+    private static FriendEntry ReadFriendStatus(Packet p) => FriendReplies.ReadStatus(p);
 
     public void SendFriendListRequest()
     {
@@ -91,23 +98,27 @@ public partial class Net
         _conn.Send(p);
     }
 
-    public void SendFriendAdd(string name)
+    public void SendFriendAdd(string name) => SendFriendName(FriendSubAdd, name);
+
+    public void SendFriendRemove(string name) => SendFriendName(FriendSubRemove, name);
+
+    public void SendFriendAnswer(string requester, bool accept)
     {
-        if (string.IsNullOrEmpty(name)) return;
-        if (name.Length > 20) name = name.Substring(0, 20);
+        if (string.IsNullOrEmpty(requester)) return;
         var p = new Packet(GameOpcodes.GS_FRIEND_PROCESS);
-        p.WriteByte(3);
-        p.WriteSByteString(name);
+        p.WriteByte(FriendSubRequest);
+        p.WriteString(requester);
+        p.WriteByte((byte)(accept ? 1 : 0));
         _conn.Send(p);
     }
 
-    public void SendFriendRemove(string name)
+    private void SendFriendName(byte sub, string name)
     {
         if (string.IsNullOrEmpty(name)) return;
-        if (name.Length > 20) name = name.Substring(0, 20);
+        if (name.Length > MaxFriendNameLength) name = name.Substring(0, MaxFriendNameLength);
         var p = new Packet(GameOpcodes.GS_FRIEND_PROCESS);
-        p.WriteByte(4);
-        p.WriteSByteString(name);
+        p.WriteByte(sub);
+        p.WriteString(name);
         _conn.Send(p);
     }
 }

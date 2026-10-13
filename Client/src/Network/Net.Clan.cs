@@ -8,10 +8,15 @@ public partial class Net
     public const byte KnCreate = 0x01, KnJoin = 0x02, KnWithdraw = 0x03, KnRemove = 0x04, KnDestroy = 0x05,
         KnAdmit = 0x06, KnReject = 0x07, KnChief = 0x09, KnVice = 0x0A, KnOfficer = 0x0B,
         KnAllList = 0x0C, KnMemberReq = 0x0D, KnModifyFame = 0x10, KnInvite = 0x11,
-        KnCapeNpc = 0x1B, KnAllyCreate = 0x1C, KnAllyReq = 0x1D, KnAllyInsert = 0x1E, KnAllyRemove = 0x1F,
+        KnMarkRegister = 0x1A, KnCapeNpc = 0x1B, KnMarkReq = 0x23, KnAllyCreate = 0x1C, KnAllyReq = 0x1D, KnAllyInsert = 0x1E, KnAllyRemove = 0x1F,
         KnAllyPunish = 0x20, KnAllyList = 0x22, KnUpdate = 0x24, KnMemberOnline = 0x27, KnMemberOffline = 0x28,
         KnPointReq = 0x3B, KnPointMethod = 0x3C, KnDonate = 0x3D, KnHandoverList = 0x3E, KnHandoverReq = 0x3F,
-        KnDonationList = 0x40, KnNotice = 0x50, KnNoticeResult = 0x51, KnTop10 = 0x63, KnLeaderPoints = 0x64;
+        KnDonationList = 0x40, KnNotice = 0x50, KnNoticeResult = 0x51, KnClanBonus = 0x62, KnTop10 = 0x63, KnLeaderPoints = 0x64, KnMemo = 0x58;
+    public event Action<byte, string>? ClanMemoEvent;
+
+    public const int NoClanBonus = -1;
+    public int ClanOnlineCount { get; private set; } = NoClanBonus;
+    public event System.Action<int>? ClanBonusEvent;
 
     public const byte KnResultOk = 1;
     public const byte KnDeclined = 11;
@@ -30,6 +35,27 @@ public partial class Net
     public event Action<int, int, string, byte, byte, byte, int, int>? EntityClanEvent;
     public event Action<int>? EntityClanClearedEvent;
     public event Action<int, int, byte>? ClanFameEvent;
+    public event Action<int, byte>? AuthorityFameEvent;
+    public event Action<ClanMatchPair>? ClanMatchPairEvent;
+    public ClanMatchPair? MatchPair { get; private set; }
+
+    internal void SeedPreviewMatch(ClanMatchPair pair) => MatchPair = pair;
+    private const byte AuthorityFameSub = 1;
+    private const int AuthorityFameBytes = 1 + sizeof(int) + 1;
+
+    private void HandleAuthorityChange(Packet p)
+    {
+        if (p.RemainingBytes < AuthorityFameBytes || p.ReadByte() != AuthorityFameSub) return;
+        int charId = p.ReadInt();
+        byte fame = p.ReadByte();
+        if (charId == MyCharId && MyClan.InClan)
+        {
+            var mine = MyClan;
+            mine.Fame = fame;
+            SetMyClan(mine);
+        }
+        AuthorityFameEvent?.Invoke(charId, fame);
+    }
     public event Action? RemovedFromClanEvent;
     public event Action<int, int, string>? ClanInviteEvent;
     public event Action<int, int>? ClanResultEvent;
@@ -40,13 +66,15 @@ public partial class Net
     public event Action<List<(string Name, int Points)>>? ClanDonationListEvent;
     public event Action<List<(string Name, int Points)>>? ClanLeaderPointsEvent;
     public event Action<List<(int Nation, int Rank, string Name)>>? ClanTop10Event;
-    public event Action<bool, List<string>>? ClanHandoverListEvent;
+    public event Action<byte, List<string>>? ClanHandoverListEvent;
     public event Action<bool, string, string>? ClanHandoverEvent;
     public event Action<int, int, int, int, int>? ClanCapeUpdateEvent;
     public event Action<List<ClanStanding>>? ClanStandingEvent;
     public event Action<string, bool>? ClanMemberPresenceEvent;
     public event Action? ClanCapeNpcEvent;
     public event Action<string, int>? AllianceInviteEvent;
+    public event Action<int, int>? ClanMarkRegisterEvent;
+    public event Action<int, int, byte[]>? ClanMarkEvent;
     public event Action<int, int, bool>? AllianceMembershipEvent;
     public event Action<string, List<AllianceClanEntry>>? AllianceListEvent;
 
@@ -78,12 +106,82 @@ public partial class Net
 
     private void ClearMyClan() => SetMyClan(new MyClanInfo { Notice = "", Name = "", MaxMembers = ClanTypes.MaxMembers });
 
+    private const int MarkRegisterReplyBytes = 4;
+    private const int MarkReplyHeaderBytes = 10;
+
+    public void SendClanMarkRegister(byte[] mark)
+    {
+        var p = new Packet(GameOpcodes.GS_KNIGHTS_PROCESS);
+        p.WriteByte(KnMarkRegister);
+        p.WriteUShort((ushort)mark.Length);
+        p.WriteBytes(mark);
+        _conn.Send(p);
+    }
+
+    public void SendClanMarkRequest(int clanId)
+    {
+        var p = new Packet(GameOpcodes.GS_KNIGHTS_PROCESS);
+        p.WriteByte(KnMarkReq);
+        p.WriteUShort((ushort)clanId);
+        _conn.Send(p);
+    }
+
+    private void HandleClanMarkRegister(Packet p)
+    {
+        if (p.RemainingBytes < MarkRegisterReplyBytes) return;
+        int result = p.ReadUShort();
+        int version = p.ReadUShort();
+        if (result == KnResultOk && MyClan.InClan)
+        {
+            var clan = MyClan;
+            clan.MarkVersion = version;
+            MyClan = clan;
+        }
+        ClanMarkRegisterEvent?.Invoke(result, version);
+    }
+
+    private void HandleClanMark(Packet p)
+    {
+        if (p.RemainingBytes < MarkReplyHeaderBytes) return;
+        int result = p.ReadUShort();
+        p.ReadUShort();
+        int clanId = p.ReadUShort();
+        int version = p.ReadUShort();
+        int size = p.ReadUShort();
+        if (result != KnResultOk || size > p.RemainingBytes) return;
+        ClanMarkEvent?.Invoke(clanId, version, p.ReadBytes(size));
+    }
+
     private void HandleKnights(Packet p)
     {
         if (p.RemainingBytes < 1) return;
         byte sub = p.ReadByte();
         switch (sub)
         {
+            case ClanMatchReply.KnightsPairSub:
+                if (ClanMatchReply.ReadPair(p) is { } pair)
+                {
+                    MatchPair = pair;
+                    ClanMatchPairEvent?.Invoke(pair);
+                }
+                return;
+            case KnMarkRegister: HandleClanMarkRegister(p); break;
+            case KnClanAdvance: HandleClanAdvance(p); break;
+            case KnClanApply: HandleClanKindResult(p, ClanApplyResultEvent); break;
+            case KnClanAdvert: HandleClanKindResult(p, ClanAdvertResultEvent); break;
+            case KnClanPromote: HandleClanPromote(p); break;
+            case KnWishBoard: HandleWishBoard(p); break;
+            case KnClanBonus:
+            {
+                bool ok = p.RemainingBytes >= 1 && p.ReadByte() == KnResultOk;
+                ClanOnlineCount = ok && p.RemainingBytes >= 1 ? p.ReadByte() : NoClanBonus;
+                ClanBonusEvent?.Invoke(ClanOnlineCount);
+                break;
+            }
+            case KnClanBattle: HandleClanBattleResult(p); break;
+            case KnClanBattleBegun: HandleClanBattleBegun(p); break;
+            case KnClanBattleEnd: HandleClanBattleEnd(p); break;
+            case KnMarkReq: HandleClanMark(p); break;
             case KnCreate:
             {
                 byte result = p.RemainingBytes >= 1 ? p.ReadByte() : (byte)0;
@@ -403,7 +501,7 @@ public partial class Net
                     int count = p.RemainingBytes >= 2 ? p.ReadUShort() : 0;
                     for (int i = 0; i < count && p.RemainingBytes >= 2; i++) names.Add(p.ReadString());
                 }
-                ClanHandoverListEvent?.Invoke(state == KnResultOk, names);
+                ClanHandoverListEvent?.Invoke(state, names);
                 break;
             }
             case KnHandoverReq:
@@ -448,6 +546,9 @@ public partial class Net
             }
             case KnNoticeResult:
                 ClanNoticeRefusedEvent?.Invoke(p.RemainingBytes >= 1 ? p.ReadByte() : 0);
+                break;
+            case KnMemo:
+                if (ClanMemoReply.Read(p) is { } memo) ClanMemoEvent?.Invoke(memo.Result, memo.Memo);
                 break;
             case KnTop10:
             {
@@ -514,6 +615,15 @@ public partial class Net
     public void SendClanPromoteOfficer(string name) => SendKnightsString(KnOfficer, name);
     public void SendClanHandover(string name) => SendKnightsString(KnHandoverReq, name);
     public void SendClanNotice(string notice) => SendKnightsString(KnNotice, notice);
+
+    public void SendClanMemo(string memo)
+    {
+        var p = new Packet(GameOpcodes.GS_KNIGHTS_PROCESS);
+        p.WriteByte(KnMemo);
+        p.WriteByte(Domain.ClanMemo.WriteKind);
+        p.WriteString(memo);
+        _conn.Send(p);
+    }
 
     public void SendClanInvite(int charId)
     {

@@ -32,7 +32,7 @@ public static class ClanRules
 
     public const byte FameChief = 1;
     public const byte FameViceChief = 2;
-    public const byte FameOfficer = 3;
+    public const byte FameOfficer = 6;
     public const byte FameTrainee = 5;
 
     public static short CapeForType(ClanType type, short current) => type switch
@@ -58,9 +58,16 @@ public static class ClanRules
 
     public static bool CanInvite(byte fame) => fame is FameChief or FameViceChief;
 
-    public static bool CanAdmit(byte fame) => fame is >= FameChief and <= FameOfficer;
+    public static bool IsStaff(byte fame) => fame is FameChief or FameViceChief or FameOfficer;
+
+    public static bool CanAdmit(byte fame) => IsStaff(fame);
 
     public static bool MeetsCapeRank(byte flag, byte grade, byte capeRanking, byte capeGrade) =>
         flag >= capeRanking
         && (flag > (byte)ClanType.Promoted || capeGrade == 0 || grade <= capeGrade);
+
+    public const byte CastellanCapeType = 3;
+    public const byte VoucherTicket = 1;
+
+    public static bool VoucherCape(byte capeType, byte ticket) => capeType == CastellanCapeType && ticket == VoucherTicket;
 }

@@ -7,6 +7,10 @@ namespace LibreKO;
 public partial class World
 {
     private const int NameChangeAuctionOpenText = 43715;
+    private const int TextClanRenameHint = 7708;
+    private const int TextClanNameTaken = 7709;
+    private const int TextClanRenamed = 7710;
+    private const int TextClanRenameNotMember = 7712;
 
     private CanvasLayer _nameChangeLayer = null!;
     private HudWindow _nameChangePanel = null!;
@@ -14,19 +18,25 @@ public partial class World
     private Label _nameChangeStatus = null!;
     private Button _nameChangeBtn = null!;
     private bool _nameChangeShown;
+    private bool _nameChangeClan;
     private string _nameChangePending = "";
+    private Label _nameChangeTitle = null!, _nameChangeHint = null!;
 
     private void NameChangeInit()
     {
         BuildNameChangePanel();
         Net.I.NameChangeSuccessEvent += OnNameChangeSuccess;
         Net.I.NameChangeResultEvent += OnNameChangeResult;
+        Net.I.ClanNameChangeResultEvent += OnClanNameChangeResult;
+        Net.I.ClanRenamedEvent += OnClanRenamed;
     }
 
     private void NameChangeDispose()
     {
         Net.I.NameChangeSuccessEvent -= OnNameChangeSuccess;
         Net.I.NameChangeResultEvent -= OnNameChangeResult;
+        Net.I.ClanNameChangeResultEvent -= OnClanNameChangeResult;
+        Net.I.ClanRenamedEvent -= OnClanRenamed;
     }
 
     private void BuildNameChangePanel()
@@ -41,11 +51,13 @@ public partial class World
         var r = _nameChangePanel.Body;
         r.AddThemeConstantOverride("separation", 8);
 
-        r.AddChild(UiTheme.SectionTitle("Rename Character"));
+        _nameChangeTitle = UiTheme.SectionTitle("Rename Character");
+        r.AddChild(_nameChangeTitle);
 
-        var hint = HudStyle.Label(12);
-        hint.Text = "Requires a Scroll of Identity. 3-20 characters.";
-        r.AddChild(hint);
+        _nameChangeHint = HudStyle.Label(12);
+        _nameChangeHint.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _nameChangeHint.CustomMinimumSize = new Vector2(260, 0);
+        r.AddChild(_nameChangeHint);
 
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 6);
@@ -66,11 +78,16 @@ public partial class World
         r.AddChild(_nameChangeStatus);
     }
 
-    private void OpenNameChange()
+    private void OpenNameChange(bool clan = false)
     {
+        _nameChangeClan = clan;
+        _nameChangeTitle.Text = clan ? "Rename Clan" : "Rename Character";
+        _nameChangeHint.Text = clan
+            ? ItemData.Text(TextClanRenameHint, "Click on the clan ID you would like to change.")
+            : "Requires a Scroll of Identity. 3-20 characters.";
         _nameChangePanel.Visible = true;
         _nameChangeShown = true;
-        _nameChangeEdit.Text = Net.I.LastEnter.Name ?? "";
+        _nameChangeEdit.Text = clan ? "" : Net.I.LastEnter.Name ?? "";
         _nameChangeEdit.CaretColumn = _nameChangeEdit.Text.Length;
         SetNameChangeStatus("", false);
         _nameChangeEdit.GrabFocus();
@@ -91,13 +108,18 @@ public partial class World
             SetNameChangeStatus("Name must be 3-20 characters.", true);
             return;
         }
+        _nameChangePending = name;
+        SetNameChangeStatus("Renaming…", false);
+        if (_nameChangeClan)
+        {
+            Net.I.SendClanNameChangeConfirm(name);
+            return;
+        }
         if (name == (Net.I.LastEnter.Name ?? ""))
         {
             SetNameChangeStatus("That's already your name.", true);
             return;
         }
-        _nameChangePending = name;
-        SetNameChangeStatus("Renaming…", false);
         Net.I.SendNameChangeConfirm(name);
     }
 
@@ -134,6 +156,31 @@ public partial class World
                 SetNameChangeStatus("Couldn't change the name.", true);
                 break;
         }
+    }
+
+    private void OnClanNameChangeResult(int code)
+    {
+        switch (code)
+        {
+            case Net.ClanNameChangeShowDialog:
+                OpenNameChange(clan: true);
+                break;
+            case Net.ClanNameChangeInvalid:
+                if (!_nameChangeShown || !_nameChangeClan) OpenNameChange(clan: true);
+                SetNameChangeStatus(ItemData.Text(TextClanNameTaken, "The ID you entered is being used by another clan. Please pick another ID."), true);
+                break;
+            case Net.ClanNameChangeNotInClan:
+                CombatNotice(ItemData.Text(TextClanRenameNotMember, "You can change your clan ID only if you are a clan member!"));
+                CloseNameChange();
+                break;
+        }
+    }
+
+    private void OnClanRenamed(string newName)
+    {
+        if (_nameChangeClan) CloseNameChange();
+        CombatNotice(ItemData.Text(TextClanRenamed, "Your clan ID has been changed."));
+        Net.I.SendClanMembersRequest();
     }
 
     private void SetNameChangeStatus(string text, bool warn)

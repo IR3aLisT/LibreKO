@@ -1,0 +1,9 @@
+
+Bind Npc 32286
+
+On greeting
+    Say "Would you like to enter into the Krowaz's Land? If the party leader applies for the entrance, all the party members can enter into the same area at one scoop. Otherwise, everybody enters individually."
+    Topic "I'll just go." do
+        Teleport 71 at 1367 1102
+    Topic "No, I'll just go." goto close
+    Goto close

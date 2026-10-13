@@ -11,7 +11,7 @@ public partial class World
         System.Array.IndexOf(InventoryConstants.VisualSlots, InventoryConstants.Head);
 
     private void GraftEquipment(Node3D body, int race, int face, int[]? gear, int hair,
-                               bool hideHelmet = false)
+                               bool hideHelmet = false, bool hideCostume = false)
     {
         if (!_partsLoaded) { _partsIndex = LoadPartsIndex(); _partsLoaded = true; }
         if (_partsIndex == null) return;
@@ -28,7 +28,7 @@ public partial class World
         string? faceStem = FacePartStem(race, face);
         if (faceStem != null) { if (GraftPart(parts, 4, faceStem, "characters")) grafted++; else missing++; }
 
-        var costume = gear != null
+        var costume = gear != null && !hideCostume
             ? CostumeLook.Dress(gear, hideHelmet, ArmorResource,
                 (part, resource, itemId) => GraftArmor(parts, part, itemId, resource, race))
             : null;
@@ -120,7 +120,7 @@ public partial class World
     {
         if (_partsIndex == null || !_partsIndex.Races.TryGetValue(race, out var rr) || rr.Face.Length == 0)
             return null;
-        return $"{rr.Face}{face:D2}";
+        return CharacterPreview.FaceStem(rr.Face, face);
     }
 
     private string? HairPartStem(int race, int hair)

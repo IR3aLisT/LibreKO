@@ -79,6 +79,7 @@ public static class SkillData
         public int BuffType;
         public int Buff2Type, Buff2Duration;
         public int NeedWeapon, NeedItem;
+        public int NeedBuffSkill;
         public int CooldownGroup;
         private const int PotionItemGroup = 9;
         public Godot.Collections.Dictionary Effect = new();
@@ -101,7 +102,8 @@ public static class SkillData
         public bool IsGroundArea => IsArea && IsAreaMoral && HasCastPhase;
 
         public bool IsCasterArea => (IsArea && (IsCasterAreaMoral || (IsAreaMoral && !HasCastPhase)))
-            || (IsCasterAreaMoral && Type1 is MagicType.Buff or MagicType.Special);
+            || (IsCasterAreaMoral && Type1 is MagicType.Buff or MagicType.Special)
+            || (Moral == SkillTarget.PartyAll && Radius == 0 && Type1 is MagicType.DotHeal or MagicType.Warp);
 
         public bool IsAreaCast => IsGroundArea || IsCasterArea;
 
@@ -140,6 +142,9 @@ public static class SkillData
         public int SpecialKind =>
             Type1 == MagicType.Special && Effect.TryGetValue("Type", out var v) ? (int)v : 0;
 
+        public int StateChange =>
+            Type1 == MagicType.Stealth && Effect.TryGetValue("StateChange", out var v) ? (int)v : 0;
+
         public int NeedStone => Effect.TryGetValue("NeedStone", out var v) ? (int)v : 0;
 
         public int TransformModelId => Effect.TryGetValue("TransformId", out var v) ? (int)v : 0;
@@ -150,6 +155,11 @@ public static class SkillData
         public int TransformUse => Effect.TryGetValue("UserSkillUse", out var v) ? (int)v : 0;
 
         public bool IsResurrect => SpecialKind == SpecialMagic.Resurrect;
+
+        public bool Revives => SpecialKind is SpecialMagic.Resurrect or SpecialMagic.ResurrectSelf or SpecialMagic.LifeCrystal;
+
+        public int WarpKind =>
+            Type1 == MagicType.Warp && Effect.TryGetValue("WarpType", out var warp) ? (int)warp : 0;
 
         public bool IsBlink =>
             Type1 == MagicType.Warp && Effect.TryGetValue("WarpType", out var v) && (int)v == WarpType.Blink;
@@ -341,6 +351,7 @@ public static class SkillData
                 Buff2Type = Int(o, "buff2Type"),
                 Buff2Duration = Int(o, "buff2Duration"),
                 NeedWeapon = Int(o, "needWeapon"),
+                NeedBuffSkill = Int(o, "needBuffSkill"),
                 NeedItem = Int(o, "needItem"),
                 CooldownGroup = Int(o, "cooldownGroup"),
                 Effect = Dict(o, "effect"),

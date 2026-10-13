@@ -1,6 +1,10 @@
 using FluentAssertions;
 using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Common.Domain.Services;
 using LibreKO.Game.Protocol.Writers;
+using LibreKO.Game.World;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 
 namespace LibreKO.Game.Tests;
 
@@ -28,6 +32,43 @@ public class NoticeTests
         packet.ReadByte().Should().Be(1);
         packet.ReadString().Should().Be("Exp Event");
         packet.ReadString().Should().Be("Experience is doubled");
+    }
+
+    [Fact]
+    public void AnEventTitleIsStyleFourWithItsTitleAndMessage()
+    {
+        var packet = NoticePacketWriter.EventTitle("Clan Notice", "Siege at nine");
+
+        packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_NOTICE);
+        packet.ReadByte().Should().Be(NoticePacketWriter.EventTitles);
+        packet.ReadByte().Should().Be(NoticePacketWriter.TitleShown);
+        packet.ReadString().Should().Be("Clan Notice");
+        packet.ReadString().Should().Be("Siege at nine");
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void RemovingAnEventTitleNamesOnlyTheTitle()
+    {
+        var packet = NoticePacketWriter.EventTitleRemoved("Exp Event");
+
+        packet.ReadByte().Should().Be(NoticePacketWriter.EventTitles);
+        packet.ReadByte().Should().Be(NoticePacketWriter.TitleRemoved);
+        packet.ReadString().Should().Be("Exp Event");
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void OnlyRunningRateEventsAreListedWithTheirServerText()
+    {
+        var data = Substitute.For<IGameDataService>();
+        data.GetServerResource(RateEvents.ResourceId(RateEvent.Exp)).Returns("Earn %d percent extra EXP.");
+        var rates = new TimeWeatherBroadcastService(new SessionManager(), Substitute.For<ILogger<TimeWeatherBroadcastService>>())
+        {
+            ExpEventAmount = 50,
+        };
+
+        RateEvents.Active(rates, data).Should().Equal(("Exp Event", "Earn 50 percent extra EXP."));
     }
 
     [Fact]

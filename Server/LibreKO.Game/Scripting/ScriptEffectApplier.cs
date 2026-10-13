@@ -39,6 +39,15 @@ public sealed class ScriptEffectApplier(
         await ApplyPendingClanAsync(context);
         await ApplyPendingAchievementsAsync(session, context);
         await ApplyPendingTempleEventJoinAsync(session, context);
+        if (context.PendingSoccerTeam != SoccerService.TeamNone && !context.ActionFailed)
+            await serviceProvider.GetRequiredService<ISoccerService>().JoinAsync(session, context.PendingSoccerTeam);
+        if (context.PendingSoccerStart && !context.ActionFailed)
+            await serviceProvider.GetRequiredService<ISoccerService>().StartAsync(session);
+        foreach (var itemId in context.PendingItemAnnouncements)
+            await serviceProvider.GetRequiredService<SessionManager>()
+                .BroadcastToAll(EffectPacketWriter.ItemAnnouncement(itemId, session.Name));
+        if (context.PendingRankBoard && !context.ActionFailed)
+            await serviceProvider.GetRequiredService<IRankBoardService>().SendAsync(session);
         await ApplyPendingLevelAsync(session, context, scriptName);
 
         await ApplyPendingNpcDespawnAsync(session, context, scriptName);
@@ -46,6 +55,7 @@ public sealed class ScriptEffectApplier(
         await ApplyPendingInstanceAsync(session, context, scriptName);
         await ApplyPendingClanInstanceAsync(session, context, scriptName);
         await ApplyPendingClanZoneChangeAsync(session, context, scriptName);
+        await ApplyPendingPartyZoneChangeAsync(session, context, scriptName);
         await ApplyPendingZoneChangeAsync(session, context, scriptName);
 
         if (context.NationTransferRequested && !context.ActionFailed)
@@ -259,6 +269,52 @@ public sealed class ScriptEffectApplier(
         var (x, z) = ResolveWarpTarget(session, (entry.ZoneId, entry.X, entry.Z));
         await serviceProvider.GetRequiredService<IInstanceEntryService>()
             .EnterClanAsync(session, (byte)entry.ZoneId, (short)entry.Set, x, z);
+    }
+
+    private async Task ApplyPendingPartyZoneChangeAsync(UserSession session, QuestScriptContext context, string scriptName)
+    {
+        if (context.PendingPartyZoneChange is not { } warp)
+            return;
+
+        if (context.ActionFailed)
+        {
+            logger.LogInformation(
+                "Script {Script}: party zone change to {Zone} skipped for {Name} — the script's action failed",
+                scriptName, warp.ZoneId, session.Name);
+            return;
+        }
+
+        if (warp.ZoneId is <= 0 or > byte.MaxValue
+            || !gameData.ZoneInfoTable.ContainsKey((short)warp.ZoneId))
+        {
+            logger.LogWarning(
+                "Script {Script}: zone {Zone} is not on this server, ignoring the party zone change for {Name}",
+                scriptName, warp.ZoneId, session.Name);
+            return;
+        }
+
+        var sessionManager = serviceProvider.GetRequiredService<SessionManager>();
+        var members = sessionManager.Parties.GetParty(session.PartyIndex) is { } party
+            ? party.MemberIds.Where(id => id >= 0)
+                .Select(id => sessionManager.GetByCharacterId(id))
+                .OfType<UserSession>()
+                .Where(member => member == session || !ZoneRules.IsTempleEvent(member.ZoneId))
+                .ToList()
+            : [session];
+
+        var (x, z) = ResolveWarpTarget(session, warp);
+        var transitions = serviceProvider.GetRequiredService<IZoneTransitionService>();
+        foreach (var member in members)
+        {
+            if (member.ZoneId == warp.ZoneId)
+            {
+                await serviceProvider.GetRequiredService<Protocol.IWorldPacketCoordinator>()
+                    .WarpAsync(member, (ushort)(x * 10f), (ushort)(z * 10f));
+                continue;
+            }
+
+            await transitions.ChangeZoneAsync(member, (byte)warp.ZoneId, x, z);
+        }
     }
 
     private async Task ApplyPendingClanZoneChangeAsync(UserSession session, QuestScriptContext context, string scriptName)

@@ -11,6 +11,7 @@ public interface ICombatLifecycleService
 {
     void SetNpcAggro(NpcInstance npc, UserSession attacker);
     Task HandleRegeneAsync(IClient client, UserSession session, byte _regeneType);
+    Task RespawnInPlaceAsync(IClient client, UserSession session);
     Task HandleNpcDeathAsync(NpcInstance npc, UserSession killer);
     Task HandlePlayerDeathAsync(UserSession victim, UserSession? killer);
     Task SendHpChangeAsync(UserSession session, int attackerId = -1);
@@ -35,6 +36,12 @@ public class CombatLifecycleService(
     IStealthService stealthService,
     IPetService petService,
     IDrakiTowerService drakiTowerService,
+    IRespawnBlinkService respawnBlinkService,
+    IChaosDungeonService chaosDungeonService,
+    IKillStreakService killStreakService,
+    IVanguardService vanguardService,
+    IWarCaptainService warCaptainService,
+    IClanMatchService clanMatchService,
     ILogger<CombatLifecycleService> logger) : ICombatLifecycleService
 {
     public const int NoKillerId = -1;
@@ -106,7 +113,7 @@ public class CombatLifecycleService(
             logger.LogWarning(
                 "Zone {ZoneId} has no start position — respawning {CharacterId}/{Name} in place rather than leaving them dead",
                 session.ZoneId, session.CharacterId, session.Name);
-            await ReviveInPlaceAsync(client, session);
+            await RespawnInPlaceAsync(client, session);
             return;
         }
 
@@ -147,19 +154,24 @@ public class CombatLifecycleService(
         await zoneTransitionService.RefreshArenaAsync(session);
 
         await worldVisibilityService.BroadcastUserInOutAsync(session, InOutType.Warp);
-        await worldVisibilityService.SendNearbyUsersToClientAsync(session);
+        await worldVisibilityService.SendNpcRegionListAsync(session);
+        await worldVisibilityService.SendRegionUserListAsync(session);
+        await respawnBlinkService.StartAsync(session);
     }
 
-    private async Task ReviveInPlaceAsync(IClient client, UserSession session)
+    public async Task RespawnInPlaceAsync(IClient client, UserSession session)
     {
         session.KillerNpcType = 0;
         session.DeathExpLoss = 0;
+        await worldVisibilityService.BroadcastUserInOutAsync(session, InOutType.Out);
         await SendRespawnAsync(client, session);
+        await worldVisibilityService.BroadcastUserInOutAsync(session, InOutType.Respawn);
+        await respawnBlinkService.StartAsync(session);
     }
 
     private async Task SendRespawnAsync(IClient client, UserSession session)
     {
-        var result = RegenePacketWriter.At(session.GetPosX, session.GetPosZ);
+        var result = RegenePacketWriter.At(session.GetPosX, session.GetPosZ, session.GetPosY);
         await client.SendPacket(result);
 
         await savedMagicService.DropVolatileAsync(session);
@@ -220,7 +232,19 @@ public class CombatLifecycleService(
             victim.CharacterId, killer?.CharacterId ?? NoKillerId);
         await sessionManager.Regions.SendToRegion(victim, deadPacket, excludeSender: false);
 
+        if (victim.ZoneId == ChaosRules.Zone)
+        {
+            await chaosDungeonService.OnPlayerKilledAsync(victim, killer);
+            victim.KillerNpcType = 0;
+            return;
+        }
+
+        var slainVanguard = vanguardService.IsWanted(victim);
         await combatRewardService.AwardPlayerKillAsync(victim, killer);
+        await killStreakService.OnPlayerDiedAsync(victim);
+        await vanguardService.OnPlayerDiedAsync(victim, killer);
+        await warCaptainService.OnPlayerDiedAsync(victim);
+        await clanMatchService.OnPlayerDiedAsync(victim, killer);
 
         if (killer == null)
         {
@@ -233,7 +257,7 @@ public class CombatLifecycleService(
 
         if (killer.Nation != victim.Nation && !penaltyFree)
         {
-            await combatNotificationService.SendDeathNoticeAsync(killer, victim);
+            await combatNotificationService.SendDeathNoticeAsync(killer, victim, slainVanguard);
 
             if (victim.Loyalty <= 0)
             {
@@ -254,7 +278,7 @@ public class CombatLifecycleService(
                     victim, LoyaltyAwards.WithRivalryBonus(award, avenged).Victim);
                 if (party == null)
                 {
-                    await loyaltyService.ChangeAsync(
+                    await loyaltyService.AwardKillAsync(
                         killer, LoyaltyAwards.WithRivalryBonus(award, avenged).Killer);
                 }
                 else
@@ -269,7 +293,7 @@ public class CombatLifecycleService(
 
                         var avengedByMember = member.HasRival
                             && member.RivalId == victim.CharacterId;
-                        await loyaltyService.ChangeAsync(
+                        await loyaltyService.AwardKillAsync(
                             member,
                             LoyaltyAwards.WithRivalryBonus(award, avengedByMember).Killer);
                         if (avengedByMember)

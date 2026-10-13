@@ -8,6 +8,9 @@ public static class RepairPrice
     private const double PriceDivisor = 10000.0;
     private const double PriceExponent = 0.75;
 
+    public static bool Listed(bool chargeItem, bool noRepairSale, int maxDurability, int durability, int cost) =>
+        !chargeItem && !noRepairSale && maxDurability > 1 && durability < maxDurability && cost > 0;
+
     public static int Cost(int buyPrice, int maxDurability, int durability)
     {
         int missing = maxDurability - durability;

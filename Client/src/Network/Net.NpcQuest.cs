@@ -60,8 +60,27 @@ public partial class Net
     public event Action<GameOpcodes>? NpcWindowEvent;
     public event Action<string[]>? NpcSayTextEvent;
 
+    public event Action<int, int>? JuraidWarningEvent;
+    private const byte JuraidWarningStyle = 67;
+
+    private bool TryHandleJuraidWarning(Packet p)
+    {
+        if (p.RemainingBytes < 13) return false;
+        p.ReadInt();
+        if (p.ReadByte() != JuraidWarningStyle)
+        {
+            p.ResetOffset();
+            return false;
+        }
+        JuraidWarningEvent?.Invoke(p.ReadInt(), p.ReadInt());
+        return true;
+    }
+
     private void HandleSelectMsg(Packet p)
     {
+        if (TryHandleDashboard(p)) return;
+        if (TryHandleJuraidWarning(p)) return;
+        if (p.RemainingBytes < NpcDialog.MinimumBytes) return;
         try
         {
             NpcDialogEvent?.Invoke(NpcDialog.Read(p));

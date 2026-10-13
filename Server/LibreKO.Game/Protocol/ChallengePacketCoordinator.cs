@@ -24,6 +24,7 @@ public class ChallengePacketCoordinator(
     private const byte ChallengePvpReject = 4;
     private const byte ChallengePvpRequestSent = 5;
     private const byte ChallengeGenericError = 11;
+    private const byte ChallengeZoneError = 12;
 
     public async Task HandleAsync(IClient client, Packet packet)
     {
@@ -58,9 +59,16 @@ public class ChallengePacketCoordinator(
     private async Task RequestAsync(UserSession session, Packet packet)
     {
         if (session.Trade.IsRequestingChallenge || session.Trade.IsChallengeRequested
-            || session.IsInParty || session.Trade.IsTrading || session.Trade.IsMerchanting)
+            || session.IsInParty || session.Trade.IsTrading || session.Trade.IsMerchanting
+            || session.ZoneId == (byte)ZoneId.Arena)
         {
             await SendErrorAsync(session);
+            return;
+        }
+
+        if (ChallengeBlockedIn(session.ZoneId))
+        {
+            await SendErrorAsync(session, ChallengeZoneError);
             return;
         }
 
@@ -142,9 +150,11 @@ public class ChallengePacketCoordinator(
         await partner.Client.SendPacket(ChallengePacketWriter.Notice(opcode));
     }
 
-    private static async Task SendErrorAsync(UserSession session)
+    public static bool ChallengeBlockedIn(byte zoneId) =>
+        BattleZoneManager.IsPvpZone(zoneId) || BattleZoneManager.IsBattleZone(zoneId) || zoneId == (byte)ZoneId.Delos;
+
+    private static async Task SendErrorAsync(UserSession session, byte error = ChallengeGenericError)
     {
-        await session.Client.SendPacket(
-            ChallengePacketWriter.Notice(ChallengeGenericError));
+        await session.Client.SendPacket(ChallengePacketWriter.Notice(error));
     }
 }

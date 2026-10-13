@@ -37,6 +37,7 @@ public sealed class CrowdAnimator
     private bool _loop;
     private float _length;
     private double _time, _previousTime, _blendLeft, _blendTotal;
+    private bool _holdBlend;
 
     public bool Driving { get; private set; }
 
@@ -78,13 +79,14 @@ public sealed class CrowdAnimator
         return false;
     }
 
-    public static void NotifyPlay(AnimationPlayer anim, string name, double blend)
+    public static void NotifyPlay(AnimationPlayer anim, string name, double blend, bool hold = true)
     {
-        if (_byPlayer.TryGetValue(anim.GetInstanceId(), out var animator)) animator.Play(name, blend);
+        if (_byPlayer.TryGetValue(anim.GetInstanceId(), out var animator)) animator.Play(name, blend, hold);
     }
 
-    private void Play(string name, double blend)
+    private void Play(string name, double blend, bool hold)
     {
+        _holdBlend = hold;
         var clip = Bake(name);
         if (clip == null) { _clip = null; return; }
         if (_clip != null && blend > 0)
@@ -130,16 +132,19 @@ public sealed class CrowdAnimator
     {
         if (_clip == null || !GodotObject.IsInstanceValid(_skel)) return;
         CountStep();
-        _time += delta;
-        if (_loop) { if (_length > 0f) _time = Mathf.PosMod(_time, _length); }
-        else if (_time > _length) _time = _length;
-
         float weight = 0f;
-        if (_blendLeft > 0 && _previous != null)
+        bool blending = _blendLeft > 0 && _previous != null;
+        if (blending)
         {
             _blendLeft -= delta;
-            _previousTime += delta;
+            if (!_holdBlend) _previousTime += delta;
             weight = _blendTotal > 0 ? (float)Mathf.Clamp(_blendLeft / _blendTotal, 0.0, 1.0) : 0f;
+        }
+        if (!blending || !_holdBlend)
+        {
+            _time += delta;
+            if (_loop) { if (_length > 0f) _time = Mathf.PosMod(_time, _length); }
+            else if (_time > _length) _time = _length;
         }
         if (apply) Apply(_clip, (float)_time, weight > 0f ? _previous : null, (float)_previousTime, weight);
     }

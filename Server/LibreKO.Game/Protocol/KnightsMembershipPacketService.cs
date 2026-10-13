@@ -19,6 +19,8 @@ public interface IKnightsMembershipPacketService
     Task HandleDestroyAsync(UserSession session);
     Task HandleAdmitAsync(UserSession session, Packet packet);
     Task HandleRejectAsync(UserSession session, Packet packet);
+    Task InviteAsync(UserSession inviter, int targetId);
+    Task<bool> JoinFromBoardAsync(UserSession target, KnightsEntity clan);
 }
 
 public class KnightsMembershipPacketService(
@@ -68,6 +70,7 @@ public class KnightsMembershipPacketService(
         if (string.IsNullOrWhiteSpace(clanName)
             || clanName.Length < MinClanNameLength
             || clanName.Length > MaxClanNameLength
+            || !NameRules.IsPlain(clanName)
             || await knightsRepo.IsNameTakenAsync(clanName))
         {
             await session.Client.SendPacket(KnightsPacketWriter.CreateResult(KnightsCreateResult.NameRefused));
@@ -98,6 +101,7 @@ public class KnightsMembershipPacketService(
         await knightsRuntimeService.SyncCharacterAsync(knightsRepo, session, includeMoney: true);
 
         sessionManager.Knights.AddClan(clan.Id, clan);
+        await knightsRuntimeService.RefreshClanBonusAsync(clan.Id);
 
         var response = KnightsPacketWriter.ClanCreated(
             session.CharacterId, clan.Id, clanName, clan.Grade, clan.Ranking, session.Money);
@@ -115,6 +119,16 @@ public class KnightsMembershipPacketService(
         }
 
         logger.LogInformation("{Name} sent a clan application, which nothing on this server admits", session.Name);
+    }
+
+    public Task InviteAsync(UserSession inviter, int targetId) => HandleInviteAsync(inviter, targetId);
+
+    public async Task<bool> JoinFromBoardAsync(UserSession target, KnightsEntity clan)
+    {
+        if (target.KnightsId > 0 || clan.Members >= ClanRules.MaxMembers || clan.Nation != (byte)target.Nation)
+            return false;
+        await JoinClanAsync(target, clan);
+        return true;
     }
 
     private async Task HandleInviteAsync(UserSession session, int targetId)
@@ -211,6 +225,7 @@ public class KnightsMembershipPacketService(
         }
 
         await clanStanding.RefreshClanAsync(clan.Id);
+        await knightsRuntimeService.RefreshClanBonusAsync(clan.Id);
 
         var allianceId = sessionManager.Knights.GetAllianceForClan(clan.Id)?.MainClanId ?? 0;
         var joined = KnightsPacketWriter.JoinAccepted(new KnightsPacketWriter.JoinedState(
@@ -394,9 +409,6 @@ public class KnightsMembershipPacketService(
             try
             {
                 await onlineMember.Client.SendPacket(disbanded);
-                await onlineMember.Client.SendPacket(
-                    KnightsBroadcastBuilders.BuildClanPointsBattleNotification(
-                        KnightsBroadcastBuilders.ClanPointsBattleDisband));
                 await knightsRuntimeService.BroadcastFameChangeAsync(onlineMember, 0, 0);
             }
             catch

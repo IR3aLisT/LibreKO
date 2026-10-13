@@ -73,7 +73,7 @@ public class ForgottenTempleTests
                 Outcome = TempleEventRewardOutcome.Win,
                 ItemId = GreenTreasureChestItemId,
                 ItemCount = 1,
-                MinLevel = 35,
+                MinLevel = 46,
                 MaxLevel = 59,
                 ExpPercent = 100
             },
@@ -162,25 +162,25 @@ public class ForgottenTempleTests
     }
 
     [Fact]
-    public async Task EnterAsync_WhenLowLevelTier_AcceptsLevel35And50_BlocksLevel30And70()
+    public async Task EnterAsync_WhenLowLevelTier_AcceptsLevel46And50_BlocksLevel45And70()
     {
-        _service.Start(minLevel: 35, maxLevel: 59);
-        var validPlayer35 = CreateTestSession(102, level: 35);
+        _service.Start(minLevel: TempleEventRules.ForgottenTempleLowMinLevel, maxLevel: TempleEventRules.ForgottenTempleLowMaxLevel);
+        var validPlayer46 = CreateTestSession(102, level: 46);
         var validPlayer50 = CreateTestSession(103, level: 50);
-        var underPlayer30 = CreateTestSession(104, level: 30);
+        var underPlayer45 = CreateTestSession(104, level: 45);
         var overPlayer70 = CreateTestSession(105, level: 70);
 
-        await _service.EnterAsync(validPlayer35);
+        await _service.EnterAsync(validPlayer46);
         await _service.EnterAsync(validPlayer50);
-        await _service.EnterAsync(underPlayer30);
+        await _service.EnterAsync(underPlayer45);
         await _service.EnterAsync(overPlayer70);
 
         await _zoneTransition.Received(1)
-            .ChangeZoneAsync(validPlayer35, ForgottenTempleService.FtZoneId, 150f, 150f);
+            .ChangeZoneAsync(validPlayer46, ForgottenTempleService.FtZoneId, 150f, 150f);
         await _zoneTransition.Received(1)
             .ChangeZoneAsync(validPlayer50, ForgottenTempleService.FtZoneId, 150f, 150f);
         await _zoneTransition.DidNotReceive()
-            .ChangeZoneAsync(underPlayer30, ForgottenTempleService.FtZoneId, Arg.Any<float>(), Arg.Any<float>());
+            .ChangeZoneAsync(underPlayer45, ForgottenTempleService.FtZoneId, Arg.Any<float>(), Arg.Any<float>());
         await _zoneTransition.DidNotReceive()
             .ChangeZoneAsync(overPlayer70, ForgottenTempleService.FtZoneId, Arg.Any<float>(), Arg.Any<float>());
     }

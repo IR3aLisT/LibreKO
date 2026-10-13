@@ -8,4 +8,6 @@ public enum ItemSealResult : byte
     WrongCode = 4,
     MissingMaterial = 5,
     NoCodeSet = 20,
+    CodeLockedOut = 21,
+    WrongVaultPassword = 22,
 }

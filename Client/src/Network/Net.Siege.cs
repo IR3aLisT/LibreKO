@@ -14,6 +14,12 @@ public partial class Net
     public event Action<SiegeCollected>? SiegeCollectedEvent;
     public event Action<SiegeTaxRates>? SiegeTaxRatesEvent;
     public event Action<SiegeRateChanged>? SiegeRateChangedEvent;
+    public event Action? SiegeWarEvent;
+    public event Action<short>? SiegeBaseEvent;
+    public event Action<SiegePoints>? SiegePointsEvent;
+
+    public SiegeWarStatus SiegeWar { get; private set; } = SiegeWarStatus.None;
+    public int SiegePointTotal { get; private set; }
 
     private void HandleSiege(Packet p)
     {
@@ -25,6 +31,25 @@ public partial class Net
                 break;
             case SiegeWarfare.CastleOffice:
                 HandleSiegeOffice(p);
+                break;
+            case Domain.SiegeWar.BaseSub:
+                if (p.RemainingBytes >= 1 + sizeof(short) && p.ReadByte() == Domain.SiegeWar.BaseSub)
+                    SiegeBaseEvent?.Invoke(p.ReadShort());
+                break;
+            case Domain.SiegeWar.StatusSub:
+                if (SiegeWarStatus.Read(p) is { } status)
+                {
+                    SiegeWar = status;
+                    RefreshKnownHostility();
+                    SiegeWarEvent?.Invoke();
+                }
+                break;
+            case Domain.SiegeWar.PointsSub:
+                if (SiegePoints.Read(p, SiegePointTotal) is { } points)
+                {
+                    SiegePointTotal = points.Kind == SiegePoints.Renewed ? 0 : points.Total;
+                    SiegePointsEvent?.Invoke(points);
+                }
                 break;
         }
     }

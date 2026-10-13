@@ -24,6 +24,7 @@ public class MerchantListingService(
     IUserNotificationService userNotificationService,
     IMerchantLifecycleService merchantLifecycleService,
     IMarketPriceService marketPriceService,
+    IDailyRankService dailyRankService,
     ILogger<MerchantListingService> logger) : IMerchantListingService
 {
     public async Task AddItemAsync(UserSession session, Packet packet)
@@ -245,8 +246,23 @@ public class MerchantListingService(
             MerchantSubOpcode.ItemPurchased, itemId, session.Name);
         await merchant.Client.SendPacket(soldNotify);
         await marketPriceService.RecordAsync(session, merchant, itemId, unitPrice, count);
+        await dailyRankService.CountMerchantSaleAsync(merchant, totalCost);
 
         if (merchant.Trade.MerchantItems.All(entry => entry == null || entry.IsEmpty))
+        {
             await merchantLifecycleService.CloseAsync(merchant, MerchantInOut.StallClosed);
+            return;
+        }
+
+        if (remainingCount == 0 && merchantSlot < MerchantLifecycleService.ShowcaseSlots(merchant))
+            await sessionManager.Regions.SendToRegion(merchant, ShowcasePacket(merchant, merchantSlot), excludeSender: false);
+    }
+
+    private static Packet ShowcasePacket(UserSession merchant, byte slot)
+    {
+        var flags = MerchantLifecycleService.StallFlags(merchant);
+        return merchant.Trade.PremiumMerchant
+            ? MerchantPacketWriter.ShowcaseRefreshed(merchant.CharacterId, flags, MerchantLifecycleService.DisplayItemIds(merchant))
+            : MerchantPacketWriter.ShowcaseSlotEmptied(merchant.CharacterId, flags, slot);
     }
 }

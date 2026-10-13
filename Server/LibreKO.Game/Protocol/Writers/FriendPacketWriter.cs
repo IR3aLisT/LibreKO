@@ -48,12 +48,42 @@ public sealed class FriendPacketWriter
         return packet;
     }
 
-    public static Packet ModifyResult(FriendSubOpcode sub, byte resultCode, string friendName, Status status)
+    public static Packet AddResult(FriendAddResult result, Status? added = null)
     {
-        var packet = Sub(sub);
-        packet.WriteByte(resultCode);
-        packet.WriteSByteString(friendName);
-        WriteStatus(packet, status);
+        var packet = Sub(FriendSubOpcode.Add);
+        packet.WriteByte((byte)result);
+        if (result == FriendAddResult.Succeeded && added is { } friend)
+            WriteStatus(packet, friend);
+        return packet;
+    }
+
+    public static Packet RemoveResult(FriendRemoveResult result, string friendName)
+    {
+        var packet = Sub(FriendSubOpcode.Remove);
+        packet.WriteByte((byte)result);
+        if (result == FriendRemoveResult.Succeeded)
+            packet.WriteString(friendName);
+        return packet;
+    }
+
+    public static Packet Request(string requesterName)
+    {
+        var packet = Sub(FriendSubOpcode.Request);
+        packet.WriteString(requesterName);
+        return packet;
+    }
+
+    public static Packet RequestResult(FriendRequestResult result)
+    {
+        var packet = Sub(FriendSubOpcode.RequestResult);
+        packet.WriteByte((byte)result);
+        return packet;
+    }
+
+    public static Packet LoggedIn(string friendName)
+    {
+        var packet = Sub(FriendSubOpcode.LoggedIn);
+        packet.WriteString(friendName);
         return packet;
     }
 

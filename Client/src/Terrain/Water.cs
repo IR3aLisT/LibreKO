@@ -7,6 +7,7 @@ public partial class Water : Node3D
 {
     private readonly List<MeshInstance3D> _patches = new();
     private ShaderMaterial? _riverMat, _stillMat;
+    private readonly Dictionary<string, ShaderMaterial?> _surfaceMats = new();
 
     public bool HasWater => _patches.Count > 0;
 
@@ -31,7 +32,8 @@ public partial class Water : Node3D
             var mi = new MeshInstance3D
             {
                 Mesh = BuildPatchMesh(terrain, p),
-                MaterialOverride = IsStill(p.Tex) ? _stillMat : _riverMat,
+                MaterialOverride = (p.Uv != null ? SurfaceMaterial(p.Tex) : null)
+                    ?? (IsStill(p.Tex) ? _stillMat : _riverMat),
                 GIMode = GeometryInstance3D.GIModeEnum.Disabled,
             };
             AddChild(mi);
@@ -83,7 +85,10 @@ public partial class Water : Node3D
                 var pos = a.Lerp(b, fz);
                 int idx = R * nc + C;
                 verts[idx] = pos;
-                uvs[idx] = new Vector2(pos.X, pos.Z) * 0.25f;
+                uvs[idx] = p.Uv is { } uv
+                    ? uv[rr * cols + cc].Lerp(uv[rr * cols + cc + 1], fx)
+                        .Lerp(uv[(rr + 1) * cols + cc].Lerp(uv[(rr + 1) * cols + cc + 1], fx), fz)
+                    : new Vector2(pos.X, pos.Z) * 0.25f;
                 normals[idx] = Vector3.Up;
             }
         }
@@ -141,18 +146,51 @@ public partial class Water : Node3D
         return mat;
     }
 
+    private ShaderMaterial? SurfaceMaterial(string tex)
+    {
+        if (_surfaceMats.TryGetValue(tex, out var cached)) return cached;
+        string path = $"res://assets/water/{tex}.png";
+        ShaderMaterial? mat = null;
+        if (ResourceLoader.Exists(path))
+        {
+            mat = new ShaderMaterial { Shader = Shaders.Get("molten_water") };
+            mat.SetShaderParameter("surface_tex", ResourceLoader.Load<Texture2D>(path));
+            mat.SetShaderParameter("wave_normal", WaveNormals().Item1);
+        }
+        _surfaceMats[tex] = mat;
+        return mat;
+    }
+
     private static Shader? _waterShader;
     private static (Texture2D, Texture2D)? _waveNormals;
+
+    private readonly record struct WaveNormalSpec(string Path, int Seed, float Strength);
+
+    private static readonly WaveNormalSpec WaveNormalA = new("res://assets/water/wave_normal_a.png", 1337, 2.2f);
+    private static readonly WaveNormalSpec WaveNormalB = new("res://assets/water/wave_normal_b.png", 7919, 1.6f);
 
     private static (Texture2D, Texture2D) WaveNormals()
     {
         if (_waveNormals.HasValue) return _waveNormals.Value;
-        _waveNormals = (MakeWaterNormal(seed: 1337, strength: 2.2f),
-                        MakeWaterNormal(seed: 7919, strength: 1.6f));
+        _waveNormals = (WaveNormal(WaveNormalA), WaveNormal(WaveNormalB));
         return _waveNormals.Value;
     }
 
-    private static ImageTexture MakeWaterNormal(int seed, float strength)
+    private static Texture2D WaveNormal(WaveNormalSpec spec) =>
+        ResourceLoader.Exists(spec.Path)
+            ? ResourceLoader.Load<Texture2D>(spec.Path)
+            : ImageTexture.CreateFromImage(MakeWaterNormal(spec.Seed, spec.Strength));
+
+    internal static void BakeWaveNormals()
+    {
+        foreach (var spec in new[] { WaveNormalA, WaveNormalB })
+        {
+            var err = MakeWaterNormal(spec.Seed, spec.Strength).SavePng(ProjectSettings.GlobalizePath(spec.Path));
+            GD.Print($"[bakewater] {spec.Path} {err}");
+        }
+    }
+
+    private static Image MakeWaterNormal(int seed, float strength)
     {
         const int N = 512;
         const int Layers = 40;
@@ -198,7 +236,7 @@ public partial class Water : Node3D
         }
         var img = Image.CreateFromData(N, N, false, Image.Format.Rgba8, buf);
         img.GenerateMipmaps();
-        return ImageTexture.CreateFromImage(img);
+        return img;
     }
 
     

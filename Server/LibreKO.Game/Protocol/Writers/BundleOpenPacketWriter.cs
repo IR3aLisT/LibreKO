@@ -7,6 +7,19 @@ public sealed class BundleOpenPacketWriter
     public const int WireSlots = 12;
     public const int EntryBytes = 6;
 
+    public const byte ResultEmpty = 0;
+    public const byte ResultOpened = 1;
+    public const byte ResultGone = 2;
+    public const byte ResultNotYours = 4;
+
+    public static Packet Refused(int bundleId, byte result)
+    {
+        var packet = new Packet(GameOpcodes.GS_BUNDLE_OPEN_REQ);
+        packet.WriteInt(bundleId);
+        packet.WriteByte(result);
+        return packet;
+    }
+
     public readonly record struct Entry(int ItemId, ushort Count);
 
     private readonly List<Entry> _entries = [];
@@ -28,11 +41,11 @@ public sealed class BundleOpenPacketWriter
 
         if (_entries.Count == 0)
         {
-            packet.WriteByte(0);
+            packet.WriteByte(ResultEmpty);
             return packet;
         }
 
-        packet.WriteByte(1);
+        packet.WriteByte(ResultOpened);
         for (var index = 0; index < WireSlots; index++)
         {
             var entry = index < _entries.Count ? _entries[index] : default;

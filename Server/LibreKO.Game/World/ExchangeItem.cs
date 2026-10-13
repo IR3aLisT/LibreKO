@@ -7,4 +7,5 @@ public class ExchangeItem
     public int Count { get; set; }
     public byte SrcPos { get; set; }
     public byte DstPos { get; set; }
+    public int UniqueId { get; set; }
 }

@@ -118,7 +118,7 @@ public partial class World
 
     private void ShowQuestProgressToast(string questName, string objective, int current, int target)
     {
-        if (target <= 0) return;
+        if (target <= 0 || !Config.QuestNotices) return;
         EnsureQuestToast();
         var key = $"{questName}|{objective}|{current}/{target}";
         if (key == _questToastKey && _questToastLeft > 0) return;

@@ -26,7 +26,7 @@ public partial class World
         var me = _self.Position;
         foreach (var (id, box) in _boxes)
         {
-            if (_autoLootTried.Contains(id) || box.BasePos.DistanceSquaredTo(me) > AutoLootRangeSq) continue;
+            if (!box.Placed || _autoLootTried.Contains(id) || box.BasePos.DistanceSquaredTo(me) > AutoLootRangeSq) continue;
             _autoLootTried.Add(id);
             _autoLooting = true;
             _openBundleId = id;
@@ -39,7 +39,13 @@ public partial class World
     {
         if (!_autoLooting) return false;
         if (_lootEntries.Count == 0) return true;
-        TakeLoot(0, _lootEntries[0].ItemId);
+        int next = _lootEntries.FindIndex(entry => LootFilterTakes(entry.ItemId));
+        if (next < 0)
+        {
+            StopAutoLoot();
+            return true;
+        }
+        TakeLoot(next, _lootEntries[next].ItemId);
         return true;
     }
 

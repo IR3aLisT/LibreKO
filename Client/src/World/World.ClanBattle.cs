@@ -15,13 +15,13 @@ public partial class World
     {
         BuildClanBattleBanner();
         Net.I.ClanBattleNotifyEvent += OnClanBattleNotify;
-        Net.I.ClanBattlePointsEvent += OnClanBattlePoints;
+        Net.I.IdentityCheckResultEvent += OnIdentityCheckResult;
     }
 
     private void ClanBattleDispose()
     {
         Net.I.ClanBattleNotifyEvent -= OnClanBattleNotify;
-        Net.I.ClanBattlePointsEvent -= OnClanBattlePoints;
+        Net.I.IdentityCheckResultEvent -= OnIdentityCheckResult;
     }
 
     private void BuildClanBattleBanner()
@@ -62,21 +62,24 @@ public partial class World
         CombatLogAdd(line, CombatLogKind.Status);
     }
 
-    private void OnClanBattlePoints(int sub)
-    {
-        var (line, disband) = ClanBattleMessage(sub);
-        ShowClanBattleBanner(line, disband ? new Color("ff8a5c") : ClanBattleGold);
-        CombatLogAdd(line, CombatLogKind.Status);
-    }
+    private const byte IdentityFailed = 0;
+    private const byte IdentityAuthorized = 1;
+    private const byte IdentityWrongNumber = 2;
+    private const byte IdentityAlreadyAuthorized = 3;
+    private const byte IdentityTooManyTries = 4;
+    private const byte IdentityWrongNumberAgain = 5;
 
-    private static (string Line, bool Disband) ClanBattleMessage(int sub) => sub switch
+    private void OnIdentityCheckResult(byte result)
     {
-        0 => ("Your clan has been disbanded.", true),
-        1 => ("A clan battle has been declared.", false),
-        2 => ("The clan battle has begun!", false),
-        3 => ("Clan battle score updated.", false),
-        4 => ("The clan battle has ended.", false),
-        5 => ("The clan battle is in progress.", false),
-        _ => ("Clan battle status has changed.", false),
-    };
+        var (id, fallback) = result switch
+        {
+            IdentityFailed => (25051, "You have failed to authorize your identification."),
+            IdentityAuthorized => (25052, "You have authorized your identification."),
+            IdentityWrongNumber or IdentityWrongNumberAgain => (1511, "Wrong ID number"),
+            IdentityAlreadyAuthorized => (25053, "You have already authorized your identification."),
+            IdentityTooManyTries => (25054, "You have tried more than limited time. You need to relog-in the game."),
+            _ => (0, ""),
+        };
+        if (id != 0) CombatNotice(ItemData.Text(id, fallback));
+    }
 }

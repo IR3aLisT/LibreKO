@@ -19,6 +19,7 @@ public class MagicHealOverTimeTests : GameTestBase
     private const int MassiveRestoreId = 111539;
     private const int HealingId = 111509;
     private const int CriticalRestoreId = 112570;
+    private const int DrainRestoreId = 490337;
     private const byte RonarkLand = BattleZoneManager.ZONE_RONARK_LAND;
     private const byte RestoreCastTime = 15;
 
@@ -89,6 +90,35 @@ public class MagicHealOverTimeTests : GameTestBase
         stranger.ActiveOverTimeEffects.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task APartyWideHealWithoutRadiusEchoesTheHealedCasterInsteadOfMinusOne()
+    {
+        using var provider = CreateProvider(_ => { }, Configure);
+        var sessions = provider.GetRequiredService<SessionManager>();
+        var (priest, client) = Player(sessions, 700, 100, 100);
+        var sent = new List<Packet>();
+        client.SendPacket(Arg.Do<Packet>(sent.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        await CastAndRelease(provider, client, DrainRestoreId, priest, -1, priest.X, priest.Z);
+
+        priest.ActiveOverTimeEffects.Should().ContainKey(DrainRestoreId);
+        EffectingTargetsOf(sent, DrainRestoreId).Should().Equal(priest.CharacterId);
+    }
+
+    private static List<int> EffectingTargetsOf(List<Packet> sent, int skillId)
+    {
+        var targets = new List<int>();
+        foreach (var packet in sent)
+        {
+            packet.ResetOffset();
+            if (packet.RemainingBytes < 13 || packet.ReadByte() != (byte)MagicProcessOpcode.Effecting) continue;
+            if (packet.ReadInt() != skillId) continue;
+            packet.ReadInt();
+            targets.Add(packet.ReadInt());
+        }
+        return targets;
+    }
+
     private static void Configure(IGameDataService gameData)
     {
         var magic = new Dictionary<int, MagicData>
@@ -97,6 +127,7 @@ public class MagicHealOverTimeTests : GameTestBase
             [MassiveRestoreId] = new() { Id = MassiveRestoreId, Type1 = 3, Moral = 2, Range = 25, CastTime = RestoreCastTime },
             [HealingId] = new() { Id = HealingId, Type1 = 3, Moral = 2, Range = 25, CastTime = RestoreCastTime },
             [CriticalRestoreId] = new() { Id = CriticalRestoreId, Type1 = 3, Moral = 6, Range = 25, CastTime = RestoreCastTime },
+            [DrainRestoreId] = new() { Id = DrainRestoreId, Type1 = 3, Moral = 6 },
         };
         gameData.GetMagic(Arg.Any<int>()).Returns(call => magic.GetValueOrDefault(call.Arg<int>()));
         gameData.MagicType3Table.Returns(new Dictionary<int, MagicType3Data>
@@ -105,6 +136,7 @@ public class MagicHealOverTimeTests : GameTestBase
             [MassiveRestoreId] = new() { Id = MassiveRestoreId, DirectType = (byte)MagicDirectType.Health, TimeDamage = 1500, Duration = 30 },
             [HealingId] = new() { Id = HealingId, DirectType = (byte)MagicDirectType.Health, FirstDamage = 240 },
             [CriticalRestoreId] = new() { Id = CriticalRestoreId, DirectType = (byte)MagicDirectType.Health, TimeDamage = 3000, Duration = 20, Radius = 20 },
+            [DrainRestoreId] = new() { Id = DrainRestoreId, DirectType = (byte)MagicDirectType.Health, TimeDamage = 500, Duration = 20 },
         });
     }
 

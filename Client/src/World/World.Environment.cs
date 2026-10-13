@@ -38,8 +38,20 @@ public partial class World
     private readonly Dictionary<(string Key, int Cx, int Cz, bool Large), List<ObjInfo>> _objBuckets = new();
     private Node3D? _objInstRoot;
 
-    private const int ObjBuildBatch = 150;
-    private const int ObjInstanceBatch = 24;
+    private const ulong ObjBuildSliceLoadingUsec = 25_000;
+    private const ulong ObjBuildSlicePlayingUsec = 4_000;
+    private ulong _objSliceStartUsec;
+
+    private bool ObjSliceSpent() =>
+        Time.GetTicksUsec() - _objSliceStartUsec
+        >= (_loadingLayer != null ? ObjBuildSliceLoadingUsec : ObjBuildSlicePlayingUsec);
+
+    private async System.Threading.Tasks.Task<bool> NextObjSlice()
+    {
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        _objSliceStartUsec = Time.GetTicksUsec();
+        return Alive;
+    }
     private const float ObjInstanceCell = 128f;
     private const int ObjInstanceMin = 2;
     private static float ObjInstanceCullPad => ObjInstanceCell * 0.7072f;
@@ -134,13 +146,19 @@ public partial class World
             OnServerWeather(w.Type, w.Amount);
     }
 
-    private void OnServerWeather(int type, int amount) => _weather = type switch
+    private void OnServerWeather(int type, int amount)
     {
-        WireWeatherRain or WireWeatherLeafRain => Weather.Rainy,
-        WireWeatherSnow => Weather.Snow,
-        WireWeatherLeaves => Weather.Windy,
-        _ => Weather.Sunny,
-    };
+        if (WeatherRules.Ignored(_zone)) return;
+        int shown = WeatherRules.Type(_zone, type);
+        _sky.WeatherLight = WeatherRules.RelativeLight(shown, WeatherRules.Amount(shown, amount));
+        _weather = shown switch
+        {
+            WireWeatherRain or WireWeatherLeafRain => Weather.Rainy,
+            WireWeatherSnow => Weather.Snow,
+            WireWeatherLeaves => Weather.Windy,
+            _ => Weather.Sunny,
+        };
+    }
 
     private void OnServerTime(int hour, int minute)
     {
@@ -229,6 +247,7 @@ public partial class World
     }
 
     private const float StepUp = 0.7f;
+    private const float NoServerHeight = float.MinValue;
     private const float EntityFloorProbeUp = 2f;
     private const float EntityFloorProbeDown = 0.5f;
     private const float ObjectFloorProbeDown = 2f;
@@ -252,6 +271,69 @@ public partial class World
         return floorY > terrainFeetY ? new Vector3(onTerrain.X, floorY + lift, onTerrain.Z) : onTerrain;
     }
 
+    private const int MaxFloorHits = 6;
+    private const float FloorHitStep = 0.05f;
+    private const float FloorNormalMin = 0.5f;
+
+    private Vector3 GroundPosFor(bool npc, float koX, float koZ, float serverY, float lift) =>
+        npc ? EntityGroundPos(koX, koZ, serverY, lift) : FloorGroundPos(koX, koZ, serverY, lift, login: false);
+
+    private const float NpcFloorReferenceUp = 1f;
+    private const float NpcFloorSearchUp = 20f;
+
+    private Vector3 InOutGroundPos(bool npc, float koX, float koZ, float serverY, float lift, CollisionObject3D? own = null) =>
+        npc ? NpcInOutGroundPos(koX, koZ, serverY, lift, own) : FloorGroundPos(koX, koZ, serverY, lift, login: false);
+
+    private Vector3 NpcInOutGroundPos(float koX, float koZ, float serverY, float lift, CollisionObject3D? own)
+    {
+        var onTerrain = GroundPos(koX, koZ, serverY, lift);
+        if (_terrain == null) return onTerrain;
+        float terrainFeetY = onTerrain.Y - lift;
+        float anchorY = serverY == NoServerHeight ? terrainFeetY : _terrain.KoToWorld(koX, serverY, koZ).Y;
+        float reference = anchorY + NpcFloorReferenceUp;
+        var floors = ObjectFloorsAt(onTerrain.X, onTerrain.Z,
+            Mathf.Max(terrainFeetY, reference) + NpcFloorSearchUp, terrainFeetY - EntityFloorProbeDown, own);
+        return new Vector3(onTerrain.X, FloorChoice.Login(terrainFeetY, floors, reference) + lift, onTerrain.Z);
+    }
+
+    private Vector3 FloorGroundPos(float koX, float koZ, float serverY, float lift, bool login)
+    {
+        var onTerrain = GroundPos(koX, koZ, serverY, lift);
+        if (_terrain == null || serverY == NoServerHeight) return EntityGroundPos(koX, koZ, serverY, lift);
+        float terrainFeetY = onTerrain.Y - lift;
+        float serverWorldY = _terrain.KoToWorld(koX, serverY, koZ).Y;
+        var floors = ObjectFloorsAt(onTerrain.X, onTerrain.Z,
+            Mathf.Max(terrainFeetY, serverWorldY) + EntityFloorProbeUp, terrainFeetY - EntityFloorProbeDown);
+        float y = login
+            ? FloorChoice.Login(terrainFeetY, floors, serverWorldY)
+            : FloorChoice.Nearest(terrainFeetY, floors, serverWorldY);
+        return new Vector3(onTerrain.X, y + lift, onTerrain.Z);
+    }
+
+    private List<float> ObjectFloorsAt(float x, float z, float top, float bottom, CollisionObject3D? alsoExclude = null)
+    {
+        var floors = new List<float>();
+        var space = GetWorld3D().DirectSpaceState;
+        var exclude = SelfProbeExclude();
+        if (alsoExclude != null && GodotObject.IsInstanceValid(alsoExclude))
+        {
+            exclude = exclude != null ? new Godot.Collections.Array<Rid>(exclude) : new Godot.Collections.Array<Rid>();
+            exclude.Add(alsoExclude.GetRid());
+        }
+        float from = top;
+        for (int i = 0; i < MaxFloorHits && from > bottom; i++)
+        {
+            var probe = PhysicsRayQueryParameters3D.Create(new Vector3(x, from, z), new Vector3(x, bottom, z), WorldCollisionLayer);
+            if (exclude != null) probe.Exclude = exclude;
+            var hit = space.IntersectRay(probe);
+            if (hit.Count == 0) break;
+            var at = (Vector3)hit["position"];
+            if (((Vector3)hit["normal"]).Y >= FloorNormalMin) floors.Add(at.Y);
+            from = at.Y - FloorHitStep;
+        }
+        return floors;
+    }
+
     private Godot.Collections.Array<Rid>? _selfProbeExclude;
 
     private Godot.Collections.Array<Rid>? SelfProbeExclude()
@@ -265,7 +347,7 @@ public partial class World
         foreach (var e in _ents.Values)
         {
             if (e.HasTarget) continue;
-            e.Body.Position = EntityGroundPos(e.KoX, e.KoZ, e.KoY, e.Lift);
+            e.Body.Position = InOutGroundPos(e.IsNpc, e.KoX, e.KoZ, e.KoY, e.Lift, e.BridgeFloor);
         }
     }
 
@@ -393,6 +475,9 @@ public partial class World
         _objects.Clear();
         _objBuckets.Clear();
         _gateColliders.Clear();
+        _keyGates.Clear();
+        _gasShapes.Clear();
+        _objectsByNpc = null;
         _objInstRoot = null;
         KoTextureAnim.Reset();
         _pickedObject = null; ClearPickCandidates();
@@ -406,14 +491,11 @@ public partial class World
 
         RebuildWarpGates();
         RebuildAnvils();
+        _objSliceStartUsec = Time.GetTicksUsec();
         for (int i = 0; i < _objects.Count; i++)
         {
             BuildObjectSlot(_objects[i]);
-            if ((i + 1) % ObjBuildBatch == 0)
-            {
-                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                if (!Alive) return;
-            }
+            if (ObjSliceSpent() && !await NextObjSlice()) return;
         }
         await BuildObjectInstances();
         if (!Alive) return;
@@ -503,7 +585,7 @@ public partial class World
         _objInstRoot = new Node3D { Name = "ObjectInstances" };
         _objRoot.AddChild(_objInstRoot);
 
-        int made = 0, instanced = 0, loose = 0, n = 0;
+        int made = 0, instanced = 0, loose = 0;
         foreach (var (cell, bucket) in _objBuckets)
         {
             bool large = cell.Large;
@@ -551,11 +633,7 @@ public partial class World
                 instanced += bucket.Count;
             }
 
-            if (++n % ObjInstanceBatch == 0)
-            {
-                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                if (!Alive) return;
-            }
+            if (ObjSliceSpent() && !await NextObjSlice()) return;
         }
         _objBuckets.Clear();
         int surf = 0;

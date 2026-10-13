@@ -297,8 +297,14 @@ public class ScriptItemService(
                 return false;
         }
 
+        if (!ItemExchangeFlags.ExchangeGivesEveryReward(exchange.RandomFlag))
+            context.PendingItemAnnouncements.AddRange(rewards
+                .Where(reward => gameData.GetItem(reward.itemId)?.ItemType == UniqueItemType)
+                .Select(reward => reward.itemId));
         return true;
     }
+
+    private const byte UniqueItemType = 4;
 
     public bool ApplyScriptReward(
         IReadOnlyList<(int itemId, int count)> take,

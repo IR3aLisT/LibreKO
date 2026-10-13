@@ -13,6 +13,7 @@ public interface IKnightsRepository
     Task<List<Character>> GetCharactersByClanAsync(short knightsId);
     Task<List<ClanMemberLoyalty>> GetMemberLoyaltyAsync();
     Task SyncCharacterClanStateAsync(int characterId, short knightsId, byte fame, int? money = null, int? loyalty = null);
+    Task SetClanMemoAsync(int characterId, string memo);
 }
 
 public readonly record struct ClanMemberLoyalty(short ClanId, string Name, int Loyalty);
@@ -26,4 +27,5 @@ public class ClanMemberProjection
     public int Loyalty { get; init; }
     public int DonatedPoints { get; init; }
     public DateTime? LastOnlineTime { get; init; }
+    public string Memo { get; init; } = "";
 }

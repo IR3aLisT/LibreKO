@@ -73,6 +73,15 @@ public class Character : Entity
 
     public byte[] GenieOptions { get; set; } = [];
 
+    public byte[] RepurchaseItems { get; set; } = [];
+
+    public const int ClanMemoMaxLength = 20;
+
+    public string ClanMemo { get; set; } = "";
+
+    public short JuraidWarnings { get; set; }
+    public DateTime? JuraidWarnedAt { get; set; }
+
     public ushort GenieMinutes => (ushort)Math.Min(Math.Ceiling(Math.Max(0, GenieRemainingSeconds) / 60), ushort.MaxValue);
 
     public byte DrakiStage { get; set; }
@@ -84,6 +93,10 @@ public class Character : Entity
     public int AttendanceClaimedDays { get; set; }
     public byte AttendanceClaimedBonus { get; set; }
     public DateTime? AttendanceCheckedOn { get; set; }
+
+    public long SealedExperience { get; set; }
+    public bool ExpSealOn { get; set; }
+    public bool Sealed { get; set; }
 
     public short GetPosX => (short)(X * 10);
     public short GetPosY => (short)(Y * 10);
@@ -107,6 +120,7 @@ public class Character : Entity
             builder.Property(p => p.AccountId).IsRequired();
             builder.Property(p => p.Slot).IsRequired();
             builder.Property(p => p.Name).IsRequired().HasMaxLength(50);
+            builder.Property(p => p.ClanMemo).IsRequired().HasMaxLength(ClanMemoMaxLength).HasDefaultValue("");
             builder.Property(p => p.Race).IsRequired();
             builder.Property(p => p.Class).IsRequired();
             builder.Property(p => p.Hair).IsRequired();
@@ -144,6 +158,9 @@ public class Character : Entity
             builder.Property(p => p.AttendanceClaimedDays);
             builder.Property(p => p.AttendanceClaimedBonus);
             builder.Property(p => p.AttendanceCheckedOn);
+            builder.Property(p => p.SealedExperience);
+            builder.Property(p => p.ExpSealOn);
+            builder.Property(p => p.Sealed);
             builder.Property(p => p.QuestData);
             builder.Property(p => p.SavedMagic);
             builder.Property(p => p.MapId).IsRequired();

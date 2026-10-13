@@ -95,8 +95,8 @@ public class ShoppingMallLetterMutationService(
         if (string.IsNullOrEmpty(recipientName)
             || string.IsNullOrEmpty(subject)
             || string.IsNullOrEmpty(message)
-            || subject.Length > ShoppingMallLetterProtocol.MaxLetterSubject
-            || message.Length > ShoppingMallLetterProtocol.MaxLetterMessage)
+            || subject.EnumerateRunes().Count() > ShoppingMallLetterProtocol.MaxLetterSubject
+            || message.EnumerateRunes().Count() > ShoppingMallLetterProtocol.MaxLetterMessage)
         {
             await session.Client.SendPacket(ShoppingMallPacketWriter.Result(
                 ShoppingMallLetterProtocol.StoreLetter, ShoppingMallLetterProtocol.LetterSend, Rejected));

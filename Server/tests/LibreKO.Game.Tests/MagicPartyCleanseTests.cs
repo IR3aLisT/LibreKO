@@ -35,11 +35,11 @@ public class MagicPartyCleanseTests : GameTestBase
         friend.PartyIndex = party.Index;
 
         foreach (var cursed in new[] { caster, friend, stranger })
-            cursed.ActiveBuffs[Curse] = new ActiveBuff
+            cursed.SetBuff(Curse, new ActiveBuff
             {
                 MagicId = Curse, CasterId = 777, BuffType = BuffType.Blind,
                 ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks,
-            };
+            });
 
         await Cast(provider, caster, BlessOfGod, AreaTarget);
 

@@ -58,9 +58,9 @@ public partial class Cape : MeshInstance3D
                     var triangles = new List<int>();
                     for (int surface = 0; surface < mesh.GetSurfaceCount(); surface++)
                     {
-                        using var arrays = mesh.SurfaceGetArrays(surface);
-                        var positions = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
-                        var indices = arrays[(int)Mesh.ArrayType.Index].AsInt32Array();
+                        var cached = MeshArraysCache.Get(mesh, surface);
+                        var positions = cached.Vertices;
+                        var indices = cached.Indices;
                         int offset = vertices.Count;
                         vertices.AddRange(positions);
                         if (indices.Length == 0)

@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using LibreKO.Common.Domain.Entities;
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
@@ -65,6 +66,7 @@ public class UserSession
     public int AccumulatedPlayMinutes() =>
         PlayMinutes + (int)Math.Max(0, (DateTime.UtcNow - SessionStartedAt).TotalMinutes);
     public int DailyLoyalty { get; set; }
+    public int DailyPremiumLoyalty { get; set; }
     public bool IsGM { get; set; }
     public bool GmModeEnabled { get; set; } = true;
     public virtual bool IsBot => false;
@@ -76,6 +78,7 @@ public class UserSession
     public string LanguageCode => Language switch
     {
         GameLanguage.Spanish => "es",
+        GameLanguage.Chinese => "zh",
         _ => LibreKO.Quests.Localization.QuestTranslations.SourceLanguage,
     };
 
@@ -131,8 +134,10 @@ public class UserSession
 
     // Visual
     public bool IsHidingHelmet { get; set; }
+    public bool IsHidingCospre { get; set; }
     public NationRanks NationRanks { get; set; } = NationRanks.None;
     public InvisibilityType Invisibility { get; set; }
+    public byte SoccerTeam { get; set; }
     public bool IsInvisible => Invisibility != InvisibilityType.None;
     public bool IsInfiltrating => Invisibility == InvisibilityType.Infiltration;
 
@@ -143,9 +148,17 @@ public class UserSession
     public short TransformId { get; set; } // 0=none, NPC model ID when transformed
     public NpcInstance? SummonedGuard { get; set; }
     public bool IsTransformed => TransformId > 0;
+    public int TransformSkillId { get; set; }
 
     // Clan/Knights
     public short KnightsId { get; set; }
+    public int ClanOnlineCount { get; set; }
+    public SiegeSide SiegeSide { get; set; }
+    public int TowerHostId { get; set; }
+    public byte PartyBoardType { get; set; }
+    public byte MatchTeam { get; set; }
+    public DateTime LastFullMoonShout { get; set; }
+    public int GuardTowerNpcId { get; set; }
     public int KnightsPoints { get; set; }
     public byte KnightsFame { get; set; }
     public int ClanInviteFrom { get; set; }
@@ -189,6 +202,8 @@ public class UserSession
 
     public byte[] GenieOptions { get; set; } = [];
 
+    public List<RepurchaseEntry> Repurchases { get; } = [];
+
     public byte DrakiStage { get; set; }
     public byte DrakiSubStage { get; set; }
     public byte DrakiEntranceLimit { get; set; } = DrakiTowerRules.MaxDailyEntrances;
@@ -213,6 +228,8 @@ public class UserSession
     public int[] DailyOps { get; } = new int[UserDailyOp.Count];
 
     public int AttendanceDays { get; set; }
+    public long SealedExperience { get; set; }
+    public bool ExpSealOn { get; set; }
     public int AttendanceClaimedDays { get; set; }
     public byte AttendanceClaimedBonus { get; set; }
     public DateTime? AttendanceCheckedOn { get; set; }
@@ -228,7 +245,22 @@ public class UserSession
     // Party
     public int PartyIndex { get; set; } = -1;
     public bool IsInParty => PartyIndex >= 0;
-    public bool IsPartyLeader { get; set; }
+    private bool _isPartyLeader;
+
+    public bool IsPartyLeader
+    {
+        get => _isPartyLeader;
+        set
+        {
+            if (_isPartyLeader == value) return;
+            _isPartyLeader = value;
+            PartyLeaderChanged?.Invoke(this);
+        }
+    }
+
+    public event Action<UserSession>? PartyLeaderChanged;
+
+    public short ClanBattleEnemy { get; set; }
 
     // 850ms cooldown shared by PARTY_TARGET_NUMBER (0x1F) and PARTY_ALERT (0x20).
     public DateTime LastPartySignalTime { get; set; } = DateTime.MinValue;
@@ -251,7 +283,8 @@ public class UserSession
     public bool HasFullAngerGauge => AngerGauge >= 5;
 
     // Active buffs: magicId -> ActiveBuff
-    public ConcurrentDictionary<int, ActiveBuff> ActiveBuffs { get; } = new();
+    private readonly ConcurrentDictionary<int, ActiveBuff> _activeBuffs = new();
+    public IReadOnlyDictionary<int, ActiveBuff> ActiveBuffs => _activeBuffs;
     public ConcurrentDictionary<int, ActiveOverTimeEffect> ActiveOverTimeEffects { get; } = new();
 
     public ConcurrentDictionary<int, long> SkillCooldowns { get; } = new();
@@ -271,6 +304,11 @@ public class UserSession
     public bool ReflectCurses { get; set; }
     public bool InstantCast { get; set; }
     public bool CanUseSkills { get; set; } = true;
+    public long BlinkUntilTicks { get; set; }
+    public bool IsBlinking => BlinkUntilTicks != 0;
+    public bool BlinkOnArrival { get; set; }
+    public ResurrectionOffer? PendingResurrection { get; set; }
+    public int ControlSignature { get; set; }
     public bool CanUsePotions { get; set; } = true;
     public bool CanTeleport { get; set; } = true;
     public bool StealthProhibited { get; set; }
@@ -279,6 +317,7 @@ public class UserSession
     public bool IsKaul { get; set; }
     public bool BlockPhysical { get; set; }
     public bool BlockMagic { get; set; }
+    public bool HealStrikesEnemies { get; private set; }
     public bool MirrorDamage { get; set; }
     public byte MirrorDamageAmount { get; set; }
     public byte SpeedAmount { get; set; } = 100;
@@ -300,6 +339,11 @@ public class UserSession
     public bool IsSitting { get; set; }           // True when player is sitting (affects HP/MP regen rate)
     public bool InCombatStance { get; set; }
 
+    public bool RankAuraHidden { get; set; }
+    public bool DevilForm { get; set; }
+
+    public Protocol.Writers.PlayerAppearanceState SizeState { get; set; } = Protocol.Writers.PlayerAppearanceState.Normal;
+
     // Skill point allocation: [0]=free, [1-4]=unused, [5]=cat1, [6]=cat2, [7]=cat3, [8]=master
     public byte[] SkillPoints { get; } = new byte[9];
 
@@ -319,9 +363,19 @@ public class UserSession
     public ItemSlot[] VipWarehouse { get; } = new ItemSlot[VipWarehouseMax];
     public DateTime VipVaultExpiry { get; set; }
 
+    public bool VipVaultExpiryAnnounced { get; set; }
+
     public string VipPassword { get; set; } = string.Empty;
 
     public byte VipPasswordRequest { get; set; }
+
+    public byte VipPasswordFailures { get; set; }
+
+    public short KurianSp { get; set; }
+
+    public GroundEffect Ground { get; set; }
+
+    public short KurianMaxSp { get; set; }
 
     public string SealCode { get; set; } = string.Empty;
 
@@ -361,6 +415,9 @@ public class UserSession
             UserSessionMagicState.WeaponDamageBonus(this));
         UserSessionMagicState.ApplyBuffBonuses(this);
         ApplyFamiliarScrolls(coefficient, gameData);
+        HealStrikesEnemies = HealStrike.Armed(Inventory, gameData.GetItemOps);
+        if (ZoneId == ChaosRules.Zone)
+            Stats.MaxHp = ChaosRules.MaxHp;
         MaxHp = Stats.MaxHp;
         MaxMp = Stats.MaxMp;
     }
@@ -460,6 +517,55 @@ public class UserSession
         UserSessionBinaryState.LoadQuestData(Quest.QuestMap, Quest.QuestKillCountsMap, data, Quest.DailyCompletionDays);
         Quest.SyncActiveQuestKillCounts();
     }
+
+    public event Action<UserSession>? BuffsChanged;
+
+    public void SetBuff(int skillId, ActiveBuff buff)
+    {
+        _activeBuffs[skillId] = buff;
+        BuffsChanged?.Invoke(this);
+    }
+
+    public bool RemoveBuff(int skillId) => RemoveBuff(skillId, out _);
+
+    public bool RemoveBuff(int skillId, [MaybeNullWhen(false)] out ActiveBuff removed)
+    {
+        if (!_activeBuffs.TryRemove(skillId, out removed))
+            return false;
+
+        BuffsChanged?.Invoke(this);
+        return true;
+    }
+
+    public int RemoveBuffsWhere(Func<int, ActiveBuff, bool> match)
+    {
+        var removed = 0;
+        foreach (var (skillId, buff) in _activeBuffs)
+        {
+            if (match(skillId, buff) && _activeBuffs.TryRemove(skillId, out _))
+                removed++;
+        }
+
+        if (removed > 0)
+            BuffsChanged?.Invoke(this);
+        return removed;
+    }
+
+    public void ClearBuffs()
+    {
+        if (_activeBuffs.IsEmpty)
+            return;
+
+        _activeBuffs.Clear();
+        BuffsChanged?.Invoke(this);
+    }
+
+    public IReadOnlyList<int> LiveBuffIds() =>
+        _activeBuffs
+            .Where(entry => !entry.Value.IsExpired)
+            .Select(entry => entry.Key)
+            .Order()
+            .ToList();
 
     public byte[] SerializeSavedMagic() => UserSessionMagicState.SerializeSavedMagic(this);
 

@@ -76,41 +76,69 @@ public partial class World
         Chat.AppendShout(message);
     }
 
+    private const int TextShoutRegistered = 7687;
+    private const int TextShoutRetryLater = 7688;
+    private const int TextShoutFailed = 7690;
+    private const int TextShoutNoItem = 2302;
+    private const int TextShoutLevel = 30302;
+    private const int TextShoutRestricted = 30303;
+    private const int TextRareItemShout = 30534;
+    private const int TextUpgradeShout = 30535;
+    private const int TextUpgradeFailShout = 30536;
+    private static readonly Color ShoutResultColour = new(1f, 1f, 0f);
+    private static readonly Color ShoutAnnouncementColour = Color.Color8(229, 204, 255);
+
     private void OnShoutUpgrade(bool ok, string name, int itemId, int rank)
     {
-        string item = ItemData.DisplayName(itemId);
-        if (string.IsNullOrEmpty(item)) item = $"item {itemId}";
-        string verb = ok ? "successfully forged" : "failed to forge";
-        string line = $"{name} has {verb} {item}!";
-
+        string template = ok
+            ? SystemText(TextUpgradeShout, "%s has successfully upgraded to the %s item. Please congratulate them.")
+            : SystemText(TextUpgradeFailShout, "%s failed to upgrade the %s item. Please send them your support.");
+        string line = TextTemplate.Fill(template, name, AnnouncedItem(itemId));
         ShowShoutBanner(line, ok ? ShoutGold : new Color("ff8a5c"));
-        var colHex = ok ? "ffd98a" : "ff9a6a";
-        CombatLogAdd(line, CombatLogKind.Status);
+        CombatLogAdd(line, CombatLogKind.Status, ShoutAnnouncementColour, AnnouncedMarkup(template, name, itemId));
     }
 
     private void OnShoutRareItem(string finder, int itemId, byte nation)
     {
-        string item = ItemData.DisplayName(itemId);
-        if (string.IsNullOrEmpty(item)) item = $"item {itemId}";
-        string line = $"{finder} has obtained {item}!";
+        string line = TextTemplate.Fill(
+            SystemText(TextRareItemShout, "%s has obtained the %s item. Please congratulate them."),
+            finder, AnnouncedItem(itemId));
         var colour = nation == Nations.Karus ? ShoutKarus
             : nation == Nations.ElMorad ? ShoutElmorad : ShoutGold;
-
         ShowShoutBanner(line, colour);
-        CombatLogAdd(line, CombatLogKind.Status);
+        CombatLogAdd(line, CombatLogKind.Status, ShoutAnnouncementColour,
+            AnnouncedMarkup(SystemText(TextRareItemShout, "%s has obtained the %s item. Please congratulate them."), finder, itemId));
     }
 
-    private void OnShoutResult(int result)
-    {
-        if (result == Net.ShoutRegisterAccepted) return;
+    private const string LogItemMeta = "i:";
 
-        CombatNotice(result switch
+    private static string AnnouncedMarkup(string template, string name, int itemId) =>
+        TextTemplate.Fill(BbCode.Esc(template), BbCode.Esc(name),
+            $"[url={LogItemMeta}{itemId}][color=#{ItemGrade.Tint(itemId).ToHtml(false)}][lb]{BbCode.Esc(AnnouncedItem(itemId))}[rb][/color][/url]");
+
+    private void OnLogMetaHover(Variant meta)
+    {
+        string text = meta.AsString();
+        if (text.StartsWith(LogItemMeta, System.StringComparison.Ordinal) && int.TryParse(text[LogItemMeta.Length..], out int itemId))
+            ShowChatItemTip(itemId);
+    }
+
+    private static string AnnouncedItem(int itemId) =>
+        ItemData.DisplayName(itemId) is { Length: > 0 } name ? name : $"item {itemId}";
+
+    private void OnShoutResult(int result, int number)
+    {
+        string text = result switch
         {
-            Net.ShoutRegisterNoItem => "You need a Logos Shout scroll to shout server-wide.",
-            Net.ShoutRegisterChatRestricted => "You cannot shout while chat is restricted.",
-            Net.ShoutRegisterLevelTooLow => "Shouting is available at level 30 or above.",
-            _ => "Could not register your message. Please try again later.",
-        });
+            Net.ShoutRegisterAccepted => TextTemplate.Fill(
+                SystemText(TextShoutRegistered, "Your message has been registered as number %d."), number),
+            Net.ShoutRegisterLevelTooLow => SystemText(TextShoutLevel, "Available at level 30 or above"),
+            Net.ShoutRegisterChatRestricted => SystemText(TextShoutRestricted, "Cannot be used while in chat restriction status."),
+            Net.ShoutRegisterRetryLater => SystemText(TextShoutRetryLater, "Cannot register message. Please try again later."),
+            Net.ShoutRegisterNoItem => SystemText(TextShoutNoItem, "Not enough items left in the  inventory."),
+            _ => SystemText(TextShoutFailed, "Message registration failed."),
+        };
+        CombatLogAdd(text, CombatLogKind.Status, ShoutResultColour);
     }
 
     public void DoShout(string message)

@@ -6,18 +6,18 @@ public partial class Net
 {
     public event Action? ClanBattleNotifyEvent;
 
-    public event Action<int>? ClanBattlePointsEvent;
+    public event Action<byte>? IdentityCheckResultEvent;
+
+    private const byte IdentityCheckResult = 1;
 
     private void HandleClanBattle(Packet p)
     {
         ClanBattleNotifyEvent?.Invoke();
     }
 
-    private void HandleClanBattlePoints(Packet p)
+    private void HandleIdentityCheck(Packet p)
     {
-        if (p.RemainingBytes < 1) return;
-        p.ReadByte();
-        int sub = p.RemainingBytes >= 1 ? p.ReadByte() : 0;
-        ClanBattlePointsEvent?.Invoke(sub);
+        if (p.RemainingBytes < 2 || p.ReadByte() != IdentityCheckResult) return;
+        IdentityCheckResultEvent?.Invoke(p.ReadByte());
     }
 }

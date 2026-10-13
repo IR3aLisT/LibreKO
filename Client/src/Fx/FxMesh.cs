@@ -114,7 +114,7 @@ public partial class FxMesh : MeshInstance3D, IFxPooledPart, IFxPart
             _initPos = Fx.ReadVec3(p, "initPos"),
             _initVel = Fx.ReadVec3(p, "initVel"),
             _accel = Fx.ReadVec3(p, "accel"),
-            _spin = Fx.ReadVec3(p, "rotVel"),
+            _spin = Fx.ReadSpinRate(p),
             _start = Fx.ReadF(p, "startTime"),
             _life = Fx.ReadF(p, "life"),
             _fadeIn = Fx.ReadF(p, "fadeIn"),
@@ -364,7 +364,7 @@ public partial class FxMesh : MeshInstance3D, IFxPooledPart, IFxPart
         Vector3 runtimeScale = (_unitScale + _scaleVel * t + _scaleAccel * swell) * _sizeScale;
         runtimeScale = new Vector3(Mathf.Max(0f, runtimeScale.X), Mathf.Max(0f, runtimeScale.Y),
                                    Mathf.Max(0f, runtimeScale.Z));
-        Basis orient = Basis.FromEuler(_spin * t);
+        Basis orient = FxSpin.MeshOrientation(_spin, t);
         if (_viewFix)
         {
             bool hasCam;

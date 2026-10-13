@@ -12,7 +12,7 @@ public partial class World
         AttachFxPlugs(body, $"res://assets/npcs/{modelStem}.fxplug.json");
     }
 
-    internal static void AttachFxPlugs(Node3D body, string path)
+    internal static void AttachFxPlugs(Node3D body, string path, bool turnWithBone = false)
     {
         using var file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
         if (file == null) return;
@@ -50,7 +50,7 @@ public partial class World
             if (!(scale > 0.0001f)) scale = 1f;
             var spawned = Fx.Spawn(fx, parent, pos, oneShot: false, sizeScale: scale);
             if (spawned is FxInstance pinned)
-                pinned.Pin(parent, parent, pos, Fx.ReadVec3(part, "dir"), inheritScale: false);
+                pinned.Pin(parent, parent, pos, Fx.ReadVec3(part, "dir"), inheritScale: false, followRotation: turnWithBone);
             if (spawned != null) CullAttachedFx(spawned);
         }
     }
@@ -111,7 +111,7 @@ public partial class World
 
     private string? _sceneLoadInFlight;
 
-    private bool SceneReadyFor(EntitySnapshot info)
+    private bool BodySceneReady(EntitySnapshot info)
     {
         if (info.ObjectType == NpcTypes.ObjectType.MapObject) return true;
         var cache = info.IsNpc ? _mobSceneCache : _playerSceneCache;

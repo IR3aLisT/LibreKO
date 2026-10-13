@@ -87,6 +87,8 @@ public partial class Net
     private const byte AdminAckCollectionRaces = 0x14;
     private const byte AdminAckFind = 0x15;
     private const byte AdminAckSpawnRow = 0x16;
+    private const byte AdminReqCommands = 20;
+    private const byte AdminAckCommands = 0x17;
     public const int AdminFindNpcs = 0;
     public const int AdminFindMonsters = 1;
     public const int AdminFindPlayers = 2;
@@ -107,9 +109,37 @@ public partial class Net
 
     public event Action<AdminPanelGrant>? AdminGrantEvent;
 
+    public event Action<List<LibreKO.Domain.GmCommandInfo>, bool>? AdminCommandsEvent;
+
+    public void SendAdminCommandsRequest()
+    {
+        var p = new Packet(GameOpcodes.GS_ADMIN_PANEL);
+        p.WriteByte(AdminReqCommands);
+        _conn.Send(p);
+    }
+
+    internal static (List<LibreKO.Domain.GmCommandInfo> Commands, bool Open) ReadAdminCommands(Packet p)
+    {
+        var commands = new List<LibreKO.Domain.GmCommandInfo>();
+        if (p.RemainingBytes < 3) return (commands, false);
+        bool open = p.ReadByte() != 0;
+        int count = p.ReadShort();
+        for (int i = 0; i < count && p.RemainingBytes >= 6; i++)
+            commands.Add(new LibreKO.Domain.GmCommandInfo(p.ReadString(), p.ReadString(), p.ReadString()));
+        return (commands, open);
+    }
+
     public AdminPanelGrant PanelGrant { get; private set; }
 
     public bool GmSpeedGranted { get; private set; }
+
+    private void ResetAdminGrant()
+    {
+        if (PanelGrant == AdminPanelGrant.None && !GmSpeedGranted) return;
+        PanelGrant = AdminPanelGrant.None;
+        GmSpeedGranted = false;
+        AdminGrantEvent?.Invoke(PanelGrant);
+    }
 
     private void HandleAdminPanel(Packet p)
     {
@@ -121,6 +151,12 @@ public partial class Net
             case AdminAckCollectionRaces: ParseAdminCollectionRaces(p); break;
             case AdminAckFind: ParseAdminFind(p); break;
             case AdminAckSpawnRow: ParseAdminSpawnRow(p); break;
+            case AdminAckCommands:
+            {
+                var (commands, open) = ReadAdminCommands(p);
+                AdminCommandsEvent?.Invoke(commands, open);
+                break;
+            }
             case 0x13: HandleGmFx(p); break;
             case AdminAckResult:
                 bool ok = p.RemainingBytes >= 1 && p.ReadByte() == 1;

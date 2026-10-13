@@ -20,7 +20,7 @@ public partial class Net
 
     public event Action<string, int, byte>? ShoutRareItemEvent;
 
-    public event Action<int>? ShoutResultEvent;
+    public event Action<int, int>? ShoutResultEvent;
 
     private void HandleShout(Packet p)
     {
@@ -30,8 +30,8 @@ public partial class Net
         if (direction == ShoutSubRegisterResult)
         {
             int result = (sbyte)p.ReadByte();
-            if (result == ShoutRegisterAccepted && p.RemainingBytes >= 1) p.ReadByte();
-            ShoutResultEvent?.Invoke(result);
+            int number = result == ShoutRegisterAccepted && p.RemainingBytes >= 1 ? p.ReadByte() : 0;
+            ShoutResultEvent?.Invoke(result, number);
             return;
         }
 
@@ -72,6 +72,16 @@ public partial class Net
                 break;
             }
         }
+    }
+
+    public void SendFullMoonShout(string message)
+    {
+        if (string.IsNullOrEmpty(message)) return;
+        var p = new Packet(GameOpcodes.GS_LOGOSSHOUT);
+        p.WriteByte(Domain.FullMoon.ShoutKind);
+        p.WriteInt(0);
+        p.WriteSByteString(message.Length > LogosShoutMaxLen ? message[..LogosShoutMaxLen] : message);
+        _conn.Send(p);
     }
 
     public void SendLogoShout(string message, byte r = 0xE0, byte g = 0xC0, byte b = 0x60)

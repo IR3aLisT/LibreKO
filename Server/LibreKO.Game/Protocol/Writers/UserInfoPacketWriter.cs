@@ -21,6 +21,8 @@ public sealed class UserInfoPacketWriter
     public const byte AuthorityPlayer = 1;
     public const byte AuthorityGameMaster = 0;
     public const int NoTransform = 0;
+    public const byte NotSeekingParty = 1;
+    public const byte SeekingParty = 2;
 
     public readonly record struct ClanState(
         short AllianceId,
@@ -61,7 +63,13 @@ public sealed class UserInfoPacketWriter
         bool IsHidingHelmet,
         short DisplayTitleId,
         IReadOnlyList<VisualItem> Visuals,
-        NationRanks? Ranks = null);
+        NationRanks? Ranks = null,
+        bool IsGenieActive = false,
+        bool IsHidingCospre = false,
+        int TransformSkillId = 0,
+        bool Blinking = false,
+        byte SoccerTeam = 0,
+        PlayerAppearanceState Size = PlayerAppearanceState.Normal);
 
     public static void WriteRecord(Packet packet, UserState user)
     {
@@ -106,13 +114,13 @@ public sealed class UserInfoPacketWriter
         packet.WriteByte(user.Face);
         packet.WriteInt(user.Hair);
         packet.WriteByte(user.Pose);
-        packet.WriteByte((byte)PlayerAppearanceState.Normal);
-        packet.WriteInt(NoTransform);
-        packet.WriteByte(user.NeedParty ? (byte)1 : (byte)0);
+        packet.WriteByte((byte)(user.Blinking ? PlayerAppearanceState.Blinking : user.Size));
+        packet.WriteInt(user.TransformSkillId > 0 ? user.TransformSkillId : NoTransform);
+        packet.WriteByte(user.NeedParty ? SeekingParty : NotSeekingParty);
         packet.WriteByte(user.IsGameMaster ? AuthorityGameMaster : AuthorityPlayer);
         packet.WriteByte(user.IsPartyLeader ? (byte)1 : (byte)0);
         packet.WriteByte(user.Invisibility);
-        packet.WriteByte(0);
+        packet.WriteByte(user.SoccerTeam);
         packet.WriteByte(0);
         packet.WriteByte(0);
         packet.WriteShort(user.Direction);
@@ -135,8 +143,8 @@ public sealed class UserInfoPacketWriter
         packet.WriteByte(0);
         packet.WriteInt(0);
         packet.WriteByte(user.IsHidingHelmet ? (byte)1 : (byte)0);
-        packet.WriteByte(0);
-        packet.WriteByte(0);
+        packet.WriteByte(user.IsHidingCospre ? (byte)1 : (byte)0);
+        packet.WriteByte(user.IsGenieActive ? (byte)1 : (byte)0);
         packet.WriteByte(0);
         packet.WriteShort(0);
         packet.WriteInt(0);

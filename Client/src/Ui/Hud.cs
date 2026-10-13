@@ -20,6 +20,8 @@ public partial class StatBar : Control
     public enum RibbonKind { None, Upper, Lower, Plain }
 
     private const float Skew = 14f;
+    internal const float FillLighten = 0.34f;
+    internal const float FillDarken = 0.38f;
     private const float RibbonBreathe = 0.19f;
     private const float RibbonBreatheSwing = 0.025f;
     private const float LowerCoreLift = 0.08f;
@@ -28,6 +30,22 @@ public partial class StatBar : Control
     private static Shader GlowShader => _glowShader ??= GD.Load<Shader>("res://shaders/ribbon_glow.gdshader");
     private static Shader FlowShader => _flowShader ??= GD.Load<Shader>("res://shaders/ribbon_flow.gdshader");
     private readonly Color _fill;
+    private Color? _fillOverride;
+    private const float TrailLighten = 0.55f;
+    private const float TrailAlpha = 0.8f;
+
+    private Color Fill => _fillOverride ?? _fill;
+
+    public Color? FillOverride
+    {
+        get => _fillOverride;
+        set
+        {
+            if (_fillOverride == value) return;
+            _fillOverride = value;
+            QueueRedraw();
+        }
+    }
     private readonly Label _text;
     private readonly RibbonKind _ribbon;
     private readonly Control? _glow, _flow, _border;
@@ -89,6 +107,16 @@ public partial class StatBar : Control
 
     private int _cur = -1, _max = -1;
     private string? _fullText;
+    private BarGlide? _glide;
+    private bool _snapNext = true;
+
+    public bool Glide
+    {
+        get => _glide != null;
+        set => _glide = value ? new BarGlide() : null;
+    }
+
+    public void SnapNext() => _snapNext = true;
 
     public void Set(int cur, int max)
     {
@@ -96,8 +124,30 @@ public partial class StatBar : Control
         _cur = cur;
         _max = max;
         _fullText = null;
-        _frac = max > 0 ? Mathf.Clamp((float)cur / max, 0f, 1f) : 0f;
+        float frac = max > 0 ? Mathf.Clamp((float)cur / max, 0f, 1f) : 0f;
         _text.Text = $"{cur} / {max}";
+        if (_glide == null || _snapNext)
+        {
+            _snapNext = false;
+            _glide?.Snap(frac);
+            _frac = frac;
+            Refresh();
+            return;
+        }
+        _glide.Aim(frac);
+        SetProcess(true);
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_glide == null || !_glide.Step(delta))
+        {
+            if (_glide != null) _frac = _glide.Shown;
+            SetProcess(false);
+            Refresh();
+            return;
+        }
+        _frac = _glide.Shown;
         Refresh();
     }
 
@@ -149,9 +199,20 @@ public partial class StatBar : Control
                 new(topLeft, 3), new(topRight, 3),
                 new(bottomRight, h - 3), new(bottomLeft, h - 3),
             };
-            Color top = _fill.Lightened(0.34f);
-            Color bottom = _fill.Darkened(0.38f);
+            Color top = Fill.Lightened(FillLighten);
+            Color bottom = Fill.Darkened(FillDarken);
             DrawPolygon(fill, new[] { top, top, bottom, bottom });
+            if (_glide != null && _glide.Trail > _frac)
+            {
+                float trailTop = Mathf.Lerp(topLeft, topLimit, _glide.Trail);
+                float trailBottom = Mathf.Lerp(bottomLeft, bottomLimit, _glide.Trail);
+                Vector2[] trail =
+                {
+                    new(topRight, 3), new(trailTop, 3),
+                    new(trailBottom, h - 3), new(bottomRight, h - 3),
+                };
+                DrawColoredPolygon(trail, TrailColour);
+            }
 
             float filledSpan = Mathf.Max(0f, topRight - topLeft);
             for (int i = 0; i < 7; i++)
@@ -179,38 +240,71 @@ public partial class StatBar : Control
     private void DrawPlain(float w, float h)
     {
         DrawRect(new Rect2(0f, 0f, w, h), new Color(0.020f, 0.022f, 0.027f, 0.90f));
+        if (Trailing)
+            DrawRect(new Rect2(1f, 1f, Mathf.Max(0f, (w - 2f) * _glide!.Trail), h - 2f), TrailColour);
         if (_frac > 0f)
         {
             var fill = new Rect2(1f, 1f, Mathf.Max(0f, (w - 2f) * _frac), h - 2f);
-            DrawRect(fill, _fill.Darkened(0.30f));
+            DrawRect(fill, Fill.Darkened(0.30f));
             DrawRect(new Rect2(fill.Position, new Vector2(fill.Size.X, fill.Size.Y * 0.45f)),
-                     _fill.Lightened(0.22f));
+                     Fill.Lightened(0.22f));
         }
         DrawRect(new Rect2(0.5f, 0.5f, w - 1f, h - 1f),
                  new Color(0.62f, 0.56f, 0.38f, 0.55f), false, 1f);
     }
 
+    private static readonly Vector2[] UpperShape = { new(0, 0), new(251, 0), new(273, 23), new(23, 24) };
+    private static readonly Vector2 UpperFrame = new(274, 25);
+    private static readonly Vector2[] LowerShape = { new(13, 0), new(264, 1), new(245, 16), new(0, 15) };
+    private static readonly Vector2 LowerFrame = new(265, 17);
+
+    public bool ShowNumbers
+    {
+        get => _text.Visible;
+        set => _text.Visible = value;
+    }
+
     private Vector2[] Silhouette() => _ribbon switch
     {
-        RibbonKind.Upper => new Vector2[] { new(0, 0), new(251, 0), new(273, 23), new(23, 24) },
-        RibbonKind.Lower => new Vector2[] { new(13, 0), new(264, 1), new(245, 16), new(0, 15) },
+        RibbonKind.Upper => Fitted(UpperShape, UpperFrame),
+        RibbonKind.Lower => Fitted(LowerShape, LowerFrame),
         _ => new Vector2[] { new(0, 0), new(Size.X, 0), new(Size.X, Size.Y), new(0, Size.Y) },
     };
 
-    private Vector2[] FilledQuad(Vector2[] silhouette) => new[]
+    private Vector2[] Fitted(Vector2[] shape, Vector2 frame)
+    {
+        float scale = Size.Y / frame.Y;
+        var fitted = new Vector2[shape.Length];
+        for (int i = 0; i < shape.Length; i++)
+        {
+            var point = shape[i];
+            float x = point.X * 2f < frame.X ? point.X * scale : Size.X - (frame.X - point.X) * scale;
+            fitted[i] = new Vector2(x, point.Y * scale);
+        }
+        return fitted;
+    }
+
+    private Vector2[] FilledQuad(Vector2[] silhouette) => FilledQuad(silhouette, _frac);
+
+    private static Vector2[] FilledQuad(Vector2[] silhouette, float fraction) => new[]
     {
         silhouette[0],
-        silhouette[0].Lerp(silhouette[1], _frac),
-        silhouette[3].Lerp(silhouette[2], _frac),
+        silhouette[0].Lerp(silhouette[1], fraction),
+        silhouette[3].Lerp(silhouette[2], fraction),
         silhouette[3],
     };
 
-    private Color RibbonEdge() => _fill.Darkened(_ribbon == RibbonKind.Lower ? 0.40f : 0.45f);
+    private bool Trailing => _glide != null && _glide.Trail > _frac;
+
+    private Color TrailColour => new(Fill.Lightened(TrailLighten), TrailAlpha);
+
+    private Color RibbonEdge() => Fill.Darkened(_ribbon == RibbonKind.Lower ? 0.40f : 0.45f);
 
     private void DrawRibbon()
     {
         var silhouette = Silhouette();
         DrawColoredPolygon(silhouette, new Color(0.035f, 0.038f, 0.040f, 0.90f));
+        if (Trailing) DrawColoredPolygon(FilledQuad(silhouette, _glide!.Trail), TrailColour);
         if (_frac > 0f) DrawColoredPolygon(FilledQuad(silhouette), RibbonEdge());
     }
 
@@ -219,7 +313,7 @@ public partial class StatBar : Control
         if (_frac <= 0f) return;
         var filled = FilledQuad(Silhouette());
         Color edge = RibbonEdge();
-        Color core = _fill.Lightened(_ribbon == RibbonKind.Upper ? RibbonBreathe : RibbonBreathe + LowerCoreLift);
+        Color core = Fill.Lightened(_ribbon == RibbonKind.Upper ? RibbonBreathe : RibbonBreathe + LowerCoreLift);
 
         Vector2 a = filled[0].Lerp(filled[3], 0.22f);
         Vector2 b = filled[1].Lerp(filled[2], 0.22f);
@@ -252,7 +346,7 @@ public partial class StatBar : Control
         {
             silhouette[0], silhouette[1], silhouette[2], silhouette[3], silhouette[0],
         };
-        layer.DrawPolyline(border, new Color(_fill, 0.13f), 3f, true);
+        layer.DrawPolyline(border, new Color(Fill, 0.13f), 3f, true);
         layer.DrawPolyline(border, new Color(0.055f, 0.060f, 0.060f, 0.96f), 1.5f, true);
         layer.DrawPolyline(border, new Color(0.56f, 0.48f, 0.27f, 0.48f), 0.75f, true);
     }
@@ -260,9 +354,19 @@ public partial class StatBar : Control
 
 public partial class LevelOrb : Control
 {
+    private const float IconInset = 0.28f;
+    private static readonly Color IconTint = new(0.86f, 0.87f, 0.90f);
+    private static readonly Color HighlightIconTint = new(0.12f, 0.09f, 0.04f);
+    private static readonly Color Face = new(0.115f, 0.120f, 0.125f, 0.97f);
+    private static readonly Color HighlightFace = new(0.86f, 0.66f, 0.27f, 0.98f);
+    private readonly CenterContainer _labels;
     private readonly Label _level;
     private readonly Label _exp;
+    private TextureRect? _icon;
+    private bool _highlighted;
     private float _expFraction;
+    private float _expShown;
+    private bool _expPlaced;
 
     public LevelOrb(float size)
     {
@@ -271,6 +375,7 @@ public partial class LevelOrb : Control
         var center = new CenterContainer();
         center.SetAnchorsPreset(LayoutPreset.FullRect);
         AddChild(center);
+        _labels = center;
         var vb = new VBoxContainer();
         vb.AddThemeConstantOverride("separation", -2);
         center.AddChild(vb);
@@ -286,11 +391,65 @@ public partial class LevelOrb : Control
         Resized += QueueRedraw;
     }
 
+    public Texture2D? Icon
+    {
+        get => _icon?.Texture;
+        set
+        {
+            if (_icon == null)
+            {
+                float inset = Mathf.Min(CustomMinimumSize.X, CustomMinimumSize.Y) * IconInset;
+                _icon = new TextureRect
+                {
+                    ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                    MouseFilter = MouseFilterEnum.Ignore,
+                    SelfModulate = _highlighted ? HighlightIconTint : IconTint,
+                };
+                _icon.SetAnchorsPreset(LayoutPreset.FullRect);
+                _icon.OffsetLeft = _icon.OffsetTop = inset;
+                _icon.OffsetRight = _icon.OffsetBottom = -inset;
+                AddChild(_icon);
+            }
+            _icon.Texture = value;
+            _labels.Visible = value == null;
+        }
+    }
+
+    public bool Highlighted
+    {
+        get => _highlighted;
+        set
+        {
+            if (_highlighted == value) return;
+            _highlighted = value;
+            if (_icon != null) _icon.SelfModulate = value ? HighlightIconTint : IconTint;
+            QueueRedraw();
+        }
+    }
+
     public void Set(int level, double expPercent)
     {
-        _expFraction = Mathf.Clamp((float)(expPercent / 100.0), 0f, 1f);
         _level.Text = level.ToString();
         _exp.Text = $"{expPercent:0.000}%";
+        SetGauge(expPercent);
+    }
+
+    public void SetGauge(double percent)
+    {
+        float fraction = Mathf.Clamp((float)(percent / 100.0), 0f, 1f);
+        if (_expPlaced && Mathf.IsEqualApprox(fraction, _expFraction)) return;
+        _expFraction = fraction;
+        if (!_expPlaced || _expFraction < _expShown) _expShown = _expFraction;
+        _expPlaced = true;
+        SetProcess(_expShown < _expFraction);
+        QueueRedraw();
+    }
+
+    public override void _Process(double delta)
+    {
+        _expShown = Mathf.MoveToward(_expShown, _expFraction, BarGlide.GlidePerSecond * (float)delta);
+        if (_expShown >= _expFraction) SetProcess(false);
         QueueRedraw();
     }
 
@@ -305,7 +464,7 @@ public partial class LevelOrb : Control
         {
             new(c.X, c.Y - r), new(c.X + r, c.Y), new(c.X, c.Y + r), new(c.X - r, c.Y),
         };
-        DrawColoredPolygon(dia, new Color(0.115f, 0.120f, 0.125f, 0.97f));
+        DrawColoredPolygon(dia, _highlighted ? HighlightFace : Face);
         Vector2[] outline = { dia[0], dia[1], dia[2], dia[3], dia[0] };
         DrawPolyline(outline, new Color(0.025f, 0.027f, 0.030f, 0.98f), 3f, true);
         DrawPolyline(outline, new Color(0.24f, 0.22f, 0.17f, 0.92f), 1.25f, true);
@@ -324,7 +483,7 @@ public partial class LevelOrb : Control
     private void DrawExpGauge(Vector2[] diamond)
     {
         Vector2[] path = { diamond[2], diamond[3], diamond[0], diamond[1], diamond[2] };
-        float remaining = _expFraction * 4f;
+        float remaining = _expShown * 4f;
         var glow = new Color(0.86f, 0.64f, 0.22f, 0.18f);
         var gold = new Color(0.86f, 0.66f, 0.27f, 0.98f);
         var highlight = new Color(1.00f, 0.82f, 0.39f, 0.72f);

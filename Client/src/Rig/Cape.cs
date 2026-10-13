@@ -7,8 +7,10 @@ using Godot;
 
 namespace LibreKO;
 
-public partial class Cape : MeshInstance3D
+public partial class Cape : MeshInstance3D, IFxTicked
 {
+    public int FxSlot { get; set; } = FxTickLane.Unlisted;
+
     public const int GmCapeId = 99;
 
     private const float RefNeckY = 1.7346f;
@@ -58,7 +60,7 @@ public partial class Cape : MeshInstance3D
     };
 
     public readonly record struct CapeDef(
-        string Name, int Family, int Grade, int Ranking, int C, int M, int Price, int Points);
+        string Name, int Family, int Grade, int Ranking, int C, int M, int Price, int Points, string Desc = "", bool Castle = false);
 
     private sealed class GridMesh
     {
@@ -91,7 +93,9 @@ public partial class Cape : MeshInstance3D
                 o["name"].AsString(), o["family"].AsInt32(), o["grade"].AsInt32(),
                 o["ranking"].AsInt32(), o["c"].AsInt32(), o["m"].AsInt32(),
                 o.TryGetValue("price", out var pr) ? pr.AsInt32() : 0,
-                o.TryGetValue("points", out var pt) ? pt.AsInt32() : 0);
+                o.TryGetValue("points", out var pt) ? pt.AsInt32() : 0,
+                o.TryGetValue("desc", out var desc) ? desc.AsString() : "",
+                o.TryGetValue("castle", out var castle) && castle.AsBool());
         }
         foreach (var k in doc["meshes"].AsGodotDictionary())
         {
@@ -200,6 +204,7 @@ public partial class Cape : MeshInstance3D
 
     private ArrayMesh _mesh = null!;
     private ShaderMaterial _mat = null!;
+    private static readonly Dictionary<(long Format, int Vertices), byte[]> VertexTemplates = Shutdown.Track(new Dictionary<(long Format, int Vertices), byte[]>());
     private byte[] _vertexBytes = Array.Empty<byte>();
     private int _normalOffset, _normalStride;
     private Basis _restBasis;
@@ -266,7 +271,6 @@ public partial class Cape : MeshInstance3D
             _handR = FirstBone(skel, "Hand_R", "RightWrist"),
             TopLevel = true,
             CastShadow = ShadowCastingSetting.Off,
-            ProcessPriority = 500,
         };
         body.AddChild(cape);
         cape.Build(grid, capeId, dye, highDetail, body);
@@ -298,7 +302,94 @@ public partial class Cape : MeshInstance3D
         _mat.SetShaderParameter("dye", new Vector3(c.R, c.G, c.B));
     }
 
-    public override void _Process(double delta)
+    public override void _EnterTree()
+    {
+        var lane = FxDriver.Lane(this, FxLane.Late);
+        if (lane == null) return;
+        lane.Join(this);
+        lane.AfterTick = FlushBatch;
+    }
+
+    private static readonly List<Cape> Batch = new();
+    private float _stepH, _stepDt;
+    private Transform3D _stepTarget;
+    private bool _stepOk;
+
+    internal static void FlushBatch()
+    {
+        if (Batch.Count == 0) return;
+        using var scope = Perf.Measure(Perf.Section.Cape);
+        foreach (var cape in Batch)
+        {
+            if (!IsInstanceValid(cape)) continue;
+            cape.RunStep();
+            cape.FinishStep();
+        }
+        Batch.Clear();
+    }
+
+    internal void TickNow(double delta)
+    {
+        FxTick(delta);
+        FlushBatch();
+    }
+
+    private void RunStep()
+    {
+        try
+        {
+            Step();
+            _stepOk = true;
+        }
+        catch (Exception)
+        {
+            _stepOk = false;
+        }
+    }
+
+    private void Step()
+    {
+        float h = _stepH, dt = _stepDt;
+        var anchor = _stepTarget;
+        while (_accum + 1e-8 >= h)
+        {
+            float blend = Mathf.Clamp(1f - ((float)_accum - h) / dt, 0f, 1f);
+            var step = _lastFrameAnchor.InterpolateWith(anchor, blend);
+            Simulate(h, step, blend);
+            _accum -= h;
+        }
+        _lastFrameAnchor = anchor;
+        _renderOrigin = anchor.Origin;
+        float alpha = Mathf.Clamp((float)_accum / h, 0, 1);
+        for (int i = 0; i < _pos.Length; i++)
+            _renderPos[i] = _w[i] == 0 ? _pins[i] : _previous[i].Lerp(_pos[i], alpha);
+        SmoothSurface(_renderPos);
+        CollideRender();
+        Pack(_surfacePos);
+    }
+
+    private void FinishStep()
+    {
+        if (!_stepOk)
+        {
+            _primed = false;
+            return;
+        }
+        GlobalTransform = new Transform3D(Basis.Identity, _renderOrigin);
+        _mesh.SurfaceUpdateVertexRegion(0, 0, _vertexBytes);
+        CommitColliders();
+        _pinPrevious = _pinCurrent;
+        Array.Copy(_pins, _oldPins, _nc);
+        if (DrawDebug) DrawDebugOverlay();
+        else if (_dbg != null) _dbg.Visible = false;
+    }
+
+    public override void _ExitTree() => FxDriver.Lane(this, FxLane.Late)?.Leave(this);
+
+    private Transform3D _parkedPin;
+    private bool _parkedWritten;
+
+    public void FxTick(double delta)
     {
         using var scope = Perf.Measure(Perf.Section.Cape);
         if (!IsInstanceValid(_skel) || _rest.Length == 0 || delta <= 0) return;
@@ -317,13 +408,19 @@ public partial class Cape : MeshInstance3D
                 Upload(_surfacePos);
                 _frozen = true;
             }
-            GlobalTransform = _pinCurrent;
+            if (!_parkedWritten || !_pinCurrent.IsEqualApprox(_parkedPin))
+            {
+                GlobalTransform = _pinCurrent;
+                _parkedPin = _pinCurrent;
+                _parkedWritten = true;
+            }
             _lastFrameAnchor = anchor;
             _pinPrevious = _pinCurrent;
             _primed = false;
             if (_dbg != null) _dbg.Visible = false;
             return;
         }
+        _parkedWritten = false;
         UpdatePins();
         if (!_primed || _frozen || delta > 0.2 || anchor.Origin.DistanceSquaredTo(_lastFrameAnchor.Origin) > 9f)
             Reset(anchor);
@@ -336,27 +433,10 @@ public partial class Cape : MeshInstance3D
         float dt = Mathf.Min((float)delta, h * 4);
         _accum += dt;
         UpdateColliders();
-        while (_accum + 1e-8 >= h)
-        {
-            float blend = Mathf.Clamp(1f - ((float)_accum - h) / dt, 0f, 1f);
-            var step = _lastFrameAnchor.InterpolateWith(anchor, blend);
-            Simulate(h, step, blend);
-            _accum -= h;
-        }
-        _lastFrameAnchor = anchor;
-        _renderOrigin = anchor.Origin;
-        GlobalTransform = new Transform3D(Basis.Identity, _renderOrigin);
-        float alpha = Mathf.Clamp((float)_accum / h, 0, 1);
-        for (int i = 0; i < _pos.Length; i++)
-            _renderPos[i] = _w[i] == 0 ? _pins[i] : _previous[i].Lerp(_pos[i], alpha);
-        SmoothSurface(_renderPos);
-        CollideRender();
-        Upload(_surfacePos);
-        CommitColliders();
-        _pinPrevious = _pinCurrent;
-        Array.Copy(_pins, _oldPins, _nc);
-        if (DrawDebug) DrawDebugOverlay();
-        else if (_dbg != null) _dbg.Visible = false;
+        _stepH = h;
+        _stepDt = dt;
+        _stepTarget = anchor;
+        Batch.Add(this);
     }
 
     private void Reset(Transform3D anchor)
@@ -421,6 +501,12 @@ public partial class Cape : MeshInstance3D
 
     private void Upload(Vector3[] positions)
     {
+        Pack(positions);
+        _mesh.SurfaceUpdateVertexRegion(0, 0, _vertexBytes);
+    }
+
+    private void Pack(Vector3[] positions)
+    {
         var points = MemoryMarshal.Cast<Vector3, NumericsVector3>(positions.AsSpan());
         var normals = MemoryMarshal.Cast<Vector3, NumericsVector3>(_nrm.AsSpan());
         normals.Clear();
@@ -440,7 +526,6 @@ public partial class Cape : MeshInstance3D
             BinaryPrimitives.WriteUInt16LittleEndian(_vertexBytes.AsSpan(offset), (ushort)Mathf.Clamp(oct.X * 65535, 0, 65535));
             BinaryPrimitives.WriteUInt16LittleEndian(_vertexBytes.AsSpan(offset + 2), (ushort)Mathf.Clamp(oct.Y * 65535, 0, 65535));
         }
-        _mesh.SurfaceUpdateVertexRegion(0, 0, _vertexBytes);
     }
 
     private static Skeleton3D? FindSkeleton(Node n)

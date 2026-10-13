@@ -6,6 +6,9 @@ public sealed class NoticePacketWriter
 {
     public const byte ScreenNotice = 1;
     public const byte LoginNotice = 2;
+    public const byte EventTitles = 4;
+    public const byte TitleShown = 1;
+    public const byte TitleRemoved = 2;
 
     private const int LineMaxLength = 255;
 
@@ -40,6 +43,24 @@ public sealed class NoticePacketWriter
             packet.WriteString(message);
         }
 
+        return packet;
+    }
+
+    public static Packet EventTitle(string title, string message)
+    {
+        var packet = EventTitlePacket(TitleShown, title);
+        packet.WriteString(message);
+        return packet;
+    }
+
+    public static Packet EventTitleRemoved(string title) => EventTitlePacket(TitleRemoved, title);
+
+    private static Packet EventTitlePacket(byte sub, string title)
+    {
+        var packet = new Packet(GameOpcodes.GS_NOTICE);
+        packet.WriteByte(EventTitles);
+        packet.WriteByte(sub);
+        packet.WriteString(title);
         return packet;
     }
 

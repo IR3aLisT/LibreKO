@@ -22,5 +22,7 @@ public static class NationRankAura
         _ => NoFx,
     };
 
+    public static int FxIdFor(int personalRank, bool king) => king ? GoldFxId : FxIdFor(personalRank);
+
     public static bool HiddenIn(int zone) => System.Array.IndexOf(HiddenZones, zone) >= 0;
 }

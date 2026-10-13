@@ -5,13 +5,17 @@ namespace LibreKO.Network;
 public sealed class NpcDialog
 {
     public const int RebirthPanelFlag = 48;
+    public const int RebirthResetPanelFlag = 52;
     public const int FamiliarPanelFlag = 9;
     public const int FamiliarShopFlag = 14;
     public const int GenderChangePanelFlag = 53;
     public const int FortunePanelFlag = 16;
     public const int SpecialAuctionPanelFlag = 58;
+    public const int FullMoonBoardFlag = 57;
     public const int ItemCombinePanelFlag = 18;
     public const int CombineRecipeBookFlag = 21;
+    public const int DisassemblePanelFlag = 27;
+    public const int RepurchaseWindowFlag = 30;
 
     public int NpcId;
     public int Flag;
@@ -23,6 +27,9 @@ public sealed class NpcDialog
 
     public readonly List<(int Index, int TextId, string? Text)> Buttons = new();
 
+    public const int ButtonSlots = 12;
+    public const int MinimumBytes = 4 + 1 + 4 + 4 + ButtonSlots * 4;
+
     public static NpcDialog Read(Packet packet)
     {
         var dialog = new NpcDialog
@@ -32,8 +39,8 @@ public sealed class NpcDialog
             QuestId = packet.ReadInt(),
             HeaderTextId = packet.ReadInt(),
         };
-        var ids = new List<int>(12);
-        for (var index = 0; index < 12; index++)
+        var ids = new List<int>(ButtonSlots);
+        for (var index = 0; index < ButtonSlots; index++)
             ids.Add(packet.ReadInt());
         dialog.ScriptFile = packet.RemainingBytes > 0 ? packet.ReadSByteString().Trim() : "";
         var texts = ReadText(packet, true, out var header, ids);

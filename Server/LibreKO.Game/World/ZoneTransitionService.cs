@@ -2,6 +2,7 @@
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using Microsoft.Extensions.Logging;
+using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
 
 namespace LibreKO.Game.World;
@@ -9,6 +10,7 @@ namespace LibreKO.Game.World;
 public interface IZoneTransitionService
 {
     event Func<UserSession, byte, Task>? PlayerLeavingZone;
+    event Func<UserSession, Task>? ZoneAbilitySent;
     Task ChangeZoneAsync(UserSession session, byte newZone, float x, float z);
     Task SendZoneAbilityAsync(UserSession session);
     Task RefreshArenaAsync(UserSession session);
@@ -21,7 +23,8 @@ public class ZoneTransitionService(
     ICollectionRaceService collectionRaceService,
     InstanceRoomRegistry instanceRooms,
     IPetService petService,
-    ILogger<ZoneTransitionService> logger) : IZoneTransitionService
+    ILogger<ZoneTransitionService> logger,
+    IPartyPacketCoordinator? partyCoordinator = null) : IZoneTransitionService
 {
     private const byte ZoneAbilityUpdate = 1;
     private const byte DefaultTariff = 10;
@@ -32,6 +35,7 @@ public class ZoneTransitionService(
     public const string RebornBarredNotice = "Reborn characters cannot enter Ardream or Ronark Land Base.";
 
     public event Func<UserSession, byte, Task>? PlayerLeavingZone;
+    public event Func<UserSession, Task>? ZoneAbilitySent;
 
     public async Task ChangeZoneAsync(UserSession session, byte newZone, float x, float z)
     {
@@ -53,7 +57,12 @@ public class ZoneTransitionService(
         if (session.ZoneId != newZone)
             await petService.DismissAsync(session);
 
+        if (session.ZoneId != newZone && session.IsInParty && partyCoordinator != null
+            && !(session.Room != 0 && instanceRooms.Holds(session.Room, newZone)))
+            await partyCoordinator.LeaveGameAsync(session);
+
         session.IsWarping = true;
+        session.BlinkOnArrival = session.ZoneId != newZone;
 
         if (x == 0f && z == 0f)
             (x, z) = ResolveZeroCoords(newZone, session.Nation);
@@ -67,6 +76,7 @@ public class ZoneTransitionService(
             instanceRooms.Leave(session);
 
         session.ZoneId = newZone;
+        session.Ground = GroundEffect.None;
         session.X = x;
         session.Z = z;
         session.Y = ResolveTargetHeight(newZone, x, z);
@@ -98,7 +108,9 @@ public class ZoneTransitionService(
     {
         session.ArenaId = ArenaZones.GetArenaId(session.ZoneId, session.X, session.Z);
         var rule = ZoneRules.For(session.ZoneId);
-        var zoneType = GetZoneAbilityType(session.ZoneId, session.ArenaId);
+        var zoneType = session.ZoneId == (byte)ZoneId.Delos && sessionManager.Battle.CastleSiegeOpen
+            ? ZoneAbilityType.SiegeType2
+            : GetZoneAbilityType(session.ZoneId, session.ArenaId);
         var kingData = gameDataService.KingSystemTable.TryGetValue((byte)session.Nation, out var data) ? data : null;
         var tariff = (ushort)(kingData?.TerritoryTariff ?? DefaultTariff);
 
@@ -108,6 +120,8 @@ public class ZoneTransitionService(
             (byte)zoneType,
             rule.Flags.HasFlag(ZoneFlags.TalkOtherNation),
             tariff));
+        if (ZoneAbilitySent is { } sent)
+            await sent(session);
     }
 
     private float ResolveTargetHeight(short zoneId, float x, float z)

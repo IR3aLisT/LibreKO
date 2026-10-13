@@ -11,6 +11,8 @@ public sealed class NpcDialogPacketWriter
     public const byte ObjectEventEffect = 11;
     public const byte ObjectEventShown = 1;
     public const byte RebirthPanelStyle = 48;
+    public const byte RebirthResetPanelStyle = 52;
+    public const byte RepurchaseWindowStyle = 30;
     public const byte FamiliarPanelStyle = 9;
     public const byte FamiliarShopStyle = 14;
     public const byte GenderChangePanelStyle = 53;
@@ -18,6 +20,7 @@ public sealed class NpcDialogPacketWriter
     public const byte SpecialAuctionPanelStyle = 58;
     public const byte ItemCombinePanelStyle = 18;
     public const byte CombineRecipeBookStyle = 21;
+    public const byte DisassemblePanelStyle = 27;
 
     public static Packet NpcSay(IReadOnlyList<int> textIds) => NpcSay(textIds, null);
 
@@ -97,6 +100,12 @@ public sealed class NpcDialogPacketWriter
     public static Packet RebirthPanel(int npcId, string scriptFile) =>
         SelectMessage(npcId, RebirthPanelStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
 
+    public static Packet RebirthResetPanel(int npcId, string scriptFile) =>
+        SelectMessage(npcId, RebirthResetPanelStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
+
+    public static Packet RepurchaseWindow(int npcId, string scriptFile) =>
+        SelectMessage(npcId, RepurchaseWindowStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
+
     public static Packet FamiliarPanel(int npcId, string scriptFile) =>
         SelectMessage(npcId, FamiliarPanelStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
 
@@ -114,6 +123,9 @@ public sealed class NpcDialogPacketWriter
 
     public static Packet CombineRecipeBook(int npcId, string scriptFile) =>
         SelectMessage(npcId, CombineRecipeBookStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
+
+    public static Packet DisassemblePanel(int npcId, string scriptFile) =>
+        SelectMessage(npcId, DisassemblePanelStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);
 
     public static Packet FamiliarShop(int npcId, string scriptFile) =>
         SelectMessage(npcId, FamiliarShopStyle, NoText, NoText, [], UserSession.SelectMessageEventCount, scriptFile);

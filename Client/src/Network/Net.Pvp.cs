@@ -7,6 +7,8 @@ public partial class Net
     public event Action<int, string, string>? PvpRivalAssignedEvent;
     public event Action? PvpRivalRemovedEvent;
     public event Action<int, bool>? PvpAngerEvent;
+    public int AngerGauge { get; private set; }
+    public bool AngerFull { get; private set; }
 
     private const byte PvpAssignRival = 1;
     private const byte PvpRemoveRival = 2;
@@ -40,11 +42,15 @@ public partial class Net
             {
                 int gauge = p.RemainingBytes >= 1 ? p.ReadByte() : 0;
                 bool full = p.RemainingBytes >= 1 && p.ReadByte() != 0;
+                AngerGauge = gauge;
+                AngerFull = full;
                 PvpAngerEvent?.Invoke(gauge, full);
                 break;
             }
 
             case PvpResetHelmet:
+                AngerGauge = 0;
+                AngerFull = false;
                 PvpAngerEvent?.Invoke(0, false);
                 break;
         }

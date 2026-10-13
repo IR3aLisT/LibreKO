@@ -50,7 +50,7 @@ public partial class World
         attach.BoneIdx = g.Joint;
 
         var mesh = scene.Instantiate<Node3D>();
-        mesh.Transform = new Transform3D(new Basis(g.Quat).Scaled(g.Scale), g.Pos);
+        mesh.Transform = WeaponMount.PlugLocal(g.Pos, g.Quat, g.Scale);
         ForceDoubleSided(mesh);
         attach.AddChild(mesh);
 
@@ -64,7 +64,7 @@ public partial class World
             return;
         }
 
-        var board = Fx.Spawn(ClanGauntletFx, attach, g.Pos, oneShot: false);
+        var board = Fx.Spawn(ClanGauntletFx, attach, mesh.Position, oneShot: false);
         if (board != null) CullAttachedFx(board);
     }
 

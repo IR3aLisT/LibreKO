@@ -31,8 +31,16 @@ public partial class Net
     public event Action<AchievementSummary>? AchievementSummaryEvent;
     public event Action<int, int>? AchievementClaimEvent;
     public event Action<int, int>? TitleChangedEvent;
+    public event Action<AchievementTitleAnswer>? TitleAnswerEvent;
 
     public int DisplayTitleId { get; private set; }
+
+    private void ApplyTitle(int charId, int titleId)
+    {
+        if (charId == MyCharId) DisplayTitleId = titleId;
+        if (_known.TryGetValue(charId, out var known)) known.TitleId = titleId;
+        TitleChangedEvent?.Invoke(charId, titleId);
+    }
 
     private void HandleAchievement(Packet p)
     {
@@ -58,10 +66,7 @@ public partial class Net
         else if (sub == AchievementSubTitleChanged)
         {
             if (p.RemainingBytes < 6) return;
-            int charId = p.ReadInt();
-            int titleId = p.ReadUShort();
-            if (charId == MyCharId) DisplayTitleId = titleId;
-            TitleChangedEvent?.Invoke(charId, titleId);
+            ApplyTitle(p.ReadInt(), p.ReadUShort());
         }
         else if (sub == AchievementSubSummary)
         {
@@ -79,6 +84,13 @@ public partial class Net
             for (int i = 0; i < AchievementRecentSlots; i++) summary.RecentlyAchieved[i] = p.ReadUShort();
             for (int i = 0; i < AchievementTabCount; i++) summary.AchievedPerTab[i] = p.ReadUShort();
             AchievementSummaryEvent?.Invoke(summary);
+        }
+        else if (AchievementTitleAnswer.Handles(sub))
+        {
+            if (AchievementTitleAnswer.Read(sub, p) is not { } answer) return;
+            if (answer.Result == AchievementTitleAnswer.Done && answer.Sub == AchievementTitleAnswer.SelectCover) DisplayTitleId = answer.TitleId;
+            if (answer.Result == AchievementTitleAnswer.Done && answer.Sub == AchievementTitleAnswer.ResetCover) DisplayTitleId = 0;
+            TitleAnswerEvent?.Invoke(answer);
         }
         else if (sub == AchievementSubClaimResult)
         {
@@ -108,6 +120,13 @@ public partial class Net
         p.WriteByte(AchievementSubSelectDisplayTitle);
         p.WriteUShort((ushort)titleId);
         p.WriteUShort(0);
+        _conn.Send(p);
+    }
+
+    public void SendTitleReset()
+    {
+        var p = new Packet(GameOpcodes.GS_ACHIEVEMENT);
+        p.WriteByte(AchievementTitleAnswer.ResetCover);
         _conn.Send(p);
     }
 

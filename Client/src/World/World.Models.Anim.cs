@@ -43,6 +43,15 @@ public partial class World
         if (DoubleSidedScenes.Add(scenePath)) ForceDoubleSided(inst);
     }
 
+    private const float ClipLengthTolerance = 0.01f;
+
+    private static void MatchClipLength(Animation? clip, AnimMeta meta)
+    {
+        if (clip == null || meta.End <= meta.Start) return;
+        float expected = (meta.End - meta.Start) / meta.Fps;
+        if (Mathf.Abs(clip.Length - expected) > ClipLengthTolerance) clip.Length = expected;
+    }
+
     internal static void RegisterAnimationMetadata(AnimationPlayer anim, string path)
     {
         if (AnimationMetaByPath.TryGetValue(path, out var shared))
@@ -82,6 +91,7 @@ public partial class World
                     };
                     map[iv.AsInt32()] = meta;
                     names[name] = meta;
+                    MatchClipLength(anim.GetAnimation(name), meta);
                 }
         }
         AnimationMetaByIndex[anim.GetInstanceId()] = map;
@@ -185,12 +195,17 @@ public partial class World
             name = AnimationNameAt(anim, slot);
         name ??= Pick(anim, requested) ?? AnimationNameAt(anim, 0) ?? Pick(anim, idleOverride ?? IdleClips);
         if (name == null || !anim.HasAnimation(name)) return;
+        if (anim.CurrentAnimation == name && anim.IsPlaying() && BlendHold.Remaining(anim) <= 0)
+        {
+            clip = state;
+            return;
+        }
 
         var res = anim.GetAnimation(name);
         if (res != null) res.LoopMode = Animation.LoopModeEnum.Linear;
         double blend = AnimationMetaFor(anim, name)?.Blend ?? AnimBlend;
-        anim.Play(name, blend);
-        CrowdAnimator.NotifyPlay(anim, name, blend);
+        BlendHold.Play(anim, name, blend, hold: false);
+        CrowdAnimator.NotifyPlay(anim, name, blend, hold: false);
         clip = state;
     }
 

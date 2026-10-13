@@ -139,6 +139,10 @@ internal sealed partial class ChatSystem
         return button;
     }
 
+    private const string GeneralTabId = "general";
+
+    internal void NoahStatusChanged() => QueueFit();
+
     private void QueueFit()
     {
         if (_fitQueued) return;
@@ -150,16 +154,30 @@ internal sealed partial class ChatSystem
     {
         _fitQueued = false;
         if (!GodotObject.IsInstanceValid(_tabHost)) return;
-        var widths = new float[_tabButtons.Count];
-        for (int i = 0; i < widths.Length; i++) widths[i] = _tabButtons[i].GetCombinedMinimumSize().X;
-        float overflowWidth = _overflow.GetCombinedMinimumSize().X;
-        var fit = ChatTabs.Fit(widths, _tabHost.Size.X, TabGap, overflowWidth, _selectedTab);
-
-        _hiddenTabs.Clear();
-        bool selectedFits = _selectedTab < fit.Visible;
+        bool noah = NoahKnight?.Invoke() == true;
+        var usable = new List<int>();
         for (int i = 0; i < _tabButtons.Count; i++)
         {
-            bool shown = selectedFits ? i < fit.Visible : i < fit.Visible - 1 || i == _selectedTab;
+            if (ChatTabs.Applies(ChatTabs.All[i], noah)) usable.Add(i);
+            else _tabButtons[i].Visible = false;
+        }
+        if (!usable.Contains(_selectedTab))
+        {
+            Callable.From(() => SelectTab(ChatTabs.IndexOf(GeneralTabId), false)).CallDeferred();
+            return;
+        }
+        var widths = new float[usable.Count];
+        for (int i = 0; i < widths.Length; i++) widths[i] = _tabButtons[usable[i]].GetCombinedMinimumSize().X;
+        float overflowWidth = _overflow.GetCombinedMinimumSize().X;
+        int selectedSlot = usable.IndexOf(_selectedTab);
+        var fit = ChatTabs.Fit(widths, _tabHost.Size.X, TabGap, overflowWidth, selectedSlot);
+
+        _hiddenTabs.Clear();
+        bool selectedFits = selectedSlot < fit.Visible;
+        for (int slot = 0; slot < usable.Count; slot++)
+        {
+            int i = usable[slot];
+            bool shown = selectedFits ? slot < fit.Visible : slot < fit.Visible - 1 || i == _selectedTab;
             _tabButtons[i].Visible = shown;
             if (!shown) _hiddenTabs.Add(i);
         }

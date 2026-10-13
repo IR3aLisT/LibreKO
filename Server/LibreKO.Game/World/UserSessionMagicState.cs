@@ -204,16 +204,9 @@ internal static class UserSessionMagicState
 
     public static int DropVolatileMagic(UserSession session, IGameDataService gameData)
     {
-        var dropped = 0;
-        foreach (var (magicId, buff) in session.ActiveBuffs)
-        {
-            if (SurvivesDeath(session, magicId, buff, gameData))
-                continue;
+        var dropped = session.RemoveBuffsWhere((magicId, buff) => !SurvivesDeath(session, magicId, buff, gameData));
 
-            if (session.ActiveBuffs.TryRemove(magicId, out _))
-                dropped++;
-        }
-
+        session.SizeState = SizeStates.Current(session);
         dropped += session.ActiveOverTimeEffects.Count;
         session.ActiveOverTimeEffects.Clear();
         session.CastingSkillId = 0;
@@ -229,8 +222,10 @@ internal static class UserSessionMagicState
     {
         session.Invisibility = InvisibilityType.None;
         session.TransformId = 0;
+        session.TransformSkillId = 0;
 
         short transformId = 0;
+        var transformSkillId = 0;
         var invisibility = InvisibilityType.None;
 
         foreach (var magicId in session.ActiveBuffs.Keys)
@@ -244,7 +239,10 @@ internal static class UserSessionMagicState
                 case MagicSkillType.Transform
                     when MagicTypeLookup.TryResolve(gameData.MagicType6Table, magic, magicId, out var type6Data):
                     if (type6Data.TransformId > 0)
+                    {
                         transformId = type6Data.TransformId;
+                        transformSkillId = magicId;
+                    }
                     break;
 
             }
@@ -260,11 +258,12 @@ internal static class UserSessionMagicState
 
         session.Invisibility = invisibility;
         session.TransformId = transformId;
+        session.TransformSkillId = transformSkillId;
     }
 
     public static void LoadSavedMagic(UserSession session, byte[]? data, IGameDataService gameData)
     {
-        session.ActiveBuffs.Clear();
+        session.ClearBuffs();
         session.ActiveOverTimeEffects.Clear();
         session.Invisibility = InvisibilityType.None;
         session.TransformId = 0;
@@ -287,8 +286,8 @@ internal static class UserSessionMagicState
             if (remainingMs <= 0)
                 continue;
 
-            session.ActiveBuffs[magicId] =
-                CreateSavedBuff(gameData, magicId, casterId, buffType, specialAmount, remainingMs);
+            session.SetBuff(magicId,
+                CreateSavedBuff(gameData, magicId, casterId, buffType, specialAmount, remainingMs));
         }
 
         RebuildSpecialStates(session, gameData);

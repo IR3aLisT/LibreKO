@@ -13,6 +13,7 @@ public class ChatInputTests
     [InlineData("&hello", ChatType.General, ChatType.Alliance)]
     [InlineData("%hello", ChatType.General, ChatType.Command)]
     [InlineData("@Rin hello", ChatType.General, ChatType.Private)]
+    [InlineData("|hello", ChatType.General, ChatType.NoahKnights)]
     [InlineData("", ChatType.Shout, ChatType.Shout)]
     public void TheTypedPrefixPicksTheChannel(string text, byte selected, byte expected) =>
         Assert.Equal(expected, ChatPrefixes.ChannelFor(text, selected));

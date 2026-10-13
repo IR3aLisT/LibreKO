@@ -7,7 +7,7 @@ namespace LibreKO;
 
 public partial class MiniMap : Control
 {
-    public readonly record struct Blip(float X, float Z, Color Color, float Radius, bool Hollow);
+    public readonly record struct Blip(float X, float Z, Color Color, float Radius, bool Hollow, bool Diamond = false);
 
     public const float SquareSize = 220f;
     public const float TouchSquareSize = 214f;
@@ -134,6 +134,7 @@ public partial class MiniMap : Control
         _zoomOut = zout;
 
         if (Platform.TouchUi) BuildCollapseToggle();
+        BuildNpcList();
     }
 
     private void BuildFrame()

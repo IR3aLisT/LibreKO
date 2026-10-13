@@ -8,25 +8,26 @@ namespace LibreKO.Game.Protocol;
 
 public interface IChatPacketCoordinator
 {
-    Task HandleAsync(UserSession session, byte chatType, string message);
+    Task HandleAsync(UserSession session, byte chatType, string message, ushort roomId = 0);
 }
 
 public class ChatPacketCoordinator(
     SessionManager sessionManager,
     IUserNotificationService userNotificationService,
     ICombatNotificationService combatNotificationService,
+    INationChatService nationChat,
     ILogger<ChatPacketCoordinator> logger) : IChatPacketCoordinator
 {
     private const int MessageMaxLength = 128;
     private const int FloodIntervalMs = 300;
     private const byte CommandCaptainFame = 100;
-    private const byte ClanOfficerFame = 3;
     private const int ShoutMinLevel = 35;
     private const int ShoutFee = 3000;
+    public const int NoahKnightsMaxLevel = 50;
 
-    public async Task HandleAsync(UserSession session, byte chatType, string message)
+    public async Task HandleAsync(UserSession session, byte chatType, string message, ushort roomId = 0)
     {
-        if (string.IsNullOrEmpty(message) || message.Length > MessageMaxLength)
+        if (string.IsNullOrEmpty(message) || message.EnumerateRunes().Count() > MessageMaxLength)
             return;
 
         if (session.IsMuted && !session.IsGM)
@@ -42,6 +43,11 @@ public class ChatPacketCoordinator(
         session.LastChatTicks = now;
 
         var type = (ChatType)chatType;
+        if (type == ChatType.ChatRoom)
+        {
+            await nationChat.SayAsync(session, roomId, message);
+            return;
+        }
         var asGameMaster = session.IsGM && session.GmModeEnabled;
         var outType = type == ChatType.General && asGameMaster ? ChatType.GameMaster : type;
 
@@ -153,12 +159,25 @@ public class ChatPacketCoordinator(
                 }
                 break;
 
+            case ChatType.NoahKnights:
+                if (session.Level > NoahKnightsMaxLevel)
+                    break;
+
+                foreach (var player in sessionManager.GetAll())
+                {
+                    if (player.Level > NoahKnightsMaxLevel)
+                        continue;
+
+                    try { await player.Client.SendPacket(result); } catch (Exception ex) { logger.LogDebug(ex, "Chat broadcast failed for {Id}", player.CharacterId); }
+                }
+                break;
+
             case ChatType.ClanOfficer:
-                if (session.KnightsId > 0 && session.KnightsFame <= ClanOfficerFame)
+                if (session.KnightsId > 0 && ClanRules.IsStaff(session.KnightsFame))
                 {
                     foreach (var member in sessionManager.GetAll())
                     {
-                        if (member.KnightsId != session.KnightsId || member.KnightsFame > ClanOfficerFame)
+                        if (member.KnightsId != session.KnightsId || !ClanRules.IsStaff(member.KnightsFame))
                             continue;
 
                         try { await member.Client.SendPacket(result); } catch (Exception ex) { logger.LogDebug(ex, "Chat broadcast failed for {Id}", member.CharacterId); }

@@ -25,8 +25,14 @@ public class SessionTerminationService(
     INpcLifecycleService npcLifecycleService,
     InstanceRoomRegistry instanceRooms,
     IBorderDefenseWarService borderDefenseWarService,
+    IChaosDungeonService chaosDungeonService,
     IKnightsRuntimeService knightsRuntime,
     IPetService petService,
+    ISoccerService soccerService,
+    INationChatService nationChat,
+    IKillStreakService killStreaks,
+    ISiegeTowerService siegeTowers,
+    IVanguardService vanguards,
     ILogger<SessionTerminationService> logger) : ISessionTerminationService
 {
     // Cap concurrent disconnect-time DB work so a mass disconnect (thousands of bots
@@ -177,7 +183,7 @@ public class SessionTerminationService(
         if (session.Trade.IsMerchanting || session.Trade.MerchantItems.Any(item => item != null && !item.IsEmpty))
             await merchantPacketCoordinator.HandleSessionEndedAsync(session);
         if (session.IsInParty)
-            await partyPacketCoordinator.RemoveMemberAsync(session, (short)session.CharacterId);
+            await partyPacketCoordinator.LeaveGameAsync(session);
 
         if (session.SummonedGuard is { } guard)
         {
@@ -186,12 +192,18 @@ public class SessionTerminationService(
         }
 
         await petService.DismissAsync(session);
+        await soccerService.LeaveAsync(session);
+        await nationChat.LeaveAllAsync(session);
+        await siegeTowers.ReleaseAsync(session);
+        await vanguards.ReleaseAsync(session);
+        killStreaks.Forget(session);
 
         session.IsMining = false;
         session.IsFishing = false;
 
         if (session.ZoneId == (byte)ZoneId.BorderDefenseWar)
             await borderDefenseWarService.OnPlayerLogoutOrLeaveAsync(session);
+            await chaosDungeonService.OnPlayerLogoutOrLeaveAsync(session);
     }
 
     private async Task MarkOfflineAsync(int characterId, CancellationToken cancellationToken)

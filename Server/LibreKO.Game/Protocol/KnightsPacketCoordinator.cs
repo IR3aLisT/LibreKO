@@ -9,14 +9,27 @@ namespace LibreKO.Game.Protocol;
 public interface IKnightsPacketCoordinator
 {
     Task HandleProcessAsync(IClient client, Packet packet);
+    Task HandlePremiumAsync(IClient client, Packet packet);
 }
 
 public class KnightsPacketCoordinator(
     SessionManager sessionManager,
     IKnightsMembershipPacketService knightsMembershipPacketService,
     IKnightsManagementPacketService knightsManagementPacketService,
+    IClanBattleService clanBattles,
+    IClanBoardService clanBoards,
     ILogger<KnightsPacketCoordinator> logger) : IKnightsPacketCoordinator
 {
+    public async Task HandlePremiumAsync(IClient client, Packet packet)
+    {
+        var session = sessionManager.GetByClientId(client.Id);
+        if (session == null || packet.RemainingBytes < 1) return;
+        if (packet.ReadByte() != KnightsBroadcastBuilders.ClanPremiumQuery) return;
+        var clan = session.KnightsId > 0 ? sessionManager.Knights.GetClan(session.KnightsId) : null;
+        await session.Client.SendPacket(
+            KnightsBroadcastBuilders.BuildClanPremium(KnightsBroadcastBuilders.ClanPremiumQuery, clan));
+    }
+
     public async Task HandleProcessAsync(IClient client, Packet packet)
     {
         var session = sessionManager.GetByClientId(client.Id);
@@ -104,6 +117,26 @@ public class KnightsPacketCoordinator(
                 await knightsManagementPacketService.HandleUpdateMemoAsync(session, packet);
                 break;
 
+            case KnightsSubOpcode.ClanAdvance:
+                await clanBoards.HandleBoardAsync(session, packet);
+                break;
+
+            case KnightsSubOpcode.ClanAdvanceApply:
+                await clanBoards.HandleApplyAsync(session, packet);
+                break;
+
+            case KnightsSubOpcode.ClanAdvanceRegister:
+                await clanBoards.HandleAdvertAsync(session, packet);
+                break;
+
+            case KnightsSubOpcode.ClanAdvancePromote:
+                await clanBoards.HandlePromoteAsync(session);
+                break;
+
+            case KnightsSubOpcode.WishBoard:
+                await clanBoards.HandleWishAsync(session, packet);
+                break;
+
             case KnightsSubOpcode.HandoverList:
                 await knightsManagementPacketService.HandleHandoverListAsync(session);
                 break;
@@ -114,6 +147,18 @@ public class KnightsPacketCoordinator(
 
             case KnightsSubOpcode.MarkVersionReq:
                 await knightsManagementPacketService.HandleMarkVersionReqAsync(session);
+                break;
+
+            case KnightsSubOpcode.ClanBattleChallenge when packet.RemainingBytes >= sizeof(int):
+                await clanBattles.ChallengeAsync(session, packet.ReadInt());
+                break;
+
+            case KnightsSubOpcode.ClanBattleAnswer when packet.RemainingBytes >= 1 + sizeof(int):
+                await clanBattles.AnswerAsync(session, packet.ReadByte() == 1, packet.ReadInt());
+                break;
+
+            case KnightsSubOpcode.ClanBattleSurrender:
+                await clanBattles.SurrenderAsync(session);
                 break;
 
             case KnightsSubOpcode.MarkRegister:
@@ -149,6 +194,9 @@ public class KnightsPacketCoordinator(
 
             case KnightsSubOpcode.AllyList:
                 await knightsManagementPacketService.HandleAllyListAsync(session);
+                break;
+
+            case KnightsSubOpcode.ClanBonus:
                 break;
 
             default:

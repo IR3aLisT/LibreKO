@@ -72,6 +72,9 @@ public partial class World
 
     internal string? HairStemFor(int race, int style) => HairPartStem(race, style);
 
+    private const int UiPreviewVp = 182;
+    private const int UiPreviewMaxVp = 250;
+
     internal Control BuildStatusUiPreview()
     {
         _zone = 21;
@@ -80,8 +83,12 @@ public partial class World
         BuildStatusHud();
         if (Platform.TouchUi) ScaleVitals(_statusRoot);
         _orb.Set(61, 23.269);
+        Sheet.SeedRebirth(2, 2, 0, 2, 0, 0);
+        _rebirthEmblem?.Set(2, 0.64f, false, RebirthProgress.Tooltip(83, 64, 2, Sheet.RebirthBonusAtRow));
+        if (_rebirthEmblem != null) _rebirthEmblem.Visible = true;
         _hpBar.Set(257, 257);
         _mpBar.Set(157, 157);
+        ShowVpBar(UiPreviewVp, UiPreviewMaxVp);
         UpdateStatusHud();
         return DetachPreviewControl((Control)_orb.GetParent());
     }
@@ -93,6 +100,14 @@ public partial class World
         _targetHp.Set(32, 48);
         _targetBox.Visible = true;
         return DetachPreviewControl(_targetBox);
+    }
+
+    internal Control BuildTargetDropsUiPreview()
+    {
+        var target = BuildTargetUiPreview();
+        _targetDrops = new[] { new TargetQuestDrop(379273000, 2, 3), new TargetQuestDrop(379274000, 0, 3) };
+        RebuildTargetDropRows();
+        return target;
     }
 
     internal Control BuildZoneAbilityUiPreview(byte zoneType)
@@ -108,18 +123,21 @@ public partial class World
         Chat = new ChatSystem(this);
         Chat.Build();
         Chat.DetachNetwork();
+        Chat.PersonalRankOf = charId => PreviewChatRanks.TryGetValue(charId, out int rank) ? rank : NationRankAura.Unranked;
         foreach (var line in PreviewChatLines()) Chat.PreviewLine(line);
         Chat.PreviewSent("Tester10", "yep, west side by the bridge");
         Chat.ShowNoticePreview("The Moradon market opens in 5 minutes.");
         return DetachPreviewControl(Chat.Panel);
     }
 
+    private static readonly Dictionary<int, int> PreviewChatRanks = new() { [9001] = 1, [9003] = 7, [9004] = 35, [9008] = 150 };
+
     private static IEnumerable<ChatLine> PreviewChatLines()
     {
         yield return new ChatLine(1, 0, 9001, "Arwen", "Anyone hunting worms near the bridge?", false);
-        yield return new ChatLine(3, 1, 9002, "Rin", "Ready when you are.", false);
+        yield return new ChatLine(3, 1, 9002, "Rin", "Ready when you are (Smile)(Thumbs up) 🔥", false);
         yield return new ChatLine(5, 0, 9003, "Kaito", $"Selling {ChatItemLink.Token(PreviewUpgradedWeapon)} cheap, whisper me", false);
-        yield return new ChatLine(6, 1, 9004, "Mira", "Clan war practice tonight.", false);
+        yield return new ChatLine(6, 1, 9004, "Mira", "Clan war practice tonight ⚔️🛡️", false);
         yield return new ChatLine(15, 2, 9005, "Borin", "Alliance meeting at the castle.", false);
         yield return new ChatLine(2, 2, 9006, "Tester10", "hey, are you farming Ronark?", false);
         yield return new ChatLine(14, 0, 9007, "Nightwalker", $"WTS {ChatItemLink.Token(PreviewUniqueRing)}", false);
@@ -197,12 +215,12 @@ public partial class World
         BuildCombatLog();
         _combatLogFrame.Visible = true;
         for (int i = 0; i < 6; i++)
-            CombatLogAdd($"You recovered {i + 2} MP.", CombatLogKind.Resource);
-        CombatLogAdd("You recovered 42 HP.", CombatLogKind.Recovery);
-        CombatLogAdd("You hit Worm for 14 damage.", CombatLogKind.Damage);
-        CombatLogAdd("Worm hit you for 3 damage.", CombatLogKind.Incoming);
-        CombatLogAdd("You hit Worm for 21 damage.", CombatLogKind.Damage);
-        CombatLogAdd("You defeated Worm.", CombatLogKind.Outgoing);
+            CombatLogAdd($"{i + 2} MP Recovered", CombatLogKind.Resource, tab: LogTab.State);
+        CombatLogAdd("42 HP Recovered", CombatLogKind.Recovery, tab: LogTab.State);
+        CombatLogAdd("Worm received 14 damage", CombatLogKind.Damage);
+        CombatLogAdd("3 HP Damage", CombatLogKind.Incoming, tab: LogTab.State);
+        CombatLogAdd("Picked up 1,250 Coins.", CombatLogKind.Resource, tab: LogTab.Item);
+        CombatLogAdd("Worm received 21 damage", CombatLogKind.Damage);
         return DetachPreviewControl(_combatLogFrame);
     }
 
@@ -260,18 +278,18 @@ public partial class World
         _myId = 1001;
         BuildBuffBar();
 
-        int shortCap = Platform.TouchUi ? 2 : 4;
-        int longCap = Platform.TouchUi ? 1 : 5;
-        int shortLived = 0, longLived = 0;
+        int normalCap = Platform.TouchUi ? 3 : 5;
+        int powerCap = Platform.TouchUi ? 0 : 4;
+        int normal = 0, power = 0;
         foreach (var s in SkillData.All)
         {
             if (s.Duration <= 0 || SkillData.Icon(s.Id) == null) continue;
             if (s.Type1 is not (MagicType.Buff or MagicType.DotHeal or MagicType.Stealth)) continue;
-            bool isLong = s.Duration >= BuffLongSeconds;
-            if (isLong ? longLived >= longCap : shortLived >= shortCap) continue;
-            if (isLong) longLived++; else shortLived++;
+            bool isPower = IsPowerBuff(s);
+            if (isPower ? power >= powerCap : normal >= normalCap) continue;
+            if (isPower) power++; else normal++;
             RegisterBuff(s, _myId, s.Duration);
-            if (shortLived >= shortCap && longLived >= longCap) break;
+            if (normal >= normalCap && power >= powerCap) break;
         }
         BuffBarTick(Now());
         return DetachPreviewControl(_buffPanel!);
@@ -285,6 +303,33 @@ public partial class World
         BuildPremiumChip();
         OnPremiumStatus(1, 1, 52);
         return DetachPreviewControl(_premiumChip);
+    }
+
+    private const int PreviewClanOnline = 24;
+
+    internal Control BuildClanBonusUiPreview()
+    {
+        Net.I.SeedPreviewClan(PreviewClan(asChief: false));
+        BuildClanBonusChip();
+        OnClanBonus(PreviewClanOnline);
+        return DetachPreviewControl(_clanBonusChip);
+    }
+
+    internal Control BuildEventTitlesUiPreview(int count, bool expanded)
+    {
+        var samples = new[]
+        {
+            new EventTitle("Exp Event", "EXP Increase Event is under way! Earn 50 percent extra EXP from monster hunting."),
+            new EventTitle("Clan Notice", "Siege practice tonight at nine, meet at the Moradon gate."),
+            new EventTitle("Drop Event", "Drop Increase Event is under way! Earn 30 percent extra Drop from monster hunting."),
+            new EventTitle("NP Event", "Bonus National point event in effect. You'll receive additional 20 percent of NPs for kill."),
+        };
+        Net.I.EventTitles.Clear();
+        for (int i = 0; i < count && i < samples.Length; i++) Net.I.EventTitles.Show(samples[i].Title, samples[i].Message);
+        Net.I.EventTitles.Expanded = expanded;
+        BuildEventTitleColumn();
+        RefreshEventTitles();
+        return DetachPreviewControl(_eventTitleColumn);
     }
 
     internal Control BuildAttendanceGiftUiPreview()
@@ -323,11 +368,14 @@ public partial class World
         return DetachPreviewControl(_clockLabel);
     }
 
+    private const int PreviewPersonalRank = 3;
+
     internal Control BuildPrimaryWindowUiPreview(string windowName, int classCode = 201)
     {
         ItemData.EnsureLoaded();
         SkillData.EnsureLoaded();
         _myId = 1001;
+        _selfPersonalRank = PreviewPersonalRank;
         Vitals.Seed(hp: 214, maxHp: 257, mp: 151, maxMp: 157);
         _selfClass = classCode;
         Sheet.SeedStats(str: 60, sta: 72, dex: 184, intel: 50, mag: 50, points: 3);
@@ -339,6 +387,8 @@ public partial class World
             FireR = 20, ColdR = 15, LightningR = 15, MagicR = 10, DiseaseR = 8, PoisonR = 12,
         });
         Sheet.SeedWealth(gold: 1_180_000, np: 2_450);
+        Sheet.ApplyLoyalty(np: 2_450, monthly: 880);
+        Sheet.SetManner(36);
         Sheet.SeedProgress(level: 82, exp: 18_704_073_876, maxExp: 24_523_906_932);
         Sheet.SeedResists(fire: 20, cold: 15, lightning: 15, magic: 10, disease: 8, poison: 12);
         Mastery.Seed(new byte[] { 4, 0, 0, 0, 0, 61, 12, 0, 0 });
@@ -419,9 +469,109 @@ public partial class World
 
     internal void ToggleBagUiPreview(int bagIndex) => ToggleBag(InventoryConstants.BagSlotFor(bagIndex));
 
-    internal Control BuildInventoryDeleteUiPreview()
+    private const int PreviewPlayerAuthority = 1;
+
+    internal Control BuildRoyaleBoardUiPreview()
     {
-        AskDeleteItem(GridStart + 1);
+        ItemData.EnsureLoaded();
+        OpenRoyaleBoard(1, 12, 245);
+        _royaleBoardTime!.Text = KnightRoyale.Clock(245);
+        _royaleBoard!.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
+        return DetachPreviewControl(_royaleBoard);
+    }
+
+    internal Control BuildRoyaleScoreUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        EnsureRoyaleScore();
+        _royaleSurvivors!.Text = TextTemplate.Fill(ItemData.Text(KnightRoyale.SurvivorsText, "Survivor(s): %d"), 17);
+        _royaleNextGas!.Text = TextTemplate.Fill(ItemData.Text(KnightRoyale.NextGasText, "Remaining time until # %d Poison Gas:"), 3);
+        _royaleGasTime!.Text = KnightRoyale.Clock(94);
+        _royaleScore!.Visible = true;
+        return DetachPreviewControl(_royaleScore);
+    }
+
+    internal Control BuildChaosSkillPageUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        SkillData.EnsureLoaded();
+        _zone = ChaosBattle.Zone;
+        EnsureChaosSkillPage();
+        RenderChaosSkillPage();
+        _chaosSkillPage!.Visible = true;
+        return DetachPreviewControl(_chaosSkillPage);
+    }
+
+    internal Control BuildChaosLadderUiPreview(bool final)
+    {
+        ItemData.EnsureLoaded();
+        var me = Net.I.LastEnter;
+        me.Name = "Zeus";
+        me.Nation = Nations.ElMorad;
+        me.Authority = PreviewPlayerAuthority;
+        Net.I.SeedPreviewEnter(me);
+        _chaosRanking = new ChaosRanking(new System.Collections.Generic.List<ChaosRankRow>
+        {
+            new("Velkan", 9, 2), new("Zeus", 7, 3), new("Aurelia", 7, 3), new("Morgrim", 5, 4), new("Rikka", 4, 6),
+            new("Talon", 3, 1), new("Seren", 2, 5), new("Bram", 1, 7), new("Ilsa", 0, 4), new("Quill", 0, 9),
+        }, 1_520_000, 3_040_000);
+        ShowChaosLadder(final);
+        return DetachPreviewControl(_chaosLadder!);
+    }
+
+    internal Control BuildClanHandoverUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        var me = Net.I.LastEnter;
+        me.Name = "Zeus";
+        Net.I.SeedPreviewEnter(me);
+        Net.I.SeedPreviewClan(PreviewClan(asChief: true));
+        _handoverPreselect = "Velkan";
+        ShowHandoverWindow(HandoverListOk, new System.Collections.Generic.List<string> { "Aurelia", "Velkan", "Morgrim" });
+        return DetachPreviewControl(_handoverWindow!);
+    }
+
+    private const float PreviewBadgeX = 800f;
+    private const float PreviewBadgeY = 450f;
+    private const int PreviewPulseFrames = 90;
+    private const double PreviewFrameSeconds = 1.0 / 60.0;
+
+    internal Control BuildCommanderUiPreview(byte order)
+    {
+        SkillData.EnsureLoaded();
+        BuildCommanderBar();
+        BuildCommanderAlarm();
+        _commanderBar!.Visible = true;
+        if (order != CommanderOrders.None) OnCommanderOrder(order);
+        _commanderBadge.Position = new Vector2(PreviewBadgeX, PreviewBadgeY);
+        for (int i = 0; i < PreviewPulseFrames; i++) _commanderPulse.Frame(PreviewFrameSeconds);
+        ShowCommanderPulse();
+        RemoveChild(_commanderAlarmLayer);
+        return DetachPreviewControl(_commanderBar);
+    }
+
+    internal CanvasLayer CommanderAlarmUiPreview() => _commanderAlarmLayer;
+
+    internal CanvasLayer OrderMessageUiPreview(bool own, float viewWidth)
+    {
+        ItemData.EnsureLoaded();
+        PlaceOrderMessage(own
+                ? "Zeus" + NoticeText(TextChaosStoneBroken, "You have destroyed the [Summoning Stone of Chaos] and opened the Gates of Chaos.")
+                : NoticeText(TextMonumentLost, "Enemy nation has captured center Monument"),
+            own ? OrderMessageRed : OrderMessageYellow, own ? OrderMessage.Flash : OrderMessage.Hold, viewWidth);
+        RemoveChild(_orderMessageLayer);
+        return _orderMessageLayer!;
+    }
+
+    internal void SearchBagUiPreview(string query)
+    {
+        if (_invSearch != null) _invSearch.Text = query;
+        RefreshBagSearch();
+    }
+
+    internal Control BuildInventoryDeleteUiPreview(int items = 1)
+    {
+        for (int i = 0; i < items; i++) AskDeleteItem(GridStart + 1 + i);
         return DetachPreviewControl(_invDelPanel);
     }
 
@@ -469,6 +619,20 @@ public partial class World
                 new AdminCollectionRace { Id = 21, Name = "Ronark Apostles of Flame", ZoneId = 71, MinLevel = 61, MaxLevel = 70, DurationMinutes = 60, AutoStart = false, Schedule = "manual", Objectives = "15 x Apostle of Flame, 10 x Doom Soldier, 10 x Troll, 2 enemy players" },
             ]);
         }
+        if (tab == AdminCommandsTab)
+        {
+            OnAdminCommands(
+            [
+                new GmCommandInfo("Items and currency", "+item <itemId> [count] | <name>", "Give yourself an item, or search items by name"),
+                new GmCommandInfo("Items and currency", "+gold <amount>", "Give or take gold"),
+                new GmCommandInfo("Items and currency", "+kc <name> <amount>", "Give or take Knight Cash"),
+                new GmCommandInfo("Character", "+setlevel <1-83>", "Set the level; resets stats and mastery, clears the skill bar"),
+                new GmCommandInfo("Character", "+gm", "Toggle GM mode: the GM aura, one-hit kills, 1 damage taken"),
+                new GmCommandInfo("Players", "+summon <name|pattern>", "Bring a player, or everyone whose name matches (* = any text), to you"),
+                new GmCommandInfo("Players", "+goto <name> | <zone> <x> <z>", "Go to a player or to a spot"),
+                new GmCommandInfo("Events", "+jr / +bdw / +chaos [sec|min] / +templecancel", "Temple events: Juraid Mountain, Border Defense War, Chaos Dungeon"),
+            ], open: false);
+        }
         if (tab == "Find")
         {
             _admFindQuery.Text = "julia";
@@ -501,6 +665,19 @@ public partial class World
     }
 
     internal (float X, float Z) KoPositionForSmoke() => (_myKoX, _myKoZ);
+
+    internal (int Players, int Npcs, int Monsters, int Shown) CensusForSmoke()
+    {
+        int players = 0, npcs = 0, monsters = 0, shown = 0;
+        foreach (var e in _ents.Values)
+        {
+            if (!e.IsNpc) players++;
+            else if (e.Attackable) monsters++;
+            else npcs++;
+            if (e.OnScreen) shown++;
+        }
+        return (players, npcs, monsters, shown);
+    }
 
     internal void CastSkillForSmoke(int skillId) => CastSkill(skillId);
 
@@ -624,6 +801,51 @@ public partial class World
         return DetachPreviewControl(_whPanel);
     }
 
+    private const int PreviewVaultDays = 23;
+    private const int PreviewVaultHours = 5;
+
+    internal Control BuildVipVaultUiPreview(bool locked)
+    {
+        ItemData.EnsureLoaded();
+        Sheet.SeedWealth(gold: 1_180_000, np: 2_450);
+        Inv.EnsureLength(GridStart + GridCount);
+        Inv[GridStart] = PreviewItem(PreviewUpgradedWeapon, 1, 7000);
+        Inv[GridStart + 1] = PreviewItem(PreviewPotion, 24, 1);
+        BuildInventoryPanel();
+        BuildVipWarehousePanel();
+        var ends = DateTimeOffset.UtcNow + (locked ? -TimeSpan.FromDays(2)
+            : TimeSpan.FromDays(PreviewVaultDays) + TimeSpan.FromHours(PreviewVaultHours));
+        var slots = new ItemSlot[VipWhSlots];
+        slots[0] = PreviewItem(PreviewReverseWeapon, 1, 6200);
+        slots[1] = PreviewItem(PreviewUniqueRing, 1, 1);
+        slots[7] = PreviewItem(PreviewPotion, 40, 1);
+        slots[20] = PreviewItem(TrinaPiece, 12, 1);
+        OnVipWarehouseContents(new VipVaultContents(PinSet: !locked, Open: !locked, (uint)ends.ToUnixTimeSeconds(), slots));
+        if (!locked) _vipWhStatus.Status($"Stored {WhItemLine(PreviewPotion, 10)}.", bad: false);
+        return DetachPreviewControl(_vipWhPanel);
+    }
+
+    internal Control BuildClanBankUiPreview(bool member)
+    {
+        ItemData.EnsureLoaded();
+        Sheet.SeedWealth(gold: 1_180_000, np: 2_450);
+        Inv.EnsureLength(GridStart + GridCount);
+        Inv[GridStart] = PreviewItem(PreviewUpgradedWeapon, 1, 7000);
+        Net.I.SeedPreviewClan(PreviewClan(asChief: !member));
+        BuildInventoryPanel();
+        BuildClanWarehousePanel();
+        _clanWhShown = true;
+        _clanWhPanel.Visible = true;
+        var slots = new ItemSlot[ClanWhSlots];
+        slots[0] = PreviewItem(PreviewReverseWeapon, 1, 6200);
+        slots[2] = PreviewItem(PreviewPotion, 40, 1);
+        slots[5] = PreviewItem(UpgradeScrollHighBlessed, 3, 1);
+        slots[30] = PreviewItem(TrinaPiece, 12, 1);
+        OnClanWhContents(2_400_000, slots);
+        if (member) AskClanWithdraw(0, -1);
+        return DetachPreviewControl(_clanWhPanel);
+    }
+
     internal string SetWarehouseSearchUiPreview(string query)
     {
         _whSearch.Text = query;
@@ -633,7 +855,7 @@ public partial class World
 
     internal QuantityPrompt OpenWarehouseAmountUiPreview()
     {
-        DepositSlot(GridStart + 1, -1);
+        AskDepositAmount(GridStart + 1, -1);
         RemoveChild(_whAmount);
         foreach (var node in _whAmount.GetChildren())
             if (node is Control control) control.Theme = HudTheme.Shared;
@@ -666,6 +888,161 @@ public partial class World
             Durability = (short)Mathf.Min(durability, short.MaxValue),
         });
         return DetachPreviewControl(_itemTipPanel);
+    }
+
+    private static readonly (int Slot, int ItemId)[] PreviewDragonPieces =
+    {
+        (InventoryConstants.Head, 507003000),
+        (InventoryConstants.Breast, 507001000),
+        (InventoryConstants.Leg, 507002000),
+    };
+    private const int PreviewWornSword = 156211038;
+    private const int PreviewBagSword = 156211031;
+
+    private static readonly (int ItemId, int Count)[] PreviewLoot =
+    {
+        (Net.GoldItemId, 48210), (330620433, 1), (389070000, 3), (156211038, 1), (379016000, 12),
+    };
+
+    internal Control BuildLootFilterUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        var filter = CurrentLootFilter();
+        filter.Enabled = true;
+        filter.MinSellPrice = 500;
+        filter.SetRule(389010000, true);
+        filter.SetRule(379021000, false);
+        BuildLootFilter();
+        RefreshLootRules();
+        _lootFilterWindow!.Visible = true;
+        return DetachPreviewControl(_lootFilterWindow);
+    }
+
+    internal Control BuildRankBoardUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        BuildRankBoard();
+        _rankBoardRows = new List<RankBoardRow>
+        {
+            new(RankBoardKind.King, 0, "Valerian", 12, 0, "Wolves", 0),
+            new(RankBoardKind.Clan, 0, "Valerian", 12, 0, "Wolves", 0),
+            new(RankBoardKind.Clan, 1, "Morgana", 15, 0, "Ironclad", 0),
+            new(RankBoardKind.Clan, 2, "Theo", 18, 0, "Ashen Vow", 0),
+            new(RankBoardKind.Player, 0, "Veteran", 12, 0, "Wolves", 0),
+            new(RankBoardKind.Player, 1, "Rising", 0, 0, "", 0),
+            new(RankBoardKind.Player, 2, "Morgana", 15, 0, "Ironclad", 0),
+            new(RankBoardKind.TopKiller, 0, "Veteran", 12, 0, "Wolves", 412),
+        };
+        FillRankBoard();
+        _rankBoard.Visible = true;
+        return DetachPreviewControl(_rankBoard);
+    }
+
+    internal Control BuildRankerPaperUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        _rankerType = RankerStatue.KarusFirstType;
+        _rankerName = "Veteran";
+        _rankerText = "Glory to Karus. Meet me at the Ronark Land bridge every evening; the strong are always welcome in our ranks.";
+        ShowRankerPaper();
+        return DetachPreviewControl(_rankerPaper);
+    }
+
+    internal Control BuildDropListUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        BuildTargetHud();
+        _targetName.Text = "Orc Watcher   Lv 41";
+        _targetHp.Set(800, 1000);
+        _targetBox.Visible = true;
+        _dropListBtn.Visible = true;
+        _dropPanel.Visible = true;
+        ShowDropList(new DropListReply(1, true, 700, 1000, 420, new List<DropLine>
+        {
+            new(389010000, DropBand.Common),
+            new(379021000, DropBand.Uncommon),
+            new(110110001, DropBand.Rare),
+            new(379016000, DropBand.VeryRare),
+        }));
+        return DetachPreviewControl(_targetBox);
+    }
+
+    internal Control BuildEventsUiPreview()
+    {
+        Sheet.SeedProgress(level: 62, exp: 0, maxExp: 1_000_000);
+        BuildEventsWindow();
+        var utc = DateTime.UtcNow;
+        var soon = utc.AddMinutes(PreviewEventLeadMinutes);
+        var later = utc.AddMinutes(PreviewEventLaterMinutes);
+        _eventSchedule = new EventSchedule(
+            new List<EventNow>
+            {
+                new(EventKind.Temple, "Juraid Mountain", EventPhase.SignUp, PreviewSignUpSeconds, 40, 83),
+                new(EventKind.CollectionRace, "Moradon Hunt", EventPhase.Running, PreviewRaceSeconds, 1, 83),
+            },
+            new List<EventSlot>
+            {
+                new(EventKind.Temple, "Forgotten Temple", EventSchedule.EveryDay, soon.Hour, soon.Minute, 60, 83),
+                new(EventKind.Temple, "Under The Castle", EventSchedule.EveryDay, later.Hour, later.Minute, 70, 83),
+                new(EventKind.Lottery, "Daily Lottery", EventSchedule.EveryDay, later.Hour, later.Minute, 0, 0),
+            },
+            utc);
+        RefreshEventsWindow();
+        _eventsPanel.Visible = true;
+        return DetachPreviewControl(_eventsPanel);
+    }
+
+    private const int PreviewEventLeadMinutes = 15;
+    private const int PreviewEventLaterMinutes = 95;
+    private const int PreviewSignUpSeconds = 412;
+    private const int PreviewRaceSeconds = 1830;
+
+    internal Control BuildLootUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        BuildLootWindow();
+        _lootEntries.Clear();
+        foreach (var (id, count) in PreviewLoot) _lootEntries.Add(new LootEntry(id, count));
+        RefreshLootWindow();
+        return DetachPreviewControl(_lootPanel);
+    }
+
+    internal Control BuildItemTooltipCaseUiPreview(string kind)
+    {
+        ItemData.EnsureLoaded();
+        _selfClass = 105;
+        Sheet.SeedProgress(level: 72, exp: 0, maxExp: 1_000_000);
+        Sheet.SeedStats(str: 60, sta: 72, dex: 184, intel: 50, mag: 50, points: 3);
+        Inv.EnsureLength(GridStart + GridCount);
+        BuildInventoryPanel();
+
+        switch (kind)
+        {
+            case "set":
+                foreach (var (slot, id) in PreviewDragonPieces) Inv[slot] = TooltipItem(id);
+                ShowItemTooltip(InventoryConstants.Head, Inv[InventoryConstants.Head]);
+                return DetachPreviewControl(_itemTipPanel);
+            case "bound":
+            {
+                var item = TooltipItem(PreviewWornSword);
+                item.Flag = (byte)ItemFlag.Bound;
+                ShowItemTooltip(-1, item);
+                return DetachPreviewControl(_itemTipPanel);
+            }
+            default:
+            {
+                Inv[InventoryConstants.RightHand] = TooltipItem(PreviewWornSword);
+                Inv[GridStart] = TooltipItem(PreviewBagSword);
+                _tooltipCompareForced = true;
+                ShowItemTooltip(GridStart, Inv[GridStart]);
+                _tooltipCompareForced = false;
+                var pair = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+                pair.AddThemeConstantOverride("separation", (int)TooltipPanelGap);
+                pair.AddChild(DetachPreviewControl(_itemTipPanel));
+                pair.AddChild(DetachPreviewControl(_itemTipCompare));
+                return pair;
+            }
+        }
     }
 
     internal Control BuildAnvilChoiceUiPreview()
@@ -733,14 +1110,26 @@ public partial class World
         return DetachPreviewControl(_npcPanel);
     }
 
-    internal Control BuildAchievementUiPreview(AchievementTab category, bool hideClaimed = false)
+    internal Control BuildAchievementUiPreview(AchievementTab category, bool hideClaimed = false, bool completedOnly = false,
+        int group = AchievementData.AllGroups)
     {
         AchievementInit();
         _achTab = category;
+        _achGroup = group;
         _achOnSummary = false;
         ApplyAchievementPageVisibility();
         _achHideClaimed.ButtonPressed = hideClaimed;
-        OnAchievementList(PreviewAchievementList());
+        if (completedOnly)
+        {
+            _achStatusFilter = AchievementStatusFilter.Completed;
+            _achStatus.Selected = Array.FindIndex(AchievementFilter.Options, o => o.Filter == AchievementStatusFilter.Completed);
+        }
+        var entries = PreviewAchievementList();
+        if (completedOnly)
+            for (int i = 0; i < entries.Count; i++)
+                if (entries[i].State == Net.AchievementStateAchieved)
+                    entries[i] = entries[i] with { State = Net.AchievementStateClaimed };
+        OnAchievementList(entries);
         _achPanel.Visible = true;
         _achShown = true;
         RebuildAchievementList(keepScroll: false);
@@ -822,9 +1211,9 @@ public partial class World
 
     private static System.Collections.Generic.List<ClanMember> PreviewClanMembers() => new()
     {
-        new() { Name = "Zeus", Fame = ClanRanks.Chief, Level = 61, Class = 207, IsOnline = true, Memo = "" },
+        new() { Name = "Zeus", Fame = ClanRanks.Chief, Level = 61, Class = 207, IsOnline = true, Memo = "Siege at 21:00" },
         new() { Name = "Hera", Fame = ClanRanks.ViceChief, Level = 72, Class = 202, IsOnline = true, Memo = "" },
-        new() { Name = "Ares", Fame = ClanRanks.Trainee, Level = 72, Class = 201, IsOnline = false, Memo = "", HoursSinceLogin = 187 * 24 },
+        new() { Name = "Ares", Fame = ClanRanks.Trainee, Level = 72, Class = 201, IsOnline = false, Memo = "Back next week", HoursSinceLogin = 187 * 24 },
         new() { Name = "Athena", Fame = ClanRanks.Trainee, Level = 72, Class = 204, IsOnline = true, Memo = "" },
         new() { Name = "Tester10", Fame = ClanRanks.Trainee, Level = 31, Class = 205, IsOnline = false, Memo = "", HoursSinceLogin = 5 },
     };
@@ -872,6 +1261,15 @@ public partial class World
                     ("Hera", 41_200), ("Zeus", 33_900), ("Ares", 12_050), ("Athena", 800),
                 });
             }
+            if (tab == ClanTab.Top)
+            {
+                ShowClanTab(ClanTab.Top);
+                OnClanTop10(new System.Collections.Generic.List<(int, int, string)>
+                {
+                    (Nations.Karus, 0, "NightWatch"), (Nations.Karus, 1, "Wolves"), (Nations.Karus, 2, "Ravens"),
+                    (Nations.ElMorad, 0, "Doves"), (Nations.ElMorad, 1, "Lions"),
+                });
+            }
         }
 
         return window;
@@ -909,6 +1307,7 @@ public partial class World
             new(2126, "Ardream", "", 72, 0, 3_000),
             new(2127, "Ronark Land Base", "", 73, 0, 17_000),
             new(2128, "Ronark Land", "", 71, 0, 17_000),
+            new(7115, "Moradon", "", 21, 0, 0),
         });
         int row = blocked ? 7 : 2;
         SelectWarpRow(row);
@@ -923,6 +1322,9 @@ public partial class World
         if (quests)
         {
             Sheet.SeedProgress(level: 60, exp: 0, maxExp: 1_000_000);
+            var me = Net.I.LastEnter;
+            me.Nation = Nations.ElMorad;
+            Net.I.SeedPreviewEnter(me);
             _selfClass = 202;
             _zone = 21;
             _quests.Add(new QuestEntry(60, 1));
@@ -930,6 +1332,14 @@ public partial class World
             _quests.Add(new QuestEntry(65, 3));
             _quests.Add(new QuestEntry(67, 4));
             OnNpcMsg(167, 13013);
+            if (_npcOffers.Count == 0)
+            {
+                _npcOffers = new List<QuestData.Offer>
+                {
+                    new(60, 0, 0), new(62, 0, QuestStateActive), new(65, 0, QuestStateReadyToTurnIn),
+                };
+                ShowNpcOffers();
+            }
         }
         else
         {
@@ -959,7 +1369,22 @@ public partial class World
         _selfClass = 1;
         BuildItemTooltip();
         BuildNpcDialog();
-        ShowQuestView(kind == "talk"
+        ShowQuestView(kind == "hunt"
+            ? new QuestView(314, 14201, 2, true, false, true, false,
+                QuestViewState.Claimable, 0, "Hunting the Werewolves",
+                "Hunt Werewolves and Lycans for [Warrior Master] Skaki.",
+                "You did it! Pick the reward you like.",
+                new QuestObjectives(314, false, [new QuestKillGroup(10, [1301], "Werewolf"), new QuestKillGroup(12, [1302], "Lycan")]),
+                [10, 7],
+                [
+                    new QuestTransfer(false, 2, 0, 250_000, 0),
+                    new QuestTransfer(false, 1, 0, 50_000, 0),
+                    new QuestTransfer(false, 3, 0, 20, 0),
+                ], [])
+            {
+                Options = [new QuestTransfer(false, 0, 156211031, 1, 0), new QuestTransfer(false, 0, 389015000, 20, 0)],
+            }
+            : kind == "talk"
             ? new QuestView(663, 31561, 2, true, true, false, false,
                 QuestViewState.Available, 0, "How to hunt",
                 "You must talk to [Hunter] Halon.",
@@ -1002,6 +1427,24 @@ public partial class World
         if (index < 0 || index >= rows.Count) return null;
         rows[index].EmitSignal(Control.SignalName.MouseEntered);
         return _itemTipPanel.Visible ? DetachPreviewControl(_itemTipPanel) : null;
+    }
+
+    private const int PreviewNpcFinderZone = 21;
+    private const int PreviewNpcFinderKind = 2;
+    private static readonly Vector2 PreviewNpcFinderSpot = new(700f, 520f);
+
+    internal Control BuildNpcFinderUiPreview()
+    {
+        _zone = PreviewNpcFinderZone;
+        _miniMap = new MiniMap();
+        _miniMap.SetZone("moradon", "Moradon");
+        _npcFinderKind = PreviewNpcFinderKind;
+        _blipScratch.Clear();
+        AddNpcFinderBlips();
+        _miniMap.UpdateView(PreviewNpcFinderSpot.X, PreviewNpcFinderSpot.Y, 0f, _blipScratch);
+        _miniMap.SetNpcKinds(NpcFinder.KindsPresent(NpcSpots, _zone, Net.I.LastEnter.Nation), _npcFinderKind);
+        _miniMap.ShowNpcList();
+        return _miniMap;
     }
 
     internal Control BuildQuestMapUiPreview()
@@ -1047,8 +1490,305 @@ public partial class World
         BuildBdwScoreBanner();
         _bdwScoreBanner.SetScores(karus, elmorad);
         ShowBdwCarrier(carrier, nation);
+        _bdwScoreBanner.RankingShown = true;
+        _bdwScoreBanner.SetClock($"End  {ClockText(PreviewWarEndSeconds)}");
         _bdwScoreBanner.Visible = true;
         return DetachPreviewControl(_bdwScoreBanner);
+    }
+
+    private const int PreviewGeniePoints = 87;
+
+    internal Control BuildGenieMiscUiPreview() => BuildGenieTabUiPreview(PreviewGenieMiscTab);
+
+    internal Control BuildGenieMainUiPreview() => BuildGenieTabUiPreview(PreviewGenieMainTab);
+
+    internal Control BuildUserVoteSelectUiPreview() => BuildUserVoteSelect(2, "Rikka");
+
+    internal Control BuildUserVoteAskUiPreview() =>
+        BuildUserVoteAsk(new UserVoteAsk("Rikka", UserVote.ReasonOther, "left the bridge to the enemy"));
+
+    private Control BuildGenieTabUiPreview(int tab)
+    {
+        GenieInit();
+        if (_geniePanel.Body.GetChildOrNull<TabContainer>(0) is { } tabs) tabs.CurrentTab = tab;
+        _geniePanel.Visible = true;
+        return DetachPreviewControl(_geniePanel);
+    }
+
+    private const int PreviewGenieMainTab = 0;
+    private const int PreviewGenieMiscTab = 1;
+
+    internal Control BuildGenieSubUiPreview()
+    {
+        _genieLayer = new CanvasLayer();
+        AddChild(_genieLayer);
+        GenieSubInit();
+        _genieMonsters.Clear();
+        _genieMonsters.Add("Worm");
+        _genieMonsters.Add("Bulcan");
+        _genieMonstersOff.Add("Worm");
+        _geniePoints = PreviewGeniePoints;
+        RefreshGenieSub();
+        return DetachPreviewControl(_genieSub!);
+    }
+
+    private const int PreviewNationRoom = 1002;
+
+    internal Control BuildNationChatUiPreview(string page)
+    {
+        NationChatInit();
+        _nationChatShown = true;
+        _ncList.Visible = true;
+        Net.I.NationChat.Left();
+        switch (page)
+        {
+            case "public":
+                Net.I.NationChat.EnteredPublic(2);
+                ShowNationTabQuietly(publicTab: true);
+                RefreshNationButtons();
+                _ncSelectedChannel = 3;
+                OnNationChannels(
+                [
+                    new NationChannel(1, "General", 212), new NationChannel(2, "Trade", 87),
+                    new NationChannel(3, "Party", 41), new NationChannel(4, "Help", 9),
+                ]);
+                return DetachPreviewControl(_ncList);
+            case "create":
+                OpenNationCreate();
+                _ncCreateTitle.Text = "Siege at nine";
+                _ncCreateOption.Selected = 1;
+                ApplyNationCreateOption();
+                _ncCreatePassword.Text = "1234";
+                _ncCreateSize.Selected = 1;
+                return DetachPreviewControl(_ncCreate);
+            case "members":
+                Net.I.NationChat.OwnRoom(PreviewNationRoom, "Siege at nine", true, "1234", 30);
+                _ncMembers.Visible = true;
+                _ncSelectedMember = 9003;
+                OnNationMembers(new NationRoomMembers(PreviewNationRoom, "Siege at nine", _myId, 30,
+                [
+                    new NationRoomMember(_myId, "Tester10"), new NationRoomMember(9001, "Rikka"),
+                    new NationRoomMember(9003, "Borin"), new NationRoomMember(9004, "Arwen"),
+                ]));
+                return DetachPreviewControl(_ncMembers);
+            default:
+                Net.I.NationChat.OwnRoom(PreviewNationRoom, "Siege at nine", true, "1234", 30);
+                ShowNationTabQuietly(publicTab: false);
+                RefreshNationButtons();
+                _ncSelectedRoom = 1004;
+                OnNationRooms(
+                [
+                    new NationRoom(1001, "Moradon traders", false, Nations.Karus, 12, 50),
+                    new NationRoom(PreviewNationRoom, "Siege at nine", true, Nations.Karus, 4, 30),
+                    new NationRoom(1003, "Colony hunters", false, Nations.ElMorad, 7, 10),
+                    new NationRoom(1004, "Clan recruits", true, Nations.Karus, 2, 10),
+                ]);
+                return DetachPreviewControl(_ncList);
+        }
+    }
+
+    private const int PreviewRoomSelf = 9006;
+    private const int PreviewRoomRikka = 9001;
+    private const int PreviewRoomBorin = 9003;
+    private const int PreviewRoomArwen = 9004;
+    private const int PreviewRoomKaito = 9005;
+    private const int PreviewRoomMembers = 6;
+    private const int PreviewRoomCrowdBase = 9100;
+    private const int PreviewRoomCrowdInCall = 3;
+    private static readonly string[] PreviewRoomCrowd =
+    [
+        "Nightwalker", "Mira", "Rin", "Aldric", "Selene", "Gorr", "Thorvald", "Isolde", "Kasimir",
+        "Liora", "Brannoch", "Maelis", "Oskar",
+    ];
+    private const int PreviewRoomSize = 30;
+    private const int PreviewPublicMembers = 212;
+    private const float PreviewRecordingLevel = 0.55f;
+    private const double PreviewRoomRepostSeconds = 0.3;
+    private const float PreviewRoomPlayed = 0.38f;
+    private const int PreviewRoomNotesScroll = 150;
+    private const float PreviewRoomLoaded = 0.6f;
+
+    private static byte[] PreviewWaveform(int seed)
+    {
+        var levels = new List<float>();
+        for (int i = 0; i < 300; i++)
+            levels.Add((float)(0.02 + 0.3 * Math.Abs(Math.Sin(i * 0.21 * seed) * Math.Sin(i * 0.047 + seed))));
+        return VoiceWaveform.FromLevels(levels);
+    }
+    private const float PreviewRoomSettingsLevel = 0.62f;
+    private static readonly Vector2I PreviewRoomSettingsAt = new(1010, 420);
+
+    internal Control BuildChatRoomUiPreview(string page)
+    {
+        _myId = PreviewRoomSelf;
+        var me = Net.I.LastEnter;
+        me.Name = "Tester10";
+        me.Nation = Nations.Karus;
+        Net.I.SeedPreviewEnter(me);
+        ChatRoomInit();
+        var room = Net.I.NationChat;
+        room.Left();
+        var now = DateTime.Now;
+        var evening = now.Date.AddDays(-1).AddHours(21);
+        if (page == "public")
+        {
+            room.EnteredPublic(1);
+            room.Describe("General", false, PreviewPublicMembers, NationChatRules.PublicCapacity);
+        }
+        else
+        {
+            if (page is "voice" or "settings" or "config") room.OwnRoom(PreviewNationRoom, "Siege at nine", true, "1234", PreviewRoomSize);
+            else room.EnteredPrivate(PreviewNationRoom);
+            room.Describe("Siege at nine", true, PreviewRoomMembers, PreviewRoomSize);
+            var members = new List<NationRoomMember>
+            {
+                new(_myId, "Tester10"), new(PreviewRoomRikka, "Rikka"), new(PreviewRoomBorin, "Borin"),
+                new(PreviewRoomArwen, "Arwen"), new(PreviewRoomKaito, "Kaito"),
+            };
+            foreach (var (name, i) in PreviewRoomCrowd.Select((name, i) => (name, i)))
+                members.Add(new NationRoomMember(PreviewRoomCrowdBase + i, name));
+            _ncMemberList = new NationRoomMembers(PreviewNationRoom, "Siege at nine", _myId, PreviewRoomSize, members);
+        }
+        Net.I.RoomTimeline.Clear();
+        Net.I.RoomTimeline.MergeHistory(
+        [
+            new RoomPost(101, RoomPostKind.Text, PreviewRoomBorin, "Borin", evening.AddMinutes(4), "Gate at nine tomorrow, bring Ascetic potions", 0, 0),
+            new RoomPost(102, RoomPostKind.Text, _myId, "Tester10", evening.AddMinutes(6), "I'll be there (Thumbs up)", 0, 0),
+            new RoomPost(103, RoomPostKind.Text, PreviewRoomRikka, "Rikka", now.AddMinutes(-14), "Morning! Who has a spare scroll?", 0, 0),
+            new RoomPost(104, RoomPostKind.Text, PreviewRoomRikka, "Rikka", now.AddMinutes(-13), "the 30-minute one 🙏", 0, 0),
+            new RoomPost(105, RoomPostKind.VoiceNote, PreviewRoomArwen, "Arwen", now.AddMinutes(-11), "", 124, 31000) { Waveform = PreviewWaveform(1) },
+            new RoomPost(110, RoomPostKind.VoiceNote, PreviewRoomRikka, "Rikka", now.AddMinutes(-10), "", 386, 96000) { Waveform = PreviewWaveform(2) },
+            new RoomPost(106, RoomPostKind.Text, PreviewRoomKaito, "Kaito", now.AddMinutes(-9),
+                $"Selling {ChatItemLink.Token(PreviewUpgradedWeapon)} for the siege, whisper me before we leave tonight so I can hold it for you", 0, 0),
+            new RoomPost(107, RoomPostKind.VoiceNote, _myId, "Tester10", now.AddMinutes(-4), "", 47, 12000) { Waveform = PreviewWaveform(3) },
+            new RoomPost(108, RoomPostKind.Text, _myId, "Tester10", now.AddMinutes(-4), "listen to that (Laughing)", 0, 0),
+        ], more: true);
+        Net.I.RoomTimeline.Add(RoomPost.Notice("Borin has entered. (Current players: 6)", now.AddMinutes(-2)));
+        Net.I.RoomTimeline.Add(RoomPost.Line(PreviewRoomBorin, "Borin", "here", now.AddMinutes(-1)));
+        if (page == "voice")
+            Net.I.RoomTimeline.Add(RoomPost.Notice(new RoomMediaReplies.SilenceNotice(PreviewRoomBorin, true, "Tester10", "Borin").Text, now));
+        var inCall = new List<VoicePeer>
+        {
+            new(PreviewRoomRikka, 0), new(PreviewRoomBorin, (byte)(page == "voice" ? VoiceFlags.Silenced : VoiceFlags.MicMuted)),
+            new(PreviewRoomArwen, 0), new(PreviewRoomKaito, VoiceFlags.Deafened),
+        };
+        if (page is "voice" or "settings" or "config")
+        {
+            inCall.AddRange(PreviewRoomCrowd.Take(PreviewRoomCrowdInCall).Select((_, i) => new VoicePeer(PreviewRoomCrowdBase + i, 0)));
+            Net.I.PreviewVoice(new VoiceSession(0, 1, new byte[VoiceSeal.KeyLength], 0, inCall));
+            VoiceChat.I?.PreviewSpeaking(PreviewRoomRikka, self: false);
+            VoiceChat.I?.PreviewSpeaking(_myId, self: true);
+        }
+        else if (page is "public" or "recording") Net.I.PreviewVoice(null);
+        else Net.I.PreviewVoice(null, inCall.Take(2).ToList());
+        if (page is "voice" or "text" or "notes") VoiceChat.I?.PreviewNote(105, PreviewRoomPlayed, 110, PreviewRoomLoaded);
+        else VoiceChat.I?.PreviewNote(0, 0f, 0, 0f);
+        ShowChatRoom();
+        if (page == "voice") SelectChatRoomMember(PreviewRoomBorin);
+        if (page == "older")
+        {
+            Net.I.RoomTimeline.MergeHistory(
+            [
+                new RoomPost(91, RoomPostKind.Text, PreviewRoomArwen, "Arwen", evening.AddMinutes(-40), "Who is coming to the siege tomorrow?", 0, 0),
+                new RoomPost(92, RoomPostKind.Text, PreviewRoomKaito, "Kaito", evening.AddMinutes(-38), "me, with two clan mates", 0, 0),
+            ], more: true);
+            RenderChatRoom();
+            var repost = new Godot.Timer { WaitTime = PreviewRoomRepostSeconds, OneShot = true, Autostart = true };
+            repost.Timeout += () =>
+            {
+                Net.I.RoomTimeline.Add(new RoomPost(109, RoomPostKind.VoiceNote, PreviewRoomRikka, "Rikka", DateTime.Now, "", 63, 16000));
+                RenderChatRoom();
+                _roomStickBottom = false;
+                _roomScroll.ScrollVertical = 0;
+            };
+            _roomWindow.AddChild(repost);
+        }
+        if (page == "minimized") _roomWindow.SetMinimized(true);
+        if (page == "notes")
+        {
+            var scroll = new Godot.Timer { WaitTime = PreviewRoomRepostSeconds, OneShot = true, Autostart = true };
+            scroll.Timeout += () =>
+            {
+                _roomStickBottom = false;
+                _roomScroll.ScrollVertical = PreviewRoomNotesScroll;
+                RefreshChatRoomNote(_roomNotes[105]);
+                RefreshChatRoomNote(_roomNotes[110]);
+            };
+            _roomWindow.AddChild(scroll);
+        }
+        if (page == "settings")
+        {
+            FillChatRoomVoiceSettings();
+            var card = _roomVoiceSettings!;
+            card.GetParent().RemoveChild(card);
+            _roomWindow.AddChild(card);
+            _roomSettingsLevel.Value = PreviewRoomSettingsLevel;
+            card.TreeEntered += () => Callable.From(() =>
+            {
+                card.Position = PreviewRoomSettingsAt;
+                card.Popup();
+            }).CallDeferred();
+            _roomTick.Stop();
+        }
+        if (page == "config")
+        {
+            FillChatRoomConfig();
+            var card = _roomConfig!;
+            card.GetParent().RemoveChild(card);
+            _roomWindow.AddChild(card);
+            card.TreeEntered += () => Callable.From(() =>
+            {
+                card.Position = PreviewRoomSettingsAt;
+                card.Popup();
+            }).CallDeferred();
+            _roomTick.Stop();
+        }
+        if (page == "recording")
+        {
+            _roomTick.Stop();
+            RefreshChatRoomRecording(true);
+            _roomRecordClock.Text = $"{VoiceNoteRules.Clock(7)} / {VoiceNoteRules.Clock(VoiceNoteRules.MaxSeconds)}";
+            _roomRecordLevel.Value = PreviewRecordingLevel;
+        }
+        return DetachPreviewControl(_roomWindow);
+    }
+
+    private const int PreviewWarEndSeconds = 1342;
+    private const uint PreviewWarHomeSeconds = 17;
+    private const uint PreviewWarVictoryExp = 1_250_400;
+
+    internal Control BuildWarResultUiPreview()
+    {
+        _bdwHudLayer = new CanvasLayer();
+        AddChild(_bdwHudLayer);
+        _bdwTick = new Godot.Timer();
+        _bdwHudLayer.AddChild(_bdwTick);
+        Net.I.BorderWar.Reset();
+        Net.I.BorderWar.SetScores(212, 148);
+        Net.I.BorderWar.Finish(Nations.Karus, PreviewWarHomeSeconds, DateTime.UtcNow);
+        BuildWarResult();
+        _warResult!.Visible = true;
+        RefreshWarResult(DateTime.UtcNow);
+        return DetachPreviewControl(_warResult);
+    }
+
+    internal Control BuildWarRankingUiPreview()
+    {
+        _bdwHudLayer = new CanvasLayer();
+        AddChild(_bdwHudLayer);
+        BuildWarRanking();
+        _warRanking!.Visible = true;
+        OnBorderWarRanking(new BorderWarRanking(
+        [
+            new BorderWarRankRow("Rikka", 1, 12, "Olympus", 41),
+            new BorderWarRankRow("Nightwalker", 1, 0, "", 23),
+            new BorderWarRankRow("Borin", 1, 7, "IronVanguard", 9),
+        ],
+        [
+            new BorderWarRankRow("Zeus", 2, 3, "Pantheon", 37),
+            new BorderWarRankRow("Ophelia", 2, 0, "", 12),
+        ], PreviewWarVictoryExp, 0));
+        return DetachPreviewControl(_warRanking);
     }
 
     internal Control BuildNestTimerUiPreview(bool completed)
@@ -1123,6 +1863,18 @@ public partial class World
         return (cell.GetGlobalRect().GetCenter(), _mailDropZone.GetGlobalRect().GetCenter());
     }
 
+    internal (Vector2 From, Vector2 To)? StackDragPointsUiPreview(int count)
+    {
+        int seed = Inv.FirstFreeGridSlot();
+        if (seed < 0) return null;
+        Inv[seed] = PreviewItem(PreviewPotion, count, 1);
+        RefreshInventoryUI();
+        var from = _invBagCells.FirstOrDefault(c => c.Slot == seed);
+        var to = _invBagCells.FirstOrDefault(c => c.Slot > seed && Inv[c.Slot].IsEmpty);
+        if (from == null || to == null || !from.IsInsideTree()) return null;
+        return (from.GetGlobalRect().GetCenter(), to.GetGlobalRect().GetCenter());
+    }
+
     internal string MailDragDebugUiPreview()
     {
         var has = _invCells.TryGetValue(_mailDragSeedSlot, out var cell);
@@ -1131,6 +1883,300 @@ public partial class World
 
     internal string MailComposeSizeUiPreview() =>
         $"window size={_mailComposeWindow.Size} min={_mailComposeWindow.GetCombinedMinimumSize()} attachments={_mailAttachments.Count} body={_mailComposeWindow.Body.Size}";
+
+    internal Control BuildPartyHudUiPreview()
+    {
+        SkillData.EnsureLoaded();
+        Net.I.SeedPartyPreview(
+            new PartyMember(1001, 1, "Tansie", 4210, 3890, 62, 208, 1820, 1500),
+            new PartyMember(1002, 1, "HiddenTuna", 5120, 4630, 61, 206, 1400, 1210),
+            new PartyMember(1003, 1, "LikeAKitty", 3890, 2210, 60, 210, 2300, 2300),
+            new PartyMember(1004, 1, "NevilleLongbotto", 4470, 1040, 59, 212, 1990, 640));
+        var buffs = PreviewPartyBuffs();
+        foreach (var (id, ping, permille, first, count) in PreviewPartyMembers)
+            Net.I.SeedPartyMemberPreview(id, ping, permille, buffs.Skip(first).Take(count).ToArray());
+        Net.I.SeedPartyCommanderPreview(PreviewPartyCommander);
+        _partyPick = PreviewPartyPick;
+        foreach (var (id, share) in PreviewWarBoardShares) _warBoardRowShares[id] = share;
+        BuildPartyHud();
+        return DetachPreviewControl(_partyHud!);
+    }
+
+    internal Control BuildPartyHudDragUiPreview()
+    {
+        var hud = BuildPartyHudUiPreview();
+        if (PartyRowFor(PreviewPartyDragged) is not { } row) return hud;
+        float grab = PartyDiamondSize * 0.5f;
+        float pressY = row.Frame.Position.Y + grab;
+        _partyDrag = new PartyRowDrag(row, pressY, grab);
+        DragPartyRow(pressY - PreviewPartyDragLift);
+        return hud;
+    }
+
+    internal Control BuildPartyHudConfigUiPreview()
+    {
+        var hud = BuildPartyHudUiPreview();
+        BuildPartyConfig();
+        RefreshPartyConfig();
+        var popup = _partyConfig!;
+        popup.GetParent().RemoveChild(popup);
+        hud.AddChild(popup);
+        popup.TreeEntered += () => Callable.From(() => Callable.From(() =>
+        {
+            popup.ResetSize();
+            popup.Position = (Vector2I)PartyConfigSpot(popup.Size, hud.GetViewportRect().Size);
+            popup.Popup();
+        }).CallDeferred()).CallDeferred();
+        return hud;
+    }
+
+    private static List<int> PreviewPartyBuffs() => SkillData.All
+        .Where(s => s.Duration > 0 && s.Type1 == MagicType.Buff && SkillData.Icon(s.Id) != null)
+        .Select(s => s.Id).Take(PreviewPartyBuffCount).ToList();
+
+    private const int PreviewPartyBuffCount = 6;
+    private const int PreviewPartyCommander = 1003;
+    private const int PreviewPartyPick = 1002;
+    private const int PreviewPartyDragged = 1004;
+    private const float PreviewPartyDragLift = 74f;
+
+    private static readonly (int Id, int PingMs, int LevelPermille, int FirstBuff, int Buffs)[] PreviewPartyMembers =
+    {
+        (1001, 84, 625, 0, 2),
+        (1002, 172, 310, 2, 2),
+        (1003, 290, 880, 1, 5),
+        (1004, PartySignal.NoSignal, 50, 0, 0),
+    };
+
+    private static readonly (int Id, int Share)[] PreviewWarBoardShares =
+    {
+        (1001, 312), (1002, 241), (1003, 168), (1004, 97),
+    };
+
+    internal Control BuildClanBoardsUiPreview(string view)
+    {
+        ItemData.EnsureLoaded();
+        ClanBoardInit();
+        _selfClass = 112;
+        var adverts = new List<ClanAdvert>
+        {
+            new(10, "Wolves", 2, 7, "Alpha", 0, "We hunt every night in Ronark Land. Level 70+ welcome, voice chat preferred."),
+            new(11, "Doves", 3, 4, "Beta", 0, "Relaxed clan for questing and Lunar War."),
+            new(12, "NightWatch", 1, 12, "Cassandra", 0, "Royal clan recruiting priests and mages for castle siege."),
+        };
+        var posts = new List<WishPost>
+        {
+            new("Rin", "Priest, level 72, online most evenings. Looking for an active clan.", 72, 112, 25, true, 101, "2026-10-09"),
+            new("Kaito", "Archer looking for a Lunar War clan.", 68, 107, 31, false, -1, "2026-10-07"),
+        };
+        if (view == "wish-board" || view == "wish-message")
+        {
+            OnWishStatus(new WishStatus(ClanBoards.RoleRecruiter, "Kaito", 0));
+            OnWishPosts(posts);
+            if (view == "wish-message")
+            {
+                OpenWishView(posts[0]);
+                return DetachPreviewControl(_wmWindow!);
+            }
+            return DetachPreviewControl(_wbWindow!);
+        }
+        OnClanBoardStatus(new ClanBoardStatus(ClanBoards.StateClanless, new List<ClanApplicant>(), 11, 0, "Doves"));
+        OnClanAdverts(adverts);
+        if (view == "clan-message")
+        {
+            OpenClanMessage(ClanMessageMode.ViewAdvert, adverts[0]);
+            return DetachPreviewControl(_cmWindow!);
+        }
+        return DetachPreviewControl(_cbWindow!);
+    }
+
+    internal Control BuildPetPlateUiPreview()
+    {
+        _petPlate = BuildPetPlate();
+        RefreshPetPlate(new PetSheet
+        {
+            Name = "Kitsune", Level = 42, Hp = 3120, MaxHp = 4400, Mp = 860, MaxMp = 1500,
+            Satisfaction = 7300, ExpPercent = 4100,
+        });
+        return DetachPreviewControl(_petPlate);
+    }
+
+    private const int PreviewBindOnEquipSword = 191329000;
+
+    internal Control BuildItemVeilsUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 6);
+        (int Id, ItemFlag Flag, short Durability)[] cells =
+        [
+            (PreviewBagSword, ItemFlag.Unsealed, 1000),
+            (PreviewBagSword, ItemFlag.Rented, 1000),
+            (PreviewBagSword, ItemFlag.Duplicate, 1000),
+            (PreviewBagSword, ItemFlag.Sealed, 1000),
+            (PreviewBagSword, ItemFlag.Unsealed, 0),
+            (PreviewBindOnEquipSword, ItemFlag.Unsealed, 1000),
+            (PreviewBagSword, ItemFlag.Bound, 1000),
+        ];
+        foreach (var (id, flag, durability) in cells)
+        {
+            var cell = new WarehouseCell(GridStart, bag: true);
+            cell.Set(new ItemSlot { ItemId = id, Count = 1, Durability = durability, Flag = (byte)flag });
+            row.AddChild(cell);
+        }
+        return row;
+    }
+
+    internal void AttachWeaponsForCapture(Node3D body, int[] gear, int race) =>
+        AttachWeapons(body, gear, new HandWearer(race));
+
+    internal (bool Ready, int Paths, string InFlight) GearStreamProbe(EntitySnapshot info) =>
+        (SceneReadyFor(info), GearPaths(PlayerRig.LookRace(info.Race, info.Class), info.Gear).Count, _sceneLoadInFlight ?? "");
+
+    internal Control BuildSoccerUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        _soccerLayer = new CanvasLayer();
+        AddChild(_soccerLayer);
+        var board = EnsureSoccerBoard();
+        OnSoccerSync(454, 2, 1);
+        return DetachPreviewControl(board);
+    }
+
+    internal Control BuildDailyRankUiPreview(string view)
+    {
+        ItemData.EnsureLoaded();
+        _drLayer = new CanvasLayer();
+        AddChild(_drLayer);
+        LoadDailyRankBoards();
+        _drWindow = BuildDailyRank();
+        bool clans = view == "daily-rank-clan";
+        int board = clans ? DailyRank.ClanBoard : DailyRank.AdonisBoard;
+        var names = clans ? PreviewDailyRankClans : PreviewDailyRankPlayers;
+        var entries = new List<DailyRankEntry>();
+        for (int i = 0; i < names.Length; i++) entries.Add(new DailyRankEntry(i + 1, names[i]));
+        _drCache[board] = new DailyRankBoardData(board, clans ? 4 : 12, clans ? -2 : 3, entries);
+        RenderDailyRank(board);
+        _drWindow.Visible = true;
+        return DetachPreviewControl(_drWindow);
+    }
+
+    private const int PreviewSecondsPerHour = 3600;
+    private const int PreviewSmashDagger = 119101000;
+    private const int PreviewSmashScrap = 810369000;
+    private const int PreviewSmashGem = 900823000;
+
+    internal Control BuildTradeUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        Inv.EnsureLength(InventoryConstants.InventoryTotal);
+        Sheet.SeedWealth(gold: 1_180_000, np: 2_450);
+        BuildExchangePanel();
+        _exPartnerName = "Rikka";
+        _exMyOffer.Add(new ExOfferItem { ItemId = PreviewSmashDagger, Count = 1, Dura = 1000 });
+        _exMyOffer.Add(new ExOfferItem { ItemId = PreviewHpPotion, Count = 40, Dura = 1 });
+        _exMyGoldOffer = 250_000;
+        _exTheirOffer.Add(new ExOfferItem { ItemId = PreviewWornSword, Count = 1, Dura = 1000 });
+        _exConfirmedByPartner = true;
+        _exMineHeader.Text = "You offer";
+        _exTheirsHeader.Text = $"{_exPartnerName} offers";
+        _exPanel.Title = $"Trade — {_exPartnerName}";
+        RefreshExchangeOffers();
+        _exPanel.Visible = true;
+        return DetachPreviewControl(_exPanel);
+    }
+
+    internal Control BuildItemSmashUiPreview(bool result)
+    {
+        ItemData.EnsureLoaded();
+        Inv.EnsureLength(InventoryConstants.InventoryTotal);
+        Inv[GridStart] = PreviewItem(PreviewSmashDagger, 1, 1000);
+        BuildSmashPanel();
+        _smashShown = true;
+        PlaceSmashItem(GridStart);
+        if (result)
+            OnItemSmashReply(new ItemSmashReply(ItemSmash.Succeeded, PreviewSmashDagger, 0,
+                [new SmashPiece(PreviewSmashScrap, 1, 3), new SmashPiece(PreviewSmashGem, 2, 1), new SmashPiece(PreviewSmashScrap, 3, 2)]));
+        _smashPanel.Visible = true;
+        return DetachPreviewControl(_smashPanel);
+    }
+
+    internal CanvasLayer ExitMenuUiPreview(bool timed)
+    {
+        ItemData.EnsureLoaded();
+        Inv.EnsureLength(InventoryConstants.InventoryTotal);
+        if (timed) SeedPreviewTimedItems();
+        BuildEscMenu();
+        RemoveChild(_escLayer);
+        _escShown = true;
+        _escLayer.Visible = true;
+        RefreshExitMenu();
+        return _escLayer;
+    }
+
+    internal Control BuildRepurchaseUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        _rbLayer = new CanvasLayer();
+        AddChild(_rbLayer);
+        long deletes = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 2 * 24 * 3600;
+        _rbRows.Clear();
+        _rbRows.Add(new RepurchaseRow(0, PreviewBagSword, 180_000, (uint)deletes));
+        _rbRows.Add(new RepurchaseRow(1, PreviewWornSword, 2_400_000, (uint)(deletes - 3600)));
+        _rbRows.Add(new RepurchaseRow(2, PreviewHpPotion, 1_350, (uint)(deletes - 3 * 24 * 3600)));
+        _rbWindow = BuildRepurchase();
+        _rbScroll.MaxValue = 0;
+        _rbScroll.Visible = false;
+        RenderRepurchase();
+        _rbWindow.Visible = true;
+        return DetachPreviewControl(_rbWindow);
+    }
+
+    internal Control BuildTimedItemsUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        Inv.EnsureLength(InventoryConstants.InventoryTotal);
+        SeedPreviewTimedItems();
+        _tiLayer = new CanvasLayer();
+        AddChild(_tiLayer);
+        OpenTimedItems();
+        return DetachPreviewControl(_tiWindow!);
+    }
+
+    private void SeedPreviewTimedItems()
+    {
+        long now = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        (int Abs, int ItemId, long HoursLeft)[] timed =
+        [
+            (GridStart + 2, PreviewBagSword, 12 * 24),
+            (InventoryConstants.RightHand, PreviewWornSword, 2 * 24 + 5),
+            (InventoryConstants.MagicBagStart, PreviewHpPotion, 5),
+            (GridStart + 7, PreviewMpPotion, 0),
+        ];
+        foreach (var (abs, itemId, hoursLeft) in timed)
+            Inv[abs] = new ItemSlot { ItemId = itemId, Count = 1, Durability = 1, ExpiresAt = (int)(now + hoursLeft * PreviewSecondsPerHour + PreviewSecondsPerHour / 2) };
+    }
+
+    private static readonly string[] PreviewDailyRankPlayers =
+    {
+        "NevilleLongbotto", "IGaLaXia", "TuMachoUrsoPol", "NOAAAAAAAAA", "Rin", "Kaito", "Veteran", "Alpha",
+        "Beta", "Cassandra", "Doves", "Rikka", "Zeus", "Wolfgang",
+    };
+
+    private static readonly string[] PreviewDailyRankClans = { "NightWatch", "Wolves", "Doves", "Ravens", "Lions" };
+
+    internal Control BuildWarBoardUiPreview()
+    {
+        BuildPartyHudUiPreview();
+        _warBoard = BuildWarBoard();
+        _warBoard.Visible = true;
+        _warBoardMode = PartyWarBoard.ModeDamage;
+        _warBoardDeal.ButtonPressed = true;
+        var shares = new List<WarBoardShare>();
+        foreach (var (id, share) in PreviewWarBoardShares) shares.Add(new WarBoardShare(id, share));
+        FillWarBoard(shares);
+        return DetachPreviewControl(_warBoard);
+    }
 
     internal Control BuildMailUiPreview()
     {
@@ -1270,7 +2316,12 @@ public partial class World
         int[] menuIds = full
             ? new[] { 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 10 }
             : new[] { 11, 12, 13, 10 };
-        for (int i = 0; i < menuIds.Length; i++) dlg.Buttons.Add((i, menuIds[i], null));
+        if (!full)
+        {
+            dlg.Buttons.Add((0, 0, NpcChoice.ReadyPrefix + "Kecoon Captain hunt"));
+            dlg.Buttons.Add((1, 0, "[In progress] Bandicoot hunt"));
+        }
+        for (int i = 0; i < menuIds.Length; i++) dlg.Buttons.Add((dlg.Buttons.Count, menuIds[i], null));
         if (rewards)
         {
             dlg.HeaderText = "Choose your reward.";
@@ -1424,7 +2475,251 @@ public partial class World
         SeedPreviewQuests();
         BuildQuestTracker();
         RefreshTracker();
-        return DetachPreviewControl(_trackerPanel);
+        var tracker = DetachPreviewControl(_trackerPanel);
+        Callable.From(() => tracker.Position = TrackerDefaultPosition()).CallDeferred();
+        return tracker;
+    }
+
+    internal Control BuildPkLadderUiPreview()
+    {
+        static RankEntry Row(int place, string name, string clan, int points, int bonus, int symbol) =>
+            new() { Place = place, Name = name, ClanName = clan, Loyalty = points, Bonus = bonus, Symbol = symbol };
+        BuildRankPanel();
+        _ladder = new PkLadderReply(
+            new[] { Row(1, "Velkan", "Wolves", 12_480, 120, 1), Row(2, "Rikka", "Wolves", 9_310, 0, 7), Row(3, "Nightwalker", "", 4_005, 45, 0) },
+            new[] { Row(1, "Arwen", "Lionheart", 15_200, 999, 3), Row(2, "Ophelia", "Lionheart", 2_150, 0, 150) },
+            4, 1_870, 60);
+        RenderLadder();
+        _rankPanel.Visible = true;
+        return DetachPreviewControl(_rankPanel);
+    }
+
+    internal CanvasLayer ClanMatchUiPreview(bool banner)
+    {
+        _matchLayer = new CanvasLayer();
+        for (int team = 0; team < ClanMatch.TeamSlots; team++) _matchTeams[team] = BuildMatchTeam(team);
+        Net.I.SeedPreviewMatch(new ClanMatchPair(96, 40, 50));
+        var roster = new System.Collections.Generic.List<ClanMatchFighter>();
+        string[] names = { "Velkan", "Rikka", "Nightwalker", "Ophelia", "Arwen", "Zeus", "Morgrim", "Aurelia" };
+        int[] classes = { 105, 211, 109, 112, 207, 106, 113, 203 };
+        for (int i = 0; i < names.Length; i++)
+            roster.Add(new ClanMatchFighter(i % 2 == 0 ? 40 : 50, i + 1, names[i], 900, 900 - i * 90, classes[i], 400, 400 - i * 40, i % 2 + 1));
+        OnMatchRoster(roster);
+        _matchTeams[0].Position = new Vector2(20f, 200f);
+        _matchTeams[1].Position = new Vector2(1453f, 200f);
+        if (banner) _matchLayer.AddChild(BuildMatchBanner(MatchBanner.RedWins));
+        return _matchLayer;
+    }
+
+    internal Control BuildExpSealUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        _expSealLayer = new CanvasLayer();
+        BuildExpSealWindow();
+        _expSealJarPlaced = true;
+        _expSealJar.Texture = ItemData.Icon(ExpSeal.EmptyJar);
+        _expSealPick.Selected = 2;
+        _expSealWindow.Visible = true;
+        return DetachPreviewControl(_expSealWindow);
+    }
+
+    internal Control BuildCommandListUiPreview(int group)
+    {
+        ItemData.EnsureLoaded();
+        _cmdLayer = new CanvasLayer();
+        BuildCommandList();
+        _cmdGroups.Select(group);
+        FillCommandEntries(CommandCatalog.Groups[group]);
+        _cmdWindow.Visible = true;
+        return DetachPreviewControl(_cmdWindow);
+    }
+
+    internal Control BuildCharacterSealUiPreview(string page)
+    {
+        ItemData.EnsureLoaded();
+        _csLayer = new CanvasLayer();
+        if (page == "trans")
+        {
+            BuildCharacterSealTrans();
+            _csSocket.Set(new ItemSlot { ItemId = 800111000, Count = 1 });
+            _csTransHeadline.Text = ItemData.Get(800111000)?.Name ?? "";
+            _csTransGold.Text = $"{12_345_678:n0}";
+            _csTrans.Visible = true;
+            return DetachPreviewControl(_csTrans);
+        }
+        if (page == "sheet")
+        {
+            BuildSealedSheet();
+            _csSheetId = 11;
+            Net.I.PetItems[11] = new PetItemInfo(11, "Velkan", 105, 70, 2500, 1, 2);
+            var sheet = new SealedCharacterSheet
+            {
+                Name = "Velkan", Nation = Nations.Karus, Race = 1, Class = 106, Level = 70, Loyalty = 18_250, Gold = 5_400_000,
+                FreePoints = 3, Stats = [160, 90, 80, 50, 50], StatBonus = [12, 0, 4, 0, 0], SkillTrees = [40, 35, 0, 5],
+            };
+            int[] gear = [0, 203003000, 0, 0, 203001000, 0, 136570000, 0, 171510000, 0, 203002000, 0, 203004000, 203005000];
+            for (int i = 0; i < gear.Length; i++) sheet.Items[i] = new ItemSlot { ItemId = gear[i], Count = 1 };
+            sheet.Items[14] = new ItemSlot { ItemId = 389010000, Count = 120 };
+            sheet.Items[15] = new ItemSlot { ItemId = 800111000, Count = 1 };
+            OnSealedSheet(sheet);
+            return DetachPreviewControl(_csSheet);
+        }
+        BuildCharacterSealWindow();
+        if (page == "select")
+        {
+            _csMode = CharacterSeal.Mode.Seal;
+            _csSlots =
+            [
+                new CharacterSummary { Name = "Zeus", Class = 101, Level = 60 },
+                new CharacterSummary { Name = "Velkan", Class = 106, Level = 70 },
+                new CharacterSummary(),
+                new CharacterSummary { Name = "Rikka", Class = 111, Level = 58 },
+            ];
+            _csPicked = 1;
+            _csSelectTitle.Text = "Select Character Slot";
+            _csSelectPrompt.Text = ">> Select Character to Seal <<";
+            RefreshCharacterSealSlots();
+            ShowCharacterSealPage(_csSelectPage, "Character Seal");
+        }
+        else if (page == "code")
+        {
+            ShuffleCharacterSealKeys();
+            _csCode = "1234";
+            _csCodeStars.Text = "****";
+            ShowCharacterSealPage(_csCodePage, "Character Seal");
+        }
+        else ShowCharacterSealPage(_csSealingPage, CharacterSealTitle);
+        return DetachPreviewControl(_csWindow);
+    }
+
+    internal Control BuildPartyBoardUiPreview()
+    {
+        ItemData.EnsureLoaded();
+        BuildPartyPanel();
+        BuildSeekPartyPanel();
+        _seekBoard = FullMoon.NormalBoard;
+        ApplySeekBoard();
+        UpdateSeekStatus();
+        _seekShown = true;
+        OnBbsList(0, 2, new System.Collections.Generic.List<PartyBbsEntry>
+        {
+            new("Velkan", 105, 62, 2, "Looking for party", 21, 0, 1),
+            new("Rikka", 211, 60, 3, "Need a priest", 21, 3, 1),
+        });
+        _seekPanel.Visible = true;
+        return DetachPreviewControl(_seekPanel);
+    }
+
+    internal Control BuildFullMoonBoardUiPreview()
+    {
+        BuildSeekPartyPanel();
+        _seekBoard = FullMoon.FullMoonBoard;
+        ApplySeekBoard();
+        UpdateSeekStatus();
+        _seekShown = true;
+        OnBbsList(0, 1, new System.Collections.Generic.List<PartyBbsEntry>
+        {
+            new("Velkan", 105, 62, 2, "Full Moon tonight", 21, 0, 1),
+            new("Rikka", 211, 60, 3, "Need a priest", 21, 3, 1),
+        });
+        _seekPanel.Visible = true;
+        return DetachPreviewControl(_seekPanel);
+    }
+
+    internal CanvasLayer FullMoonCaptionUiPreview()
+    {
+        _fullMoonCaption = BuildFullMoonCaption();
+        RemoveChild(_fullMoonCaptionLayer);
+        return _fullMoonCaptionLayer!;
+    }
+
+    internal Control BuildNereidUiPreview()
+    {
+        var box = new VBoxContainer();
+        box.AddThemeConstantOverride("separation", 16);
+        _fullMapLayer = new CanvasLayer();
+        _nereidStrip = UiTheme.Text("", 12, UiTheme.TextHi, HorizontalAlignment.Center);
+        _nereidStrip.AddThemeStyleboxOverride("normal", UiTheme.MeterTrack());
+        _nereidStrip.CustomMinimumSize = new Vector2(MiniMap.MapSize, NereidStripHeight);
+        _nereidFlagBoard = NereidBoard(Control.LayoutPreset.TopLeft, 0f);
+        _nereidScoreBoard = NereidBoard(Control.LayoutPreset.TopLeft, 0f);
+        foreach (var label in new[] { _nereidFlagBoard, _nereidScoreBoard })
+        {
+            _fullMapLayer.RemoveChild(label);
+            label.CustomMinimumSize = new Vector2(NereidBoardWidth, NereidStripHeight);
+        }
+        _nereidStrip.Text = "El Morad  6 : 8  Karus";
+        _nereidFlagBoard.Text = "Total Point   Elmo: 6   Karu: 8";
+        _nereidScoreBoard.Text = "TotalPoint   Elmo: 12   Karu: 26";
+        _nereidFlagBoard.Visible = _nereidScoreBoard.Visible = true;
+        box.AddChild(_nereidStrip);
+        box.AddChild(_nereidFlagBoard);
+        box.AddChild(_nereidScoreBoard);
+        return box;
+    }
+
+    internal Control BuildVanguardUiPreview(int mode)
+    {
+        _vanguardLayer = new CanvasLayer();
+        BuildVanguardInvite();
+        BuildVanguardInviteMini();
+        BuildVanguardList();
+        BuildVanguardListMini();
+        _vanguardCountdown = 7.4;
+        VanguardTick(0);
+        HudWindow window = mode switch
+        {
+            VanguardInviteFull => _vanguardInvite,
+            VanguardListFull => _vanguardList,
+            VanguardListMini => _vanguardListMini,
+            _ => _vanguardInviteMini,
+        };
+        _vanguardNationBand.Color = new Color("#" + DeathNotices.KarusNameColour);
+        string[] names = { "Velkan", "Rikka", "Nightwalker", "Ophelia", "Arwen", "Zeus" };
+        for (int i = 0; i < Vanguard.ListRows; i++) _vanguardRows[i].Text = names[i];
+        _vanguardOthers.Text = Vanguard.OthersCount(names.Length).ToString();
+        window.Visible = true;
+        return DetachPreviewControl(window);
+    }
+
+    internal Control BuildSiegeTowerUiPreview()
+    {
+        var box = new VBoxContainer();
+        box.AddThemeConstantOverride("separation", 24);
+        BuildTowerButton(box);
+        _towerButton.Text = TowerText(SiegeTower.BoardingText);
+        _towerButton.Visible = true;
+        _dropOff = UiTheme.ActionButton(TowerText(SiegeTower.ExitText), "");
+        _dropOff.CustomMinimumSize = new Vector2(DropOffWidth, DropOffHeight);
+        _dropOff.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+        box.AddChild(_dropOff);
+        return box;
+    }
+
+    internal Control BuildSiegeWarUiPreview()
+    {
+        BuildSiegeWarWindow();
+        ShowSiegeStatus(new SiegeWarStatus(2, 120, 4, 0, 912, 2405, "Wolves"));
+        _siegeWarPanel.Visible = true;
+        return DetachPreviewControl(_siegeWarPanel);
+    }
+
+    internal Control BuildChaosGuideUiPreview()
+    {
+        var window = BuildChaosGuide();
+        window.Visible = true;
+        return DetachPreviewControl(window);
+    }
+
+    internal Control BuildNestIndunUiPreview()
+    {
+        const int monsterStone = 900144023;
+        BuildNestWindow();
+        _nestStone = monsterStone;
+        _nestWindow.Title = ItemData.DisplayName(monsterStone);
+        _nestExplain.Text = ItemData.Get(monsterStone)?.Desc ?? "";
+        _nestWindow.Visible = true;
+        return DetachPreviewControl(_nestWindow);
     }
 
     internal Control BuildDeathDialogUiPreview(bool respawnPending)
@@ -1439,12 +2734,13 @@ public partial class World
 
     internal Control BuildUserInfoUiPreview()
     {
+        LoadDailyRankBoards();
         UserInfoInit();
-        RequestUserInformation("Tester10");
-        OnUserInformation(true, new Net.UserInformation(
-            "Tester10", 61, 202, 2_450, 380,
-            17, 3, 1, 1, "Noah Knights", "Ardream", 2, 1,
-            [208003000, 208001000, 208002000, 208004000, 208005000, 136710000, 127410000]));
+        OnUserInformation(new UserInfoReply(
+            "Tester10", 61, 202, 1_245_000, 38_200,
+            17, 3, 1, 4, "Noah Knights", "Ardream", 2, 1, 3,
+            new[] { 4, 255, 37, 0, 120, 0, 1 },
+            new[] { new RankMark(0, 2, 1, 0), new RankMark(1, 3, 0, 0), new RankMark(2, 0, 0, 1), new RankMark(51, 0, 0, 2) }));
         return DetachPreviewControl(_userInfoPanel);
     }
 
@@ -1476,21 +2772,25 @@ public partial class World
 
     internal Control BuildWhisperUiPreview(bool minimized = false)
     {
+        ItemData.EnsureLoaded();
         Chat = new ChatSystem(this);
         WhisperInit();
         OpenWhisperWith("Tester10");
         var chat = _whispers["Tester10"];
         if (Net.I.WhisperHistory("Tester10").Count == 0)
         {
+            AppendWhisper(chat, mine: false, notice: true, ItemData.Text(ChatSystem.TextWhisperConnected, "Successfully connected for a private chat"));
             AppendWhisper(chat, mine: false, notice: false, "hey, are you farming Ronark?");
             AppendWhisper(chat, mine: true, notice: false, "yep, west side by the bridge. bring pots");
-            AppendWhisper(chat, mine: false, notice: false, "omw");
+            AppendWhisper(chat, mine: false, notice: false, "omw (Smile)");
             AppendWhisper(chat, mine: true, notice: false, "invite me when you get here");
             AppendWhisper(chat, mine: false, notice: false, "which channel are you on?");
             AppendWhisper(chat, mine: true, notice: false, "channel 2, near the north gate");
             AppendWhisper(chat, mine: false, notice: false, "ok give me a sec, repairing");
             AppendWhisper(chat, mine: true, notice: false, "no rush, I'll hold the spot");
             AppendWhisper(chat, mine: false, notice: false, "ready, invite me");
+            AppendWhisper(chat, mine: true, notice: false, $"also got this {ChatItemLink.Token(MarketPricePreviewItem)} for you");
+            AppendWhisper(chat, mine: false, notice: false, $"{ChatItemLink.Token(MarketPricePreviewItem)} nice, thanks! how much do you want for it?");
         }
         if (!minimized) return DetachPreviewControl(chat.Window);
 
@@ -1568,6 +2868,46 @@ public partial class World
         _questKills[275] = new ushort[] { 20, 0, 0, 0 };
         _questTracked.Add(274);
         _questSelected = 60;
+        if (!Config.LegacyQuestFallback) SeedPreviewQuestViews();
+    }
+
+    private void SeedPreviewQuestViews()
+    {
+        foreach (var view in PreviewQuestViews())
+        {
+            _questViews[view.QuestId] = view;
+            _questStrings[view.QuestId] = new QuestStrings(view.QuestId, view.Title, view.Journal);
+            _questObjectives[view.QuestId] = view.Objectives;
+            _questKills[view.QuestId] = view.Counts;
+            int state = view.State == QuestViewState.Claimable ? QuestStateReadyToTurnIn : QuestStateActive;
+            int index = _quests.FindIndex(q => q.QuestId == view.QuestId);
+            if (index < 0) _quests.Add(new QuestEntry(view.QuestId, state));
+            else _quests[index] = new QuestEntry(view.QuestId, state);
+        }
+        _questSelected = 274;
+    }
+
+    private static IEnumerable<QuestView> PreviewQuestViews()
+    {
+        yield return new QuestView(274, 14201, 21, false, false, false, false, QuestViewState.InProgress, 0,
+            "Worm hunt", "[Guard] Patrick asked me to thin out the worms near the Moradon bridge.", "",
+            new QuestObjectives(274, false,
+            [
+                new QuestKillGroup(20, [150], "Worm", HasTarget: true),
+                new QuestKillGroup(10, [151], "Bulcan"),
+            ]),
+            [13, 10],
+            [
+                new QuestTransfer(false, 2, QuestData.ExpItemId, 125_400, 0),
+                new QuestTransfer(false, 1, QuestData.CoinItemId, 2_500_000, 0),
+                new QuestTransfer(false, 0, 389010000, 5, 0),
+            ], []);
+        yield return new QuestView(275, 14201, 21, false, false, true, false, QuestViewState.Claimable, 0,
+            "Patrick's letter", "Bring the letter back to [Guard] Patrick.", "",
+            new QuestObjectives(275, false, []), [], [], []);
+        yield return new QuestView(60, 18004, 0, false, false, false, false, QuestViewState.InProgress, 0,
+            "Daily practice", "Defeat any monster anywhere.", "",
+            new QuestObjectives(60, false, [new QuestKillGroup(5, [150], "Any monster")]), [3], [], []);
     }
 
     internal Control BuildMerchantMenuUiPreview()

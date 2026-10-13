@@ -9,21 +9,24 @@ public partial class World
     {
         public int SkillId;
         public double End;
-        public bool LongLived;
+        public bool Power;
         public Control Entry = null!;
+        public Control Chip = null!;
         public Label Timer = null!;
     }
 
     private const float BuffChipPointerSize = 32f;
     private const double BuffTickStep = 0.2;
-    private const int BuffLongSeconds = 60;
     private const int BuffTooltipWidth = 44;
     private static readonly Vector2 BuffPanelFromCenter = new(-300f, 56f);
+    private static readonly Vector2 BuffPowerPanelBelow = new(0f, 44f);
+    private static readonly Color BuffBlinkDim = new(1f, 1f, 1f, BuffExpiry.BlinkDimAlpha);
 
     private readonly List<ActiveBuff> _buffs = new();
     private Control? _buffPanel;
-    private HBoxContainer _buffShortRow = null!;
-    private HBoxContainer _buffLongRow = null!;
+    private Control? _buffPowerPanel;
+    private HBoxContainer _buffNormalRow = null!;
+    private HBoxContainer _buffPowerRow = null!;
     private double _buffNextTick;
     private readonly List<ActiveBuff> _buffOrder = new();
     private readonly List<(int SkillId, double End)> _buffRestore = new();
@@ -36,19 +39,10 @@ public partial class World
         var layer = new CanvasLayer { Layer = 64 };
         AddChild(layer);
 
-        var panel = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Stop };
-        panel.AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
-        layer.AddChild(panel);
+        _buffNormalRow = BuffRow();
+        _buffPowerRow = BuffRow();
+        var panel = BuffPanel(layer, _buffNormalRow);
         _buffPanel = panel;
-
-        var col = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        col.AddThemeConstantOverride("separation", 5);
-        panel.AddChild(col);
-
-        _buffShortRow = BuffRow();
-        _buffLongRow = BuffRow();
-        col.AddChild(_buffShortRow);
-        col.AddChild(_buffLongRow);
 
         if (Platform.TouchUi)
         {
@@ -57,13 +51,30 @@ public partial class World
             return;
         }
 
-        HudLayout.Attach(panel, "hud_buffs", panel,
-            () =>
-            {
-                var vp = GetViewport().GetVisibleRect().Size;
-                return vp * 0.5f + BuffPanelFromCenter;
-            });
+        HudLayout.Attach(panel, "hud_buffs", panel, () => BuffPanelDefault(Vector2.Zero));
+
+        var power = BuffPanel(layer, _buffPowerRow);
+        _buffPowerPanel = power;
+        HudLayout.Attach(power, "hud_buffs_power", power, () => BuffPanelDefault(BuffPowerPanelBelow));
     }
+
+    private static PanelContainer BuffPanel(CanvasLayer layer, HBoxContainer row)
+    {
+        var panel = new PanelContainer { MouseFilter = Control.MouseFilterEnum.Stop };
+        panel.AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
+        layer.AddChild(panel);
+        panel.AddChild(row);
+        return panel;
+    }
+
+    private Vector2 BuffPanelDefault(Vector2 offset)
+    {
+        var vp = GetViewport().GetVisibleRect().Size;
+        return vp * 0.5f + BuffPanelFromCenter + offset;
+    }
+
+    private static bool IsPowerBuff(SkillData.Skill s) =>
+        BuffWindow.IsPower(s.UseItem, ItemData.Get(s.UseItem)?.Kind ?? 0);
 
     private static HBoxContainer BuffRow()
     {
@@ -150,7 +161,7 @@ public partial class World
         }
 
         bool harmful = s.IsEnemy || s.MoveSpeedPercent < 100;
-        bool longLived = s.Duration >= BuffLongSeconds;
+        bool power = !Platform.TouchUi && IsPowerBuff(s);
 
         var entry = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         entry.AddThemeConstantOverride("separation", 1);
@@ -159,15 +170,10 @@ public partial class World
         {
             CustomMinimumSize = new Vector2(BuffChipSize, BuffChipSize),
             MouseFilter = Control.MouseFilterEnum.Pass,
-            TooltipText = harmful
-                ? $"{s.Name}\n{TextWrap.Wrap(s.Desc, BuffTooltipWidth)}"
-                : $"{s.Name}\n{TextWrap.Wrap(s.Desc, BuffTooltipWidth)}\nDouble-click to remove.",
+            TooltipText = harmful ? BuffTooltip(s) : $"{BuffTooltip(s)}\nDouble-click to remove.",
         };
-        if (!harmful)
-        {
-            int cancelId = s.Id;
-            chip.GuiInput += ev => BuffChipInput(ev, cancelId);
-        }
+        int chipSkill = s.Id;
+        chip.GuiInput += ev => BuffChipInput(ev, chipSkill, harmful);
         var style = new StyleBoxFlat
         {
             BgColor = new Color(0.05f, 0.05f, 0.07f, 0.85f),
@@ -224,23 +230,27 @@ public partial class World
             entry.AddChild(timer);
         }
 
-        (Platform.TouchUi || !longLived ? _buffShortRow : _buffLongRow).AddChild(entry);
+        (power ? _buffPowerRow : _buffNormalRow).AddChild(entry);
         _buffs.Add(new ActiveBuff
         {
             SkillId = s.Id,
             End = end,
-            LongLived = longLived,
+            Power = power,
             Entry = entry,
+            Chip = chip,
             Timer = timer,
         });
         ShowBuffRows();
     }
 
-    private void BuffChipInput(InputEvent ev, int skillId)
+    private static string BuffTooltip(SkillData.Skill s) => $"{s.Name}\n{TextWrap.Wrap(s.Desc, BuffTooltipWidth)}";
+
+    private void BuffChipInput(InputEvent ev, int skillId, bool harmful)
     {
-        if (skillId == FragmentOfManesSkillId) return;
-        if (ev is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true, DoubleClick: true })
-            Net.I.SendMagic(MagicSub.Cancel, skillId, _myId);
+        if (ev is not InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } click) return;
+        if (ContinuanceClick(skillId)) return;
+        if (harmful || skillId == FragmentOfManesSkillId) return;
+        if (click.DoubleClick) Net.I.SendMagic(MagicSub.Cancel, skillId, _myId);
     }
 
     private void OnBuffExpired(int buffType)
@@ -253,7 +263,7 @@ public partial class World
         for (int i = _buffs.Count - 1; i >= 0; i--)
         {
             var s = SkillData.Get(_buffs[i].SkillId);
-            if (s == null || !BuffExpiry.Removes(buffType, s.BuffType, s.Type1, s.TimeDamage)) continue;
+            if (s == null || !BuffExpiry.Removes(buffType, s.BuffType, s.Type1, s.TimeDamage, s.StateChange)) continue;
             DropBuff(i);
             dropped = true;
         }
@@ -278,6 +288,7 @@ public partial class World
         if (GodotObject.IsInstanceValid(b.Entry)) b.Entry.QueueFree();
         _buffs.RemoveAt(index);
         Net.I.BuffEnds.Remove(b.SkillId);
+        ForgetExtendedBuff(b.SkillId);
         if (SkillData.Get(b.SkillId) is { } s && s.MoveSpeedPercent != 100) ClearMoveSpeedBuff();
     }
 
@@ -298,6 +309,7 @@ public partial class World
                 continue;
             }
             b.Timer.Text = left >= 60 ? $"{left / 60:0}M" : $"{left:0}S";
+            b.Chip.Modulate = BuffExpiry.BlinkDimmed(left) ? BuffBlinkDim : Colors.White;
             b.Timer.AddThemeColorOverride("font_color",
                 left <= 5 ? new Color(1f, 0.45f, 0.45f) : Colors.White);
         }
@@ -309,21 +321,21 @@ public partial class World
     {
         _buffOrder.Clear();
         foreach (var b in _buffs)
-            if (b.Entry.GetParent() == _buffShortRow) _buffOrder.Add(b);
+            if (b.Entry.GetParent() == _buffNormalRow) _buffOrder.Add(b);
         _buffOrder.Sort((a, b) => a.End.CompareTo(b.End));
         for (int i = 0; i < _buffOrder.Count; i++)
             if (_buffOrder[i].Entry.GetIndex() != i)
-                _buffShortRow.MoveChild(_buffOrder[i].Entry, i);
+                _buffNormalRow.MoveChild(_buffOrder[i].Entry, i);
     }
 
     private void ShowBuffRows()
     {
-        int shortLived = 0, longLived = 0;
+        int normal = _groundChip != null ? 1 : 0, power = 0;
         foreach (var b in _buffs)
-            if (b.LongLived) longLived++;
-            else shortLived++;
-        _buffShortRow.Visible = Platform.TouchUi ? _buffs.Count > 0 : shortLived > 0;
-        _buffLongRow.Visible = !Platform.TouchUi && longLived > 0;
+            if (b.Power) power++;
+            else normal++;
+        _buffNormalRow.Visible = normal > 0;
+        _buffPowerRow.Visible = power > 0;
     }
 
     private void ClearAllBuffs()

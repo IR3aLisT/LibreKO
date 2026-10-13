@@ -39,7 +39,7 @@ public class ClanWarehousePacketCoordinator(
 
         if (session.KnightsId <= 0 || sessionManager.Knights.GetClan(session.KnightsId) == null)
         {
-            await SendResult(session, sub, ClanWarehouseResult.Failed);
+            await SendResult(session, sub, ClanWarehouseResult.NotInClan);
             return;
         }
 
@@ -113,11 +113,15 @@ public class ClanWarehousePacketCoordinator(
         if (itemData == null
             || srcPos >= InventoryConstants.HaveMax
             || dstPos >= WarehousePageSize
-            || (itemId >= ItemNoTradeMin && itemId <= ItemNoTradeMax)
             || count <= 0
             || (itemData.Countable == 0 && count != 1))
         {
             await SendResult(session, WarehouseSubOpcode.Input, ClanWarehouseResult.Failed);
+            return;
+        }
+        if ((itemId >= ItemNoTradeMin && itemId <= ItemNoTradeMax) || !WarehousePacketCoordinator.Storable(itemData))
+        {
+            await SendResult(session, WarehouseSubOpcode.Input, ClanWarehouseResult.NotStorable);
             return;
         }
 
@@ -129,6 +133,7 @@ public class ClanWarehousePacketCoordinator(
             return;
         }
 
+        var untradable = false;
         KnightsEntity? clanRef = null;
         var success = sessionManager.Knights.WithClanWarehouse(session.KnightsId, (c, slots) =>
         {
@@ -136,8 +141,13 @@ public class ClanWarehousePacketCoordinator(
             return session.WithLock(s =>
             {
                 var source = s.Inventory[absSrc];
-                if (source.ItemId != itemId || source.Count < count || source.IsLinked)
+                if (source.ItemId != itemId || source.Count < count)
                     return false;
+                if (!source.IsTradable)
+                {
+                    untradable = true;
+                    return false;
+                }
 
                 var destination = slots[realDst];
                 if (!CanMergeOrPlace(itemData, destination, itemId, count))
@@ -162,7 +172,8 @@ public class ClanWarehousePacketCoordinator(
 
         if (!success || clanRef == null)
         {
-            await SendResult(session, WarehouseSubOpcode.Input, ClanWarehouseResult.Failed);
+            await SendResult(session, WarehouseSubOpcode.Input,
+                untradable ? ClanWarehouseResult.NotStorable : ClanWarehouseResult.Failed);
             return;
         }
 
@@ -176,8 +187,7 @@ public class ClanWarehousePacketCoordinator(
     {
         if (!IsLeaderOrAssistant(session))
         {
-            packet.ReadInt(); packet.ReadInt(); packet.ReadByte(); packet.ReadByte(); packet.ReadByte(); packet.ReadInt();
-            await SendResult(session, WarehouseSubOpcode.Output, ClanWarehouseResult.Failed);
+            await SendResult(session, WarehouseSubOpcode.Output, ClanWarehouseResult.NoRights);
             return;
         }
 
@@ -283,8 +293,7 @@ public class ClanWarehousePacketCoordinator(
     {
         if (!IsLeaderOrAssistant(session))
         {
-            packet.ReadInt(); packet.ReadInt(); packet.ReadByte(); packet.ReadByte(); packet.ReadByte();
-            await SendResult(session, WarehouseSubOpcode.Move, ClanWarehouseResult.Failed);
+            await SendResult(session, WarehouseSubOpcode.Move, ClanWarehouseResult.NoRights);
             return;
         }
 
@@ -293,6 +302,7 @@ public class ClanWarehousePacketCoordinator(
         var page = packet.ReadByte();
         var srcPos = packet.ReadByte();
         var dstPos = packet.ReadByte();
+        var dstPage = packet.RemainingBytes >= 1 ? packet.ReadByte() : page;
 
         if (srcPos >= WarehousePageSize || dstPos >= WarehousePageSize)
         {
@@ -301,7 +311,7 @@ public class ClanWarehousePacketCoordinator(
         }
 
         var realSrc = page * WarehousePageSize + srcPos;
-        var realDst = page * WarehousePageSize + dstPos;
+        var realDst = dstPage * WarehousePageSize + dstPos;
         if (realSrc >= KnightsManager.ClanWarehouseSlots || realDst >= KnightsManager.ClanWarehouseSlots)
         {
             await SendResult(session, WarehouseSubOpcode.Move, ClanWarehouseResult.Failed);
@@ -339,8 +349,7 @@ public class ClanWarehousePacketCoordinator(
     {
         if (!IsLeaderOrAssistant(session))
         {
-            packet.ReadInt(); packet.ReadInt(); packet.ReadByte(); packet.ReadByte(); packet.ReadByte();
-            await SendResult(session, WarehouseSubOpcode.InventoryMove, ClanWarehouseResult.Failed);
+            await SendResult(session, WarehouseSubOpcode.InventoryMove, ClanWarehouseResult.NoRights);
             return;
         }
 

@@ -18,11 +18,13 @@ public partial class Net
     public const byte WarpResultArrived = 1;
     public const byte WarpResultLevelTooLow = 2;
     public const byte WarpResultCastleSiege = 3;
+    public const byte WarpResultLunarWar = 4;
     public const byte WarpResultNoNationalPoints = 5;
     public const byte WarpResultLevelRangeOnly = 6;
     public const byte WarpResultNotQualified = 7;
     public const byte WarpResultTradeCooldown = 8;
     public const byte WarpResultServerFull = 9;
+    public const byte WarpResultQuestCompleted = 10;
     public const byte WarpResultClanGrade = 12;
     public const byte WarpResultSameAddress = 13;
     public const byte WarpResultCaptcha = 14;
@@ -35,7 +37,12 @@ public partial class Net
         {
             byte result = p.RemainingBytes >= 1 ? p.ReadByte() : WarpResultArrived;
             if (result == WarpResultArrived) return;
-            int detail = result == WarpResultLevelTooLow && p.RemainingBytes >= 1 ? p.ReadByte() : 0;
+            int detail = result switch
+            {
+                WarpResultLevelTooLow when p.RemainingBytes >= 1 => p.ReadByte(),
+                WarpResultQuestCompleted when p.RemainingBytes >= 2 => p.ReadUShort(),
+                _ => 0,
+            };
             WarpFailEvent?.Invoke(result, detail);
             return;
         }

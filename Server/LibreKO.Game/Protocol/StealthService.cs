@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Services;
+﻿using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
@@ -33,7 +33,7 @@ public class StealthService(
             return;
 
         foreach (var skillId in ActiveStealthSkills(session))
-            session.ActiveBuffs.TryRemove(skillId, out _);
+            session.RemoveBuff(skillId);
 
         session.Invisibility = InvisibilityType.None;
         await BroadcastVisibilityAsync(session);

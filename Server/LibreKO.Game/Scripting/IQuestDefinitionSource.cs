@@ -10,6 +10,7 @@ public interface IQuestDefinitionSource
     ObjectiveRule ObjectiveRuleFor(int questId);
 
     QuestText? TextFor(int questId, int nation = 0, int classGroup = 0);
+    IReadOnlyList<(int Item, int Count)> CollectsFor(int questId, int classGroup, int nation, int rebirthLevel) => [];
     bool IsAutoAccepted(int questId) => false;
     bool HasAutomaticFlow(int questId) => false;
     Task SendViewsAsync(UserSession session, int? questId = null, bool changesOnly = false) => Task.CompletedTask;

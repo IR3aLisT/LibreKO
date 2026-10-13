@@ -6,7 +6,28 @@ public partial class Net
 {
     public const int WhisperLogMax = 120;
 
-    public const byte SubChatTargetWhisper = 1, SubChatTargetBlock = 2;
+    public const byte SubChatTargetWhisper = 1, SubChatTargetBlock = 2, SubChatTargetClanAdmission = 4;
+    private const byte ConsultClan = 0, ConsultPlayer = 1;
+
+    public event Action<bool, string, bool>? ClanConsultationEvent;
+
+    public void SendClanConsultation(int clanId)
+    {
+        var p = new Packet(GameOpcodes.GS_CHAT_TARGET);
+        p.WriteByte(SubChatTargetClanAdmission);
+        p.WriteByte(ConsultClan);
+        p.WriteShort((short)clanId);
+        _conn.Send(p);
+    }
+
+    public void SendPlayerConsultation(string name)
+    {
+        var p = new Packet(GameOpcodes.GS_CHAT_TARGET);
+        p.WriteByte(SubChatTargetClanAdmission);
+        p.WriteByte(ConsultPlayer);
+        p.WriteString(name);
+        _conn.Send(p);
+    }
 
     public const byte ChatAuthorityPlayer = 1, ChatAuthorityGameMaster = 2;
 
@@ -33,6 +54,28 @@ public partial class Net
             ? log
             : System.Array.Empty<WhisperLine>();
 
+    public readonly record struct OpenWhisper(string Name, Godot.Vector2 Position, bool Minimized, bool Unread);
+
+    private readonly System.Collections.Generic.List<OpenWhisper> _openWhispers = new();
+
+    public System.Collections.Generic.IReadOnlyList<OpenWhisper> OpenWhispers => _openWhispers;
+
+    public void KeepOpenWhispers(System.Collections.Generic.IEnumerable<OpenWhisper> windows)
+    {
+        _openWhispers.Clear();
+        _openWhispers.AddRange(windows);
+    }
+
+    private string _whispersOf = "";
+
+    private void ResetWhispersOnCharacterChange()
+    {
+        if (string.Equals(_whispersOf, SelectedChar, StringComparison.OrdinalIgnoreCase)) return;
+        _whispersOf = SelectedChar;
+        _whisperLog.Clear();
+        _openWhispers.Clear();
+    }
+
     public void RecordWhisper(string name, bool mine, bool notice, string text)
     {
         if (!_whisperLog.TryGetValue(name, out var log))
@@ -48,9 +91,13 @@ public partial class Net
 
     public readonly record struct DeathNotice(
         int VictimNation, int KillerNation, int Kind, int KillerId, string KillerName,
-        int VictimId, string VictimName, int X, int Z);
+        int VictimId, string VictimName, int X, int Z, bool VictimIsKing = false);
 
     public event Action<DeathNotice>? DeathNoticeEvent;
+    public event Action<int>? KrowazNoticeEvent;
+    public event Action<MonumentNotice>? MonumentNoticeEvent;
+    public event Action<ChaosStoneNotice>? ChaosStoneNoticeEvent;
+    public event Action<BoxItemNotice>? BoxItemNoticeEvent;
 
     public const byte ChatTypeDeathNotice = 26;
     private const int DeathNoticeMinBytes = 4 + 4 + 1 + 4 + 1 + 4;
@@ -66,6 +113,28 @@ public partial class Net
             HandleDeathNotice(p);
             return;
         }
+        if (type == ChatType.ChatRoom)
+        {
+            HandleRoomChat(p);
+            return;
+        }
+        if (type == ChatType.KrowazNotice)
+        {
+            if (ReadKrowazSeconds(p) is { } seconds) KrowazNoticeEvent?.Invoke(seconds);
+            return;
+        }
+        switch (type)
+        {
+            case ChatType.MonumentNotice:
+                if (MonumentNotice.Read(p) is { } monument) MonumentNoticeEvent?.Invoke(monument);
+                return;
+            case ChatType.ChaosStoneNotice:
+                if (ChaosStoneNotice.Read(p) is { } stone) ChaosStoneNoticeEvent?.Invoke(stone);
+                return;
+            case ChatType.BoxItemNotice:
+                if (BoxItemNotice.Read(p) is { } box) BoxItemNoticeEvent?.Invoke(box);
+                return;
+        }
         int nation = p.RemainingBytes >= 1 ? p.ReadByte() : 0;
         int charId = p.RemainingBytes >= 4 ? p.ReadInt() : 0;
         string name = p.RemainingBytes >= 1 ? p.ReadSByteString() : "";
@@ -76,28 +145,43 @@ public partial class Net
         ChatEvent?.Invoke(new ChatLine(type, nation, charId, name, message, isGm));
     }
 
+    internal static int? ReadKrowazSeconds(Packet p) => p.RemainingBytes >= 2 ? p.ReadShort() : null;
+
     private void HandleDeathNotice(Packet p)
     {
-        if (p.RemainingBytes < DeathNoticeMinBytes) return;
-        int victimNation = p.ReadByte();
+        if (ReadDeathNotice(p) is { } notice) DeathNoticeEvent?.Invoke(notice);
+    }
+
+    internal static DeathNotice? ReadDeathNotice(Packet p)
+    {
+        if (p.RemainingBytes < DeathNoticeMinBytes) return null;
         int killerNation = p.ReadByte();
-        p.ReadByte();
+        int victimNation = p.ReadByte();
+        bool king = p.ReadByte() != 0;
         int kind = p.ReadByte();
+        if (kind == DeathNotices.DefeatedKind) (killerNation, victimNation) = (victimNation, killerNation);
         int killerId = p.ReadInt();
         string killerName = p.ReadSByteString();
-        if (p.RemainingBytes < 5) return;
+        if (p.RemainingBytes < 5) return null;
         int victimId = p.ReadInt();
         string victimName = p.ReadSByteString();
         int x = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
         int z = p.RemainingBytes >= 2 ? p.ReadShort() : 0;
-        DeathNoticeEvent?.Invoke(new DeathNotice(victimNation, killerNation, kind, killerId, killerName,
-                                                 victimId, victimName, x, z));
+        return new DeathNotice(victimNation, killerNation, kind, killerId, killerName, victimId, victimName, x, z, king);
     }
 
     private void HandleChatTarget(Packet p)
     {
         if (p.RemainingBytes < 3) return;
         byte type = p.ReadByte();
+        if (type == SubChatTargetClanAdmission)
+        {
+            short admission = p.ReadShort();
+            string who = admission == ChatTargetConnected && p.RemainingBytes >= 2 ? p.ReadString() : "";
+            bool received = p.RemainingBytes >= 1 && p.ReadByte() != 0;
+            ClanConsultationEvent?.Invoke(admission == ChatTargetConnected, who, received);
+            return;
+        }
         if (type != SubChatTargetWhisper) return;
         short result = p.ReadShort();
         string name = p.RemainingBytes >= 2 ? p.ReadString() : "";

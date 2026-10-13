@@ -5,6 +5,7 @@ namespace LibreKO.Network;
 public partial class Net
 {
     public CharacterSheet Sheet { get; } = new();
+    public bool HealStrikesEnemies { get; private set; }
 
     public Vitals Vitals { get; } = new();
 
@@ -43,9 +44,6 @@ public partial class Net
         int fireR, int coldR, int lightningR, int magicR, int diseaseR, int poisonR,
         byte[] skillPoints)
     {
-        SkillCooldowns.Clear();
-        PotionReadyAt = 0;
-        BuffEnds.Clear();
         Sheet.SeedStats(str, sta, dex, intel, magicStat, statPoints);
         Sheet.SeedStatBonuses(strBonus, staBonus, dexBonus, intelBonus, magicBonus);
         Sheet.SeedCombat(ap, ac);
@@ -55,6 +53,30 @@ public partial class Net
         Sheet.SetMaxWeight(maxWeight);
         Vitals.Seed(hp, maxHp, mp, maxMp);
         Mastery.Seed(skillPoints);
+    }
+
+    private void ResetSessionState()
+    {
+        SkillCooldowns.Clear();
+        PotionReadyAt = 0;
+        BuffEnds.Clear();
+        SelfTransformSkill = 0;
+        SelfAbnormal = 0;
+        SelfExpeditionSide = NoExpeditionSide;
+        HealStrikesEnemies = false;
+        ClanOnlineCount = NoClanBonus;
+        SelfDevilForm = false;
+        ResetChaosBattle();
+        ChaosHotbar = null;
+        ForgetGroundEffect();
+        AngerGauge = 0;
+        AngerFull = false;
+        WhispersBlocked = false;
+        TimedItemsOffered = false;
+        SoccerTeam = 0;
+        NationChat.Left();
+        ResetRoomMedia();
+        _ownStatus.Clear();
         ClearParty("a fresh GS_MYINFO (character select or reconnect)");
         _openWindows.Clear();
     }

@@ -39,6 +39,10 @@ Source: [phosphor-icons/core](https://github.com/phosphor-icons/core), `assets`
 License: MIT. Copyright © Phosphor Icons. The SVG `currentColor` fill was changed to white so Godot can
 tint the imported texture consistently.
 
+The chat room voice controls use the regular weight of `microphone`, `microphone-slash`, `speaker-high`,
+`speaker-slash`, `phone`, `phone-x`, `play`, `pause`, `smiley`, `waveform`, `gear`, `paper-plane-right` (saved as
+`system/send.svg`) and `sliders-horizontal` (saved as `system/sliders.svg`).
+
 See `licenses/PHOSPHOR-MIT.txt` for the license text.
 
 ## Project-original icons
@@ -48,6 +52,9 @@ not derived from a third-party asset.
 
 `system/bag.svg` is an original bag silhouette drawn for GKO on the same grid. It replaced Phosphor's
 `backpack`, whose straps, buckle and pockets read as noise at HUD icon sizes.
+
+`system/key.svg` is an original key silhouette drawn for GKO on the Phosphor 256-unit grid: a ring and a
+toothed shaft; it is not copied from a third-party asset.
 
 `system/search.svg` is an original magnifier drawn for GKO on the Phosphor 256-unit grid so it sits
 with the rest of the `system/` set; it is not copied from a third-party asset.

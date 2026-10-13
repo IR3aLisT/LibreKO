@@ -60,6 +60,45 @@ public static class StarterStats
         [14] = new[] { 213 },
     };
 
+    private static readonly Dictionary<int, int> RaceTexts = new()
+    {
+        [1] = 3211, [2] = 3216, [3] = 3218, [4] = 3214,
+        [11] = 3203, [12] = 3206, [13] = 3204,
+    };
+
+    private static readonly int[] StatHintTexts = { 3219, 3220, 3202, 3210, 3201 };
+
+    private const int StatStr = 0, StatSta = 1, StatDex = 2, StatInt = 3, StatMag = 4;
+    private const int KarusClassBase = 1, ElMoradClassBase = 2;
+    private const int Warrior = 1, Rogue = 2, Mage = 3, Priest = 4, Kurian = 13;
+
+    public static int RaceTextId(int race) => RaceTexts.TryGetValue(race, out int text) ? text : 0;
+
+    public static int ClassTextId(int cls) => (cls / 100, cls % 100) switch
+    {
+        (KarusClassBase, Warrior) => 3217,
+        (KarusClassBase, Rogue) => 3215,
+        (KarusClassBase, Mage) => 3212,
+        (KarusClassBase, Priest) => 3213,
+        (ElMoradClassBase, Warrior) => 3209,
+        (ElMoradClassBase, Rogue) => 3208,
+        (ElMoradClassBase, Mage) => 3205,
+        (ElMoradClassBase, Priest) => 3207,
+        _ => 0,
+    };
+
+    public static int StatHintTextId(int statIndex) =>
+        statIndex >= 0 && statIndex < StatHintTexts.Length ? StatHintTexts[statIndex] : 0;
+
+    public static bool Recommended(int cls, int statIndex) => (cls % 100) switch
+    {
+        Warrior or Kurian => statIndex is StatStr or StatSta,
+        Rogue => statIndex is StatSta or StatDex,
+        Mage => statIndex is StatInt or StatMag,
+        Priest => statIndex is StatStr or StatInt,
+        _ => false,
+    };
+
     public static int[] RacesFor(int nation) =>
         nation == Nations.Karus ? new[] { 1, 2, 3, 4, 6 } : new[] { 11, 12, 13, 14 };
 

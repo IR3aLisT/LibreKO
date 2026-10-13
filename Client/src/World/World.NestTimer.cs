@@ -18,7 +18,7 @@ public partial class World
 
     private void NestTimerInit()
     {
-        if (!NestDungeon.IsNestZone(_zone)) Net.I.ClearNestTimer();
+        if (!NestDungeon.IsNestZone(_zone) && _zone != ChaosBattle.Zone) Net.I.ClearNestTimer();
     }
 
     private void NestTimerDispose()
@@ -86,6 +86,11 @@ public partial class World
                            $"{draki / 60}:{draki % 60:00}");
             return;
         }
+        if (_zone == ChaosBattle.Zone)
+        {
+            ShowChaosPlate();
+            return;
+        }
         int left = NestDungeon.IsNestZone(_zone) ? Net.I.NestSecondsLeft : 0;
         if (left <= 0)
         {
@@ -98,8 +103,10 @@ public partial class World
     private void ShowNestTimer(int stoneItemId, int secondsLeft, bool completed)
     {
         string title = stoneItemId != 0 ? ItemData.DisplayName(stoneItemId) : NestTimerFallbackTitle;
-        ShowTimerPlate(title, completed ? NestDungeon.CompletedLine : null,
-                       NestDungeon.TerminationLine(secondsLeft, completed));
+        ShowTimerPlate(title, completed ? ItemData.Text(NestDungeon.CompletedText, NestDungeon.CompletedFallback) : null,
+                       NestDungeon.TerminationLine(secondsLeft, completed,
+                           ItemData.Text(NestDungeon.TerminationText, NestDungeon.TerminationFallback),
+                           ItemData.Text(NestDungeon.SecondsText, NestDungeon.SecondsFallback)));
     }
 
     private void ShowTimerPlate(string title, string? middle, string line)
@@ -110,7 +117,7 @@ public partial class World
         if (key != _nestTimerText)
         {
             _nestTimerText = key;
-            _nestTimerTitle!.Text = $"<< {title} >>";
+            _nestTimerTitle!.Text = ItemData.Text(NestDungeon.TitleText, NestDungeon.TitleFallback).Replace("%s", title);
             _nestTimerDone!.Text = middle ?? "";
             _nestTimerDone.Visible = showMiddle;
             _nestTimerLine!.Text = line;

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
@@ -163,7 +163,7 @@ public class PartyPacketWriterTests
         var packet = PartyPacketWriter.Commander(70_001, "Aurelia");
         packet.ResetOffset();
 
-        packet.ReadByte().Should().Be((byte)PartySubOpcode.Commander);
+        packet.ReadByte().Should().Be(30);
         packet.ReadInt().Should().Be(70_001);
         packet.ReadShort().Should().Be(7);
         packet.ReadBytes(7).Should().Equal("Aurelia"u8.ToArray());
@@ -171,24 +171,95 @@ public class PartyPacketWriterTests
     }
 
     [Fact]
-    public void TargetNumberIsSub31AndPreservesNegativeCodes()
+    public void TheCommanderMarkIsSub31WithTheTargetAndAClearFlag()
     {
-        var packet = PartyPacketWriter.TargetNumber(70_001, -1);
+        var packet = PartyPacketWriter.CommanderMark(70_001, clear: true);
         packet.ResetOffset();
 
-        packet.ReadByte().Should().Be((byte)PartySubOpcode.TargetNumber);
+        packet.ReadByte().Should().Be(31);
         packet.ReadInt().Should().Be(70_001);
-        packet.ReadByte().Should().Be(0xFF);
+        packet.ReadByte().Should().Be(1);
+        packet.RemainingBytes.Should().Be(0);
     }
 
     [Fact]
-    public void AlertIsSub32()
+    public void TheCommanderOrderIsSub32()
     {
-        var packet = PartyPacketWriter.Alert(3);
+        var packet = PartyPacketWriter.CommanderOrder(3);
         packet.ResetOffset();
 
-        packet.ReadByte().Should().Be((byte)PartySubOpcode.Alert);
+        packet.ReadByte().Should().Be(32);
         packet.ReadByte().Should().Be(3);
         packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void MemberBuffsIsSub64WithTheMemberAndEachSkillId()
+    {
+        var packet = PartyPacketWriter.MemberBuffs(70_001, [500_049, 107_725]);
+
+        packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_PARTY);
+        Convert.ToHexString(packet.GetData()).Should().Be("40711101000251A10700CDA40100");
+    }
+
+    [Fact]
+    public void MemberBuffsWithNoBuffsCarriesAZeroCount()
+    {
+        var packet = PartyPacketWriter.MemberBuffs(70_001, []);
+
+        Convert.ToHexString(packet.GetData()).Should().Be("407111010000");
+    }
+
+    [Fact]
+    public void MemberBuffsStopsAtTheLargestCountAByteHolds()
+    {
+        var skillIds = Enumerable.Range(1, PartyPacketWriter.MaxMemberBuffs + 10).ToArray();
+
+        var packet = PartyPacketWriter.MemberBuffs(70_001, skillIds);
+        packet.ResetOffset();
+
+        packet.ReadByte().Should().Be((byte)PartySubOpcode.MemberBuffs);
+        packet.ReadInt().Should().Be(70_001);
+        packet.ReadByte().Should().Be(PartyPacketWriter.MaxMemberBuffs);
+        for (var index = 1; index <= PartyPacketWriter.MaxMemberBuffs; index++)
+            packet.ReadInt().Should().Be(index);
+        packet.RemainingBytes.Should().Be(0);
+    }
+
+    [Fact]
+    public void SignalProbeIsSub65WithTheToken()
+    {
+        var packet = PartyPacketWriter.SignalProbe(0x0A0B0C0D);
+
+        packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_PARTY);
+        Convert.ToHexString(packet.GetData()).Should().Be("410D0C0B0A");
+    }
+
+    [Fact]
+    public void SignalTableIsSub66WithEachMembersRoundTrip()
+    {
+        var packet = PartyPacketWriter.SignalTable(
+        [
+            new PartyPacketWriter.SignalEntry(70_001, 80),
+            new PartyPacketWriter.SignalEntry(70_002, PartyPacketWriter.NoSignal),
+        ]);
+
+        packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_PARTY);
+        Convert.ToHexString(packet.GetData()).Should().Be("420271110100500072110100FFFF");
+    }
+
+    [Fact]
+    public void SignalTableWithNoEntriesCarriesAZeroCount()
+    {
+        Convert.ToHexString(PartyPacketWriter.SignalTable([]).GetData()).Should().Be("4200");
+    }
+
+    [Fact]
+    public void LevelProgressIsSub67WithTheMemberAndThePermille()
+    {
+        var packet = PartyPacketWriter.LevelProgress(70_001, 375);
+
+        packet.GetOpcode().Should().Be((byte)GameOpcodes.GS_PARTY);
+        Convert.ToHexString(packet.GetData()).Should().Be("43711101007701");
     }
 }

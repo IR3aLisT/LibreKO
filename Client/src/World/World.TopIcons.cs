@@ -10,10 +10,12 @@ public partial class World
     private const float TopIconPadX = 9f;
 
     private CanvasLayer _topIconLayer = null!;
+    private Rect2 _topRightRow;
     private Button _powerUpStoreIcon = null!;
     private TextureRect _powerUpStoreImage = null!;
     private Button _lotteryIcon = null!;
     private TextureRect _lotteryImage = null!;
+    private Button _genieIcon = null!;
 
     private static Color TopIconColor(bool waiting) => waiting ? UiTheme.GoldBright : UiTheme.TextLo;
 
@@ -34,9 +36,37 @@ public partial class World
         _lotteryIcon.Resized += PlaceLotteryIcon;
         _lotteryIcon.VisibilityChanged += PlaceLotteryIcon;
 
+        _genieIcon = TopIconButton(_topIconLayer, "system/sparkle", "Genie", ToggleGenie, out _);
+        _genieIcon.Visible = !Platform.TouchUi;
+
         if (_premiumChip != null) _premiumChip.Resized += PlaceTopIcons;
+        if (_pluginHud.TryGetValue(LibreKO.Plugins.HudPart.MiniMap, out var themedMap))
+        {
+            themedMap.ItemRectChanged += PlaceTopIcons;
+            themedMap.VisibilityChanged += PlaceTopIcons;
+        }
+        Callable.From(PlaceTopIcons).CallDeferred();
         Callable.From(PlacePowerUpStoreIcon).CallDeferred();
         Callable.From(PlaceLotteryIcon).CallDeferred();
+    }
+
+    private float MiniMapRightSpan()
+    {
+        if (!_pluginHud.TryGetValue(LibreKO.Plugins.HudPart.MiniMap, out var themed) || !IsInstanceValid(themed))
+            return HudAnchor.Edge + MiniMap.SquareSize;
+        if (!themed.IsVisibleInTree() || themed.Size.X <= 0f) return HudAnchor.Edge;
+        var rect = themed.GetGlobalRect();
+        float screen = GetViewport().GetVisibleRect().Size.X;
+        bool topRight = rect.End.X >= screen - TopRightTolerance && rect.Position.Y <= TopRightTolerance;
+        return topRight ? Mathf.Max(HudAnchor.Edge, screen - rect.Position.X) : HudAnchor.Edge;
+    }
+
+    private const float TopRightTolerance = 48f;
+
+    private void PinPremiumChip()
+    {
+        if (!IsInstanceValid(_premiumChip)) return;
+        HudAnchor.Pin(_premiumChip, HudAnchor.Spot.TopRight, new Vector2(MiniMapRightSpan() + StatusHudGap, HudAnchor.Edge));
     }
 
     private void TopIconsDispose()
@@ -94,16 +124,22 @@ public partial class World
     {
         if (Platform.TouchUi || !IsInstanceValid(_premiumChip)) return;
 
+        PinPremiumChip();
+        var row = _premiumChip.Visible ? _premiumChip.GetGlobalRect() : new Rect2();
         var size = new Vector2(TopIconSize + TopIconPadX * 2f, Mathf.Max(_premiumChip.Size.Y, TopIconSize));
-        float right = HudAnchor.Edge + MiniMap.SquareSize + StatusHudGap + _premiumChip.Size.X;
+        float right = MiniMapRightSpan() + StatusHudGap + _premiumChip.Size.X;
         float top = HudAnchor.Edge + (_premiumChip.Size.Y - size.Y) * 0.5f;
-        foreach (Control icon in new Control[] { _attendanceGift, _trophy, _mailIconButton, _powerUpStoreIcon, _lotteryIcon })
+        foreach (Control icon in new Control[] { _attendanceGift, _trophy, _mailIconButton, _powerUpStoreIcon, _lotteryIcon, _tiIcon, _eventsIcon, _genieIcon, _drIcon, _siegeIcon })
         {
             if (!IsInstanceValid(icon) || !icon.Visible) continue;
             right += TopIconGap;
             icon.CustomMinimumSize = size;
             HudAnchor.Pin(icon, HudAnchor.Spot.TopRight, new Vector2(right, top));
             right += size.X;
+            row = row.HasArea() ? row.Merge(icon.GetGlobalRect()) : icon.GetGlobalRect();
         }
+        if (row.IsEqualApprox(_topRightRow)) return;
+        _topRightRow = row;
+        PluginHost.Game.RaiseTopRightRow();
     }
 }

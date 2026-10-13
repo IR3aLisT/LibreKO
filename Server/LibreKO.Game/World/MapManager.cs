@@ -37,6 +37,14 @@ public class MapManager(ILogger<MapManager> logger)
         logger.LogInformation("Loaded {Count}/{Total} zone maps from {Dir}",
             loaded, gameData.ZoneInfoTable.Count, mapDirectory);
 
+        int objectCount = 0;
+        foreach (var (zoneId, smd) in _zoneMaps)
+            foreach (var row in gameData.MapObjectsByZone[zoneId])
+                if (smd.ObjectEvents.TryAdd(row.Index, ObjectEventOf(row)))
+                    objectCount++;
+        if (objectCount > 0)
+            logger.LogInformation("Added {Count} map objects from the MapObjects table", objectCount);
+
         // Load zone events from EVENT table
         int eventCount = 0;
         foreach (var (zoneId, _) in gameData.ZoneInfoTable)
@@ -54,6 +62,19 @@ public class MapManager(ILogger<MapManager> logger)
         logger.LogInformation("Loaded {Count} zone events across {ZoneCount} zones",
             eventCount, _zoneEvents.Count);
     }
+
+    internal static ObjectEvent ObjectEventOf(MapObjectData row) => new()
+    {
+        Belong = row.Belong,
+        Index = row.Index,
+        Type = row.Type,
+        ControlNpcId = row.ControlNpcId,
+        Status = row.Status,
+        PosX = row.X,
+        PosY = row.Y,
+        PosZ = row.Z,
+        Life = row.Life,
+    };
 
     public SmdFile? GetMap(short zoneId)
     {

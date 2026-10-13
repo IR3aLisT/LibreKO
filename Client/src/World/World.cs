@@ -18,6 +18,7 @@ public partial class World : Node3D, IWorldContext
     Node3D? IWorldContext.BodyOf(int charId) =>
         charId == _myId ? _self : _ents.TryGetValue(charId, out var e) ? e.Body : null;
     float IWorldContext.HeadHeight(int charId) => HeadHeightOf(charId);
+    PlateStack? IWorldContext.PlateOf(int charId) => PlateOf(charId);
     double IWorldContext.Now => Now();
 
     private bool Alive => IsInstanceValid(this) && !IsQueuedForDeletion();
@@ -25,6 +26,7 @@ public partial class World : Node3D, IWorldContext
     public override void _Ready()
     {
         GD.Print("[enter] world scene instantiated");
+        Net.I.WorldActive = true;
         _ = Diag.Guard("world-load", LoadWorld);
     }
 
@@ -41,7 +43,7 @@ public partial class World : Node3D, IWorldContext
         _zone = info.Zone;
         _myKoX = info.X; _myKoZ = info.Z; _myKoY = info.Y;
         _isGm = info.Authority == Net.GameMasterAuthority;
-        _collisionsOff = _isGm;
+        _collisionsOff = _isGm && Net.I.GmCollisionsOff;
 
         _loadStartedAt = Now();
         BuildLoading();
@@ -90,7 +92,8 @@ public partial class World : Node3D, IWorldContext
 
         string selfName = info.Name.Length > 0 ? info.Name : "You";
         GD.Print("[load] character: body scene");
-        PackedScene? selfScene = ResolvePlayerScene(info.Race);
+        int selfLookRace = PlayerRig.LookRace(info.Race, info.Class);
+        PackedScene? selfScene = ResolvePlayerScene(selfLookRace);
         Node3D selfVisual;
         if (selfScene != null)
         {
@@ -99,7 +102,7 @@ public partial class World : Node3D, IWorldContext
             _selfFlinch = Flinch.Attach(selfVisual);
             CaptureSelfDefaults(selfVisual);
             GD.Print("[load] character: equipment");
-            GraftEquipment(selfVisual, info.Race, info.Face, info.Gear, info.Hair, Net.I.HelmetHidden);
+            GraftEquipment(selfVisual, selfLookRace, info.Face, info.Gear, info.Hair, Net.I.HelmetHidden, Net.I.CostumeHidden);
             GD.Print("[load] character: complete");
         }
         else
@@ -114,19 +117,20 @@ public partial class World : Node3D, IWorldContext
         var selfCs = FindFirst<CollisionShape3D>(_selfBody);
         _selfCapsule = selfCs?.Shape as CapsuleShape3D;
         _selfCapsuleOffsetY = selfCs?.Position.Y ?? 0.85f;
-        _self.Position = GroundPos(info.X, info.Z, info.Y, _selfLift);
+        _self.Position = FloorGroundPos(info.X, info.Z, info.Y, _selfLift, login: true);
         _lastFreePos = _self.Position;
         _entities.AddChild(_self);
-        ApplySelfClan(MyClan.InClan ? MyClan.Name : "");
+        RefreshSelfClanLine();
         if (selfScene != null)
         {
-            AttachWeapons(_self, info.Gear);
+            AttachWeapons(_self, info.Gear, new HandWearer(info.Race));
             DressClanGauntlet(_self, info.Race, MyClan.InClan ? MyClan.Grade : 0, MyClan.InClan ? MyClan.Ranking : 0);
             _selfWingAnims = AttachWings(_self, info.Gear, info.Race, _zone, shineShadow: true);
             System.Array.Clear(_selfWingClips);
             AttachHandFx(_self, info.Gear, info.Race, _zone);
         }
         _selfPersonalRank = info.PersonalRank;
+        _selfKing = info.IsKing;
         RefreshRankAuraFor(_myId, _stealthIds.Contains(_myId));
         _selfVisual = selfVisual;
         DressSelfCape();
@@ -147,12 +151,21 @@ public partial class World : Node3D, IWorldContext
         Net.I.DeadEvent += OnDead;
         Net.I.SelfHpEvent += OnSelfHp;
         Net.I.SelfMpEvent += OnSelfMp;
+        Net.I.SelfStaminaEvent += OnSelfStamina;
         Net.I.RegeneEvent += OnRegene;
         Net.I.LookChangeEvent += OnLookChange;
 
         Net.I.ReplayKnownEntities(OnSpawn);
+        ApplySelfPlateState();
 
         BuildFacets();
+        if (Net.I.SelfTransformSkill > 0 && !ZoneLookHolds(_myId)) WearMonsterLook(_myId, Net.I.SelfTransformSkill);
+        else
+        {
+            if (Net.I.SelfTransformSkill > 0) HoldSelfTransform(Net.I.SelfTransformSkill);
+            ApplyZoneLook(_myId);
+        }
+        if (Net.I.SelfDevilForm) ApplyDevilForm(_myId, true);
         BuildEscapeStack();
         BuildHotkeys();
         ApplyHudTheme();
@@ -162,16 +175,22 @@ public partial class World : Node3D, IWorldContext
         if (_selfAnim != null) { PlayClipOn(_selfAnim, ref _selfClip, "idle"); _selfAnim.Advance(0.0); }
         _worldReady = true;
         if (Net.I.ConsumeZoneChange()) Net.I.SendZoneEnterAck();
-        else Net.I.SendReady();
+        else if (!Net.I.ConsumeRebuildInPlace()) Net.I.SendReady();
 
+        var fxWarm = WarmHotbarFxInView();
         if (!await LoadStep("Syncing server time…", 0.96f, $"{_ents.Count} entities nearby")) return;
         await WaitForServerEnvironment(2.5);
 
         if (!Alive) return;
 
         if (!await LoadStep("Ready", 1.0f, "Welcome to LibreKO")) return;
+        MemoryCensus.Log($"zone {_zone} loaded");
+        if (fxWarm != null && IsInstanceValid(fxWarm)) fxWarm.QueueFree();
         HideLoading();
         RefreshInZoneLeaveUi();
+        ShowChaosGuideOnEntry();
+        ShowFullMoonCaptionOnEntry();
+        ReleaseEntryPopups();
     }
 
     private async System.Threading.Tasks.Task WaitForServerEnvironment(double timeoutSec)
@@ -189,6 +208,9 @@ public partial class World : Node3D, IWorldContext
     public override void _Input(InputEvent ev)
     {
         if (!_worldReady || Net.I.ReconnectBlocking) return;
+        if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left or MouseButton.Right }
+            && !Chat.IsActive)
+            ReleaseTextFocusOutside();
         if (ev is InputEventMouseButton
             {
                 Pressed: true,
@@ -217,14 +239,29 @@ public partial class World : Node3D, IWorldContext
             }
             if (k.Keycode == Key.Escape && TryMinimizeFocusedWhisper())
             { GetViewport().SetInputAsHandled(); return; }
+            if (k.Keycode == Key.Escape && FocusedTextField() is { } textField)
+            { textField.ReleaseFocus(); GetViewport().SetInputAsHandled(); return; }
             if (GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit or SpinBox) return;
+            if (k.Keycode is Key.Enter or Key.KpEnter && TryEnterWarp()) { GetViewport().SetInputAsHandled(); return; }
             if (k.Keycode is Key.Enter or Key.KpEnter) { Chat.Open(); GetViewport().SetInputAsHandled(); return; }
             NoteMoveKey(k);
+            if (KeyBinds.Held(KeyAction.CommanderHold) && _commanderHotkeys.TryGetValue(KeyChord.From(k), out var command))
+            { command(); GetViewport().SetInputAsHandled(); return; }
             if (_hotkeys.TryGetValue(KeyChord.From(k), out var press))
             { press(); GetViewport().SetInputAsHandled(); return; }
             if (k.Keycode == Key.Escape)
             { HandleEscape(); GetViewport().SetInputAsHandled(); }
         }
+    }
+
+    private Control? FocusedTextField() =>
+        GetViewport().GuiGetFocusOwner() is { } focused and (LineEdit or TextEdit) ? focused : null;
+
+    private void ReleaseTextFocusOutside()
+    {
+        if (FocusedTextField() is not { } focused) return;
+        if (focused.GetGlobalRect().HasPoint(focused.GetGlobalMousePosition())) return;
+        focused.ReleaseFocus();
     }
 
     public override void _UnhandledInput(InputEvent ev)
@@ -240,30 +277,32 @@ public partial class World : Node3D, IWorldContext
             bool overUi = GetViewport().GuiGetHoveredControl() != null;
             float maxDist = _infoShown ? InfoMaxDist : MaxDist;
             if (mb.Pressed && mb.ButtonIndex == MouseButton.WheelUp && !overUi)
-                _camDist = Mathf.Clamp(_camDist * 0.9f, MinDist, maxDist);
+                _camZoomGoal = Mathf.Clamp(_camZoomGoal * 0.9f, MinDist, maxDist);
             else if (mb.Pressed && mb.ButtonIndex == MouseButton.WheelDown && !overUi)
-                _camDist = Mathf.Clamp(_camDist * 1.12f, MinDist, maxDist);
+                _camZoomGoal = Mathf.Clamp(_camZoomGoal * 1.12f, MinDist, maxDist);
+            else if (TradeHoldsInput) return;
             else if (HandleProfilePointer(mb, overUi)) return;
         }
+        else if (TradeHoldsInput) return;
         else if (ev is InputEventMouseMotion mm)
             HandleProfilePointer(mm, GetViewport().GuiGetHoveredControl() != null);
-    }
-
-    public override void _PhysicsProcess(double delta)
-    {
-        if (!_worldReady || Net.I.ReconnectBlocking) return;
-        UpdateHeldMoveTarget(delta);
-        HandleInput(delta);
     }
 
     public override void _Process(double delta)
     {
         if (!_worldReady) return;
         using var worldScope = Perf.Measure(Perf.Section.World);
+        if (!Net.I.ReconnectBlocking)
+        {
+            double step = FrameStep.Clamp(delta);
+            UpdateHeldMoveTarget(step);
+            HandleInput(step);
+        }
 
         using (Perf.Measure(Perf.Section.Spawn))
         {
             ProcessSpawnQueue();
+            GearStreamTick();
             TickNestTimer();
             TickQuestToast(delta);
         }
@@ -272,11 +311,37 @@ public partial class World : Node3D, IWorldContext
         double nowSec = Time.GetTicksMsec() / 1000.0;
         Vector3 selfPos = _self.Position;
         Vector3 camPos = _camera != null ? _camera.GlobalPosition : selfPos;
+        FxLod.Update(camPos, delta);
         float nameDist2 = NameTagDist * NameTagDist;
         var entityScope = Perf.Measure(Perf.Section.Entities);
         StealthTick(selfPos);
+        RespawnBlinkTick(nowSec);
+        SizeStateTick(nowSec);
+        AngerGaugeTick(nowSec);
+        PartyHudTick(nowSec);
         RefreshFrustum();
         RankEntityAnimation();
+        FollowHeadJoint(_self, SelfPlateRoot(), _selfHead);
+        AreaBannerTick();
+        PkLadderTick();
+        ChaosTick();
+        KnightRoyaleTick();
+        SiegeWarTick(delta);
+        VanguardTick(delta);
+        EventsTick(delta);
+        DailyRankTick(delta);
+        TimedItemsTick(delta);
+        ExitTick(delta);
+        SoccerTick(delta);
+        RenderFaultTick();
+        GestureTick();
+        KeyGateTick(delta);
+        NpcTouchTick(delta);
+        TickSelfFacing(dt);
+        PortraitTick(nowSec);
+        CommanderTick(nowSec);
+        CommanderFrame(delta);
+        OrderMessageTick(nowSec);
         _animFull = _animMid = _animFar = _animOff = _closeEntities = 0;
         foreach (var e in _ents.Values)
         {
@@ -300,7 +365,8 @@ public partial class World : Node3D, IWorldContext
             {
                 int moveEvery = e.OnScreen ? Config.MoveFarEvery : OffScreenMoveEvery;
                 e.MoveAccum += step;
-                if (++e.MoveFrames % moveEvery != 0) moveStep = 0f;
+                bool due = ++e.MoveFrames % moveEvery == 0 || (e.OnScreen && e.MoveAccum >= OnScreenMoveFloor);
+                if (!due) moveStep = 0f;
                 else { moveStep = e.MoveAccum; e.MoveAccum = 0f; }
             }
             if (moveStep > 0f && !Perf.SkipMove && e.HasTarget && e.Speed > 0f && !e.Dead)
@@ -311,32 +377,37 @@ public partial class World : Node3D, IWorldContext
 
             moveScope.Dispose();
             using (Perf.Measure(Perf.Section.EntFacing)) TickEntityFacing(e, step);
-            using (Perf.Measure(Perf.Section.EntCollider)) SyncEntityCollider(e, pos, selfPos);
 
             using (Perf.Measure(Perf.Section.EntLod)) UpdateEntityAnimLod(e, camPos, pos);
             using (Perf.Measure(Perf.Section.EntAudio)) AudioEntityStepTick(e, nowSec, selfPos, pos);
+            if (e.MoveSwingAt >= 0 || e.MoveStrikeAt >= 0) MoveAttackTick(e, nowSec);
 
             var plateScope = Perf.Measure(Perf.Section.EntPlates);
             if (e.NameTag != null)
             {
                 bool near = !Perf.SkipPlates && pos.DistanceSquaredTo(selfPos) <= nameDist2 && !HiddenFromMe(e);
                 SyncEntityPlates(e, near);
-                if (e.Plate != null) e.Plate.SetVisible(near);
-                else if (near != e.NameTag.Visible) e.NameTag.Visible = near;
+                if (near) FollowHeadJoint(e.Body, e.PlateRoot, e.Head);
+                if (e.Plate != null) e.Plate.SetVisible(near && !_platesHidden);
+                else if ((near && !_platesHidden) != e.NameTag.Visible) e.NameTag.Visible = near && !_platesHidden;
             }
 
             plateScope.Dispose();
+            if (Dying(e)) TickDying(e, nowSec);
+            else if (e.Dead && (e.PushStart >= 0 || e.DeathCryAt > 0)) TickCorpse(e, nowSec, delta);
             if (e.Anim != null && !e.AnimPaused)
             {
                 if (e.Dead) {  }
-                else if (nowSec < e.ActionUntil) {  }
+                else if (nowSec < e.ActionUntil && !(e.NpcGesturing && EntityMoving(e, pos))) {  }
                 else
                 {
+                    if (e.NpcGesturing) { e.NpcGesturing = false; e.ActionUntil = 0; }
                     if (e.ActionClip != null) { e.ActionClip = null; e.Clip = null; ResetEntityActionScale(e); }
                     bool moving = EntityMoving(e, pos);
                     PlayClip(e, moving
-                        ? e.Backwards ? "walk_reverse" : e.Speed >= RunThreshold ? "run" : "walk"
+                        ? e.Backwards ? "walk_reverse" : e.Speed >= RunThresholdOf(e) ? "run" : "walk"
                         : e.Sitting ? "sit" : "idle");
+                    TickNpcGesture(e, nowSec);
                 }
                 if (e.AnimThrottled)
                 {
@@ -412,8 +483,11 @@ public partial class World : Node3D, IWorldContext
             TickPadTriggers();
             AreaCastTick(delta, nowSec);
             LootTick(nowSec);
+            DeathDialogTick();
+            ControlStateTick();
             StallSignTick();
             GatherTick(nowSec);
+            HitFlashTick(nowSec);
             NpcTick(delta);
             _touchInteractionAccum += delta;
             if (_touchInteractionAccum >= TouchInteractionInterval)
@@ -427,6 +501,7 @@ public partial class World : Node3D, IWorldContext
             WarpGateTick();
             AnvilTick();
             PieceChangeTick(delta);
+            ItemSmashTick(delta);
             KoTextureAnim.Tick(delta);
         }
 
@@ -434,6 +509,7 @@ public partial class World : Node3D, IWorldContext
         {
             UpdateSelectionRing();
             TargetHpPollTick(nowSec);
+            TargetEffectsPollTick(nowSec);
             UpdateTargetHud();
             UpdateInfoPanel();
         }
@@ -473,6 +549,7 @@ public partial class World : Node3D, IWorldContext
     }
     public override void _ExitTree()
     {
+        Net.I.WorldActive = false;
         HudLayout.EditMode = false;
         GameCursor.Disable();
         Net.I.EntitySpawnEvent -= OnSpawn;
@@ -487,9 +564,11 @@ public partial class World : Node3D, IWorldContext
         Net.I.DeadEvent -= OnDead;
         Net.I.SelfHpEvent -= OnSelfHp;
         Net.I.SelfMpEvent -= OnSelfMp;
+        Net.I.SelfStaminaEvent -= OnSelfStamina;
         Net.I.RegeneEvent -= OnRegene;
         GetViewport().SizeChanged -= RefreshInventoryUI;
         Net.I.ItemMoveResultEvent -= OnItemMoveResult;
+        Net.I.InventoryArrangeFailedEvent -= OnInventoryArrangeFailed;
         Net.I.ItemRemoveResultEvent -= OnItemRemoveResult;
         Net.I.ItemStatsEvent -= OnItemStats;
         Net.I.InventorySlotEvent -= OnInventorySlotUpdate;

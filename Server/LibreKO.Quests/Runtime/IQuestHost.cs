@@ -21,6 +21,7 @@ public interface IQuestHost
     bool IsInParty { get; }
     bool IsPartyLeader { get; }
     bool IsKing { get; }
+    bool KrowazOpen { get; }
     bool ActionFailed { get; }
 
     int SkillPoints(int tree);
@@ -54,6 +55,9 @@ public interface IQuestHost
     void GiveClanPremium(int days);
     void GiveAchievement(int achievementId);
     void JoinTempleEvent();
+    void JoinSoccerTeam(bool blue);
+    void StartSoccerGame();
+    void ShowRankBoard();
     void SetPlayerLevel(int level);
     void SetDrakiRift(int stage, int subStage);
     void TakeItem(int itemId, int count);
@@ -74,6 +78,7 @@ public interface IQuestHost
     void ShowLocation(QuestLocation location, int questId);
     void TeleportToZone(int zoneId, int x, int z);
     void TeleportClanToZone(int zoneId, int x, int z);
+    void TeleportPartyToZone(int zoneId, int x, int z);
     void EnterInstance(int zoneId, int set, int x, int z);
     void EnterClanInstance(int zoneId, int set, int x, int z);
     void CastSkill(int skillId);
@@ -91,6 +96,8 @@ public interface IQuestHost
     void OpenJobChangePanel();
     void OpenClanRenamePanel();
     void OpenRebirthPanel();
+    void OpenRebirthResetPanel();
+    void OpenRepurchaseWindow();
     void OpenFamiliarPanel();
     void OpenFamiliarShop();
     void OpenGenderChangePanel();
@@ -98,6 +105,7 @@ public interface IQuestHost
     void OpenSpecialAuctionPanel();
     void OpenItemCombinePanel();
     void OpenCombineRecipeBook();
+    void OpenDisassembleWindow();
     void OpenNationTransferPanel();
 
     void Unsupported(string what);

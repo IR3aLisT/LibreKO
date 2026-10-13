@@ -70,5 +70,9 @@ public class HpMpRegenService(
 
         if ((hpChanged || mpChanged) && session.IsInParty)
             await combatNotificationService.SendPartyHpUpdateAsync(session);
+
+        if (KurianStamina.Regenerate(session, VitalsRegenCalculator.IntervalSeconds))
+            await session.Client.SendPacket(
+                VitalsPacketWriter.StaminaChange(session.KurianMaxSp, session.KurianSp), stoppingToken);
     }
 }

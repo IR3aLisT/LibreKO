@@ -66,8 +66,8 @@ public class PartyBbsPacketWriterTests
         packet.ReadString().Should().Be("Aurelia");
         packet.ReadInt().Should().Be(105);
         packet.ReadByte().Should().Be(62);
+        packet.ReadByte().Should().Be(PartyBbsPacketWriter.RangeByLevel);
         packet.ReadByte().Should().Be(PartyBbsPacketWriter.EntrySeeker);
-        packet.ReadByte().Should().Be(0);
         packet.ReadSByteString().Should().Be("lfg");
         packet.ReadShort().Should().Be(21);
         packet.ReadByte().Should().Be(3);

@@ -17,13 +17,21 @@ public static class TempleEventRules
     public const byte UnderTheCastleDefaultMinLevel = 70;
     public const byte UnderTheCastleDefaultMaxLevel = 83;
     public const int ForgottenTempleDurationSeconds = 2400;
-    public const byte ForgottenTempleLowMinLevel = 35;
+    public const byte ForgottenTempleLowMinLevel = 46;
     public const byte ForgottenTempleLowMaxLevel = 59;
     public const byte ForgottenTempleHighMinLevel = 60;
     public const byte ForgottenTempleHighMaxLevel = 83;
 
-    public const int ChaosPlayersPerRoom = 18;
+    public const int ChaosPlayersPerRoom = ChaosRules.PlayersPerRoom;
+    public const ushort BorderDefenseWarIndunEvent = 2;
+    public const int MapOfChaos = 910246000;
     public const int StartMinuteOfHour = 0;
+
+    public static ushort SignUpEventId(TempleEvent contest) =>
+        contest == TempleEvent.Chaos ? ChaosRules.IndunEvent : (ushort)contest;
+
+    public static short JoinReplyId(TempleEvent contest, byte zone) =>
+        contest == TempleEvent.Chaos ? (short)ChaosRules.IndunEvent : zone;
 
     public static byte ZoneFor(TempleEvent contest) => contest switch
     {

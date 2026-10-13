@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Infrastructure.Network;
@@ -59,14 +59,14 @@ public class UserSessionTests
         session.RecalculateStats(coefficient, gameData);
         var baselineHit = session.Stats.TotalHit;
 
-        session.ActiveBuffs[500049] = new ActiveBuff
+        session.SetBuff(500049, new ActiveBuff
         {
             MagicId = 500049,
             CasterId = session.CharacterId,
             BuffType = LibreKO.Common.Enums.BuffType.WeaponDamage,
             BonusAttack = 5,
             ExpireTicks = DateTime.UtcNow.AddMinutes(30).Ticks
-        };
+        });
 
         session.RecalculateStats(coefficient, gameData);
 
@@ -81,20 +81,20 @@ public class UserSessionTests
         var sourceClient = Substitute.For<LibreKO.Common.Infrastructure.Network.IClient>();
         sourceClient.Id.Returns(Guid.NewGuid());
         var source = new UserSession(sourceClient, 1, 1);
-        source.ActiveBuffs[100] = new ActiveBuff
+        source.SetBuff(100, new ActiveBuff
         {
             MagicId = 100,
             CasterId = 5,
             BuffType = 0,
             ExpireTicks = DateTime.UtcNow.AddMinutes(1).Ticks
-        };
-        source.ActiveBuffs[200] = new ActiveBuff
+        });
+        source.SetBuff(200, new ActiveBuff
         {
             MagicId = 200,
             CasterId = 5,
             BuffType = 0,
             ExpireTicks = DateTime.UtcNow.AddMinutes(-1).Ticks
-        };
+        });
 
         var serialized = source.SerializeSavedMagic();
 

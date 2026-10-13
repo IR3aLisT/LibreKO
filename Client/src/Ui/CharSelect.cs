@@ -11,6 +11,10 @@ public partial class CharSelect : Node3D
 
     private Node3D _characterAnchor = null!;
     private Node3D? _characterModel;
+    private readonly Dictionary<string, Node3D> _modelCache = new();
+    private const double CharListTimeoutSeconds = 20;
+    private int _charListAttempts;
+    private bool _charListArrived;
     private VBoxContainer _characterList = null!;
     private Label _status = null!;
     private Button _enterButton = null!;
@@ -36,8 +40,16 @@ public partial class CharSelect : Node3D
         LoginNet.I.ErrorEvent += OnLoginServerError;
 
         _status.Text = "Loading characters…";
-        Net.I.RequestCharList();
+        RequestCharListWithTimeout();
         Callable.From(() => GlyphWarmer.Warm(this)).CallDeferred();
+        GetTree().CreateTimer(MemoryCensusDelaySeconds).Timeout += LogMemoryCensus;
+    }
+
+    private const double MemoryCensusDelaySeconds = 3;
+
+    private void LogMemoryCensus()
+    {
+        if (IsInsideTree()) MemoryCensus.Log("character select");
     }
 
     public override void _Process(double delta) => TickStage(delta);
@@ -134,7 +146,7 @@ public partial class CharSelect : Node3D
 
         var line = new Label
         {
-            Text = $"Level {c.Level}  ·  {ClassLabel(c.Class)}",
+            Text = $"{CharacterLevelText.Of(c.Level, c.Rebirth)}  ·  {ClassLabel(c.Class)}",
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         line.AddThemeFontSizeOverride("font_size", 13);
@@ -146,10 +158,78 @@ public partial class CharSelect : Node3D
         return card;
     }
 
+    private Control BuildEmptySlotCard()
+    {
+        var card = new Button
+        {
+            CustomMinimumSize = new Vector2(0, 70),
+            FocusMode = Control.FocusModeEnum.None,
+            Modulate = EmptySlotTint,
+        };
+        card.Pressed += OpenCreate;
+
+        var text = new Label
+        {
+            Text = EmptySlotText,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        text.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        text.AddThemeFontSizeOverride("font_size", 14);
+        text.AddThemeColorOverride("font_color", UiTheme.TextLo);
+        card.AddChild(text);
+
+        ApplyCharacterButtonStyle(card, selected: false);
+        return card;
+    }
+
+    private const string EmptySlotText = "Empty slot  ·  Create a character";
+    private static readonly Color EmptySlotTint = new(1f, 1f, 1f, 0.6f);
+
     private static int NationOf(int race) => race >= 11 ? Nations.ElMorad : Nations.Karus;
+
+    private const int CharListMaxAttempts = 2;
+
+    private void RequestCharListWithTimeout()
+    {
+        _charListAttempts++;
+        Net.I.RequestCharList();
+        GetTree().CreateTimer(CharListTimeoutSeconds).Timeout += OnCharListTimeout;
+    }
+
+    private void OnCharListTimeout()
+    {
+        if (_charListArrived || !IsInsideTree() || _returningToServers) return;
+        if (_charListAttempts < CharListMaxAttempts)
+        {
+            _status.Text = "The character list is late, asking again…";
+            RequestCharListWithTimeout();
+            return;
+        }
+        _status.Text = "The character list did not arrive. Go back to the server list and try again.";
+    }
+
+    private void DetachCharacterModel()
+    {
+        if (_characterModel == null || !GodotObject.IsInstanceValid(_characterModel)) return;
+        if (_modelCache.ContainsValue(_characterModel)) _characterModel.GetParent()?.RemoveChild(_characterModel);
+        else _characterModel.QueueFree();
+        _characterModel = null;
+    }
+
+    private void ClearModelCache()
+    {
+        foreach (var model in _modelCache.Values)
+            if (GodotObject.IsInstanceValid(model) && model != _characterModel) model.QueueFree();
+        _modelCache.Clear();
+    }
 
     private void OnCharList(List<CharacterSummary> characters)
     {
+        _charListArrived = true;
+        DetachCharacterModel();
+        ClearModelCache();
         foreach (Node child in _characterList.GetChildren())
             child.QueueFree();
         _buttons.Clear();
@@ -171,6 +251,8 @@ public partial class CharSelect : Node3D
 
         foreach (var character in _characters)
             _characterList.AddChild(BuildCharacterCard(character));
+        for (int slot = _characters.Count; slot < MaxSlots; slot++)
+            _characterList.AddChild(BuildEmptySlotCard());
 
         _createButton.Disabled = _characters.Count >= MaxSlots;
         SelectCharacter(_characters[0]);
@@ -187,8 +269,16 @@ public partial class CharSelect : Node3D
         foreach (var (button, entry) in _buttons)
             ApplyCharacterButtonStyle(button, ReferenceEquals(entry, character));
 
-        if (_characterModel != null && GodotObject.IsInstanceValid(_characterModel))
-            _characterModel.QueueFree();
+        DetachCharacterModel();
+        if (_modelCache.TryGetValue(character.Name, out var cached) && GodotObject.IsInstanceValid(cached))
+        {
+            _characterModel = cached;
+            _characterAnchor.RotationDegrees = new Vector3(0, _stageStandYaw, 0);
+            _characterAnchor.Scale = Vector3.One;
+            _characterAnchor.AddChild(cached);
+            return;
+        }
+
         int hair = (int)character.Hair;
         _characterModel = CharacterPreview.Build(character.Race, character.Face, character.Gear,
             HairCode.StyleOf(hair), HairCode.TintOf(hair));
@@ -199,6 +289,7 @@ public partial class CharSelect : Node3D
             return;
         }
 
+        _modelCache[character.Name] = _characterModel;
         _characterModel.Position = Vector3.Zero;
         _characterModel.Rotation = Vector3.Zero;
         _characterAnchor.RotationDegrees = new Vector3(0, _stageStandYaw, 0);
@@ -408,6 +499,9 @@ public partial class CharSelect : Node3D
 
     public override void _ExitTree()
     {
+        if (_stageFxLayer != null && IsInstanceValid(_stageFxLayer)) _stageFxLayer.QueueFree();
+        _stageFxLayer = null;
+        ClearModelCache();
         Net.I.CreateCharResultEvent -= OnCreateResult;
         Net.I.CharListEvent -= OnCharList;
         Net.I.EnterWorldEvent -= OnEnterWorld;

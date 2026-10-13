@@ -21,6 +21,8 @@ public sealed class SessionPacketWriter
         return packet;
     }
 
+    public static Packet ServerFull() => new(GameOpcodes.GS_SERVER_FULL);
+
     public static Packet LoginDenied()
     {
         var packet = new Packet(GameOpcodes.GS_LOGIN);
@@ -66,13 +68,13 @@ public sealed class SessionPacketWriter
         return packet;
     }
 
-    public static Packet VersionCheck(short version)
+    public static Packet VersionCheck(short version, GameServerState state = GameServerState.Open)
     {
         var packet = new Packet(GameOpcodes.GS_VERSION_CHECK);
         packet.WriteByte((byte)GameServerMode.Normal);
         packet.WriteShort(version);
         packet.WriteByte(NoCryptionKey);
-        packet.WriteByte((byte)GameServerState.Open);
+        packet.WriteByte((byte)state);
         return packet;
     }
 }

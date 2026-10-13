@@ -31,11 +31,19 @@ public class KingSystemRuntimeService(
         return gameDataService.KingSystemTable.TryGetValue((byte)nation, out var kingData) ? kingData : null;
     }
 
-    public bool IsKing(UserSession session, KingSystemData? kingData)
-    {
-        return kingData != null
-            && string.Equals(kingData.KingName?.Trim(), session.Name, StringComparison.OrdinalIgnoreCase);
-    }
+    public bool IsKing(UserSession session, KingSystemData? kingData) => IsKingName(kingData, session.Name);
+
+    public const ushort KarusKingCape = 97;
+    public const ushort ElmoradKingCape = 98;
+
+    public static bool IsKingName(KingSystemData? kingData, string name) =>
+        kingData != null && string.Equals(kingData.KingName?.Trim(), name, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsKingOf(IGameDataService gameData, AccountNation nation, string name) =>
+        gameData.KingSystemTable.TryGetValue((byte)nation, out var kingData) && IsKingName(kingData, name);
+
+    public static ushort KingCapeOf(AccountNation nation) =>
+        nation == AccountNation.ElMorad ? ElmoradKingCape : KarusKingCape;
 
     public async Task PersistKingPropertyAsync<TProperty>(
         KingSystemData kingData,

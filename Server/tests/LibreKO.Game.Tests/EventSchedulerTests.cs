@@ -48,8 +48,11 @@ public class EventSchedulerTests
             _lottery,
             _juraidMountain,
             _bdw,
+            Substitute.For<IChaosDungeonService>(),
             _utc,
             _ft,
+            Substitute.For<IKrowazService>(),
+            Substitute.For<INereidMonumentService>(),
             _gameData,
             _logger);
     }
@@ -100,8 +103,7 @@ public class EventSchedulerTests
             minLevel: 60,
             maxLevel: 83);
 
-        _scheduler.TryJoinTempleEvent(lowPlayer, out var reason).Should().BeFalse();
-        reason.Should().Contain("too low");
+        _scheduler.TryJoinTempleEvent(lowPlayer).Should().Be(TempleJoinResult.LevelTooLow);
     }
 
     [Fact]
@@ -116,7 +118,6 @@ public class EventSchedulerTests
             minLevel: 60,
             maxLevel: 83);
 
-        _scheduler.TryJoinTempleEvent(highPlayer, out var reason).Should().BeFalse();
-        reason.Should().Contain("already registered");
+        _scheduler.TryJoinTempleEvent(highPlayer).Should().Be(TempleJoinResult.AlreadyJoined);
     }
 }

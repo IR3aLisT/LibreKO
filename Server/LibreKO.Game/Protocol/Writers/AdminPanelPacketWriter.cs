@@ -183,6 +183,22 @@ public sealed class AdminPanelPacketWriter
         return packet;
     }
 
+    public const byte CommandsSub = 0x17;
+
+    public static Packet Commands(bool open, IReadOnlyList<GmCommand> commands)
+    {
+        var packet = Sub(CommandsSub);
+        packet.WriteByte(open ? Granted : Denied);
+        packet.WriteShort((short)commands.Count);
+        foreach (var command in commands)
+        {
+            packet.WriteString(command.Group);
+            packet.WriteString(command.Syntax);
+            packet.WriteString(command.Description);
+        }
+        return packet;
+    }
+
     private static Packet Sub(byte sub)
     {
         var packet = new Packet(GameOpcodes.GS_ADMIN_PANEL);

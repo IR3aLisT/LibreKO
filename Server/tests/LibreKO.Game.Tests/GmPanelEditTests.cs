@@ -1,7 +1,10 @@
 ﻿using FluentAssertions;
+using LibreKO.Common.Domain.Entities;
+using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Common.Infrastructure.Persistence;
 using LibreKO.Game.Protocol;
 using LibreKO.Game.World;
 using Microsoft.Extensions.DependencyInjection;
@@ -107,6 +110,64 @@ public class GmPanelEditTests : GameTestBase
             session.Race.Should().Be((byte)CharacterRace.ElMoradMale);
         }
     }
+
+    [Fact]
+    public async Task ANationChangeMovesEveryCharacterOfTheAccount()
+    {
+        var provider = CreateProvider(
+            db =>
+            {
+                db.Accounts.Add(new Account { Login = "gm-look", Password = "pw", Nation = AccountNation.Karus });
+                db.SaveChanges();
+                int accountId = db.Accounts.Single(account => account.Login == "gm-look").Id;
+                db.Characters.Add(LookCharacter(accountId, 0, "GameMaster", (byte)CharacterRace.KarusArchTuarek, KarusWarrior));
+                db.Characters.Add(LookCharacter(accountId, 1, "Healer", (byte)CharacterRace.KarusPuriTuarek, KarusPriest));
+            },
+            gameData => gameData.GetCoefficient(Arg.Any<short>())
+                .Returns(call => CreateBasicCoefficient(call.Arg<short>())));
+        using (provider)
+        {
+            int accountId = await GetAccountIdAsync(provider, "gm-look");
+            int gmId = await GetCharacterIdAsync(provider, "GameMaster");
+            var client = Substitute.For<IClient>();
+            client.Id.Returns(Guid.NewGuid());
+            client.SendPacket(Arg.Any<Packet>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+            var session = provider.GetRequiredService<SessionManager>().CreateSession(client, gmId, accountId);
+            session.Name = "GameMaster";
+            session.IsGM = true;
+            session.Class = KarusWarrior;
+            session.Nation = AccountNation.Karus;
+            session.Race = (byte)CharacterRace.KarusArchTuarek;
+
+            await Send(provider, client, ReqSetLook, (byte)AccountNation.ElMorad, (byte)CharacterRace.ElMoradMale);
+
+            session.Class.Should().Be(NationTransferRules.NewClass(KarusWarrior));
+            using var scope = provider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var healer = db.Characters.Single(character => character.Name == "Healer");
+            healer.Class.Should().Be(NationTransferRules.NewClass(KarusPriest));
+            healer.Race.Should().Be((byte)CharacterRace.ElMoradFemale);
+            db.Characters.Single(character => character.Name == "GameMaster").Race.Should().Be((byte)CharacterRace.ElMoradMale);
+            db.Accounts.Single(account => account.Id == accountId).Nation.Should().Be(AccountNation.ElMorad);
+        }
+    }
+
+    private const short KarusPriest = 104;
+
+    private static Character LookCharacter(int accountId, byte slot, string name, byte race, short classId) => new()
+    {
+        AccountId = accountId,
+        Slot = slot,
+        Name = name,
+        Race = race,
+        Class = classId,
+        Level = StartLevel,
+        Hp = 100,
+        Mp = 100,
+        MapId = 21,
+        Items = new byte[InventoryConstants.InventoryTotal * 8],
+        SkillPointData = new byte[9],
+    };
 
     [Theory]
     [InlineData((byte)CharacterRace.ElMoradMale)]

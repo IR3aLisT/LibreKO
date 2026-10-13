@@ -52,7 +52,12 @@ public class ItemRemoveService(
 
         var removedItemId = item.ItemId;
         logger.LogDebug("{Name} removed item {ItemId} from slot {Slot}", session.Name, removedItemId, absolutePosition);
-        item.Clear();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        session.WithLock(s =>
+        {
+            RepurchaseRules.Record(s.Repurchases, item, item.Count, now);
+            item.Clear();
+        });
 
         if (affectsEquipment)
             await itemEquipmentEffectService.ApplyRemovalEffectsAsync(session, removedItemId);

@@ -20,8 +20,20 @@ public class ChatTabsTests
     [InlineData(13, false, ChatCategory.Commander)]
     [InlineData(1, true, ChatCategory.Notice)]
     [InlineData(8, false, ChatCategory.Notice)]
+    [InlineData(33, false, ChatCategory.ChatRoom)]
+    [InlineData(34, false, ChatCategory.NoahKnights)]
     public void EveryChatTypeHasOneCategory(byte type, bool serverNotice, ChatCategory expected) =>
         Assert.Equal(expected, ChatCategories.Of(type, serverNotice));
+
+    [Theory]
+    [InlineData("noah", true, true)]
+    [InlineData("noah", false, false)]
+    [InlineData("clan", true, false)]
+    [InlineData("alliance", true, false)]
+    [InlineData("clan", false, true)]
+    [InlineData("party", true, true)]
+    public void OnlyNoahKnightsSeeTheirTabAndTheyLoseClanAndAlliance(string id, bool noahKnight, bool shown) =>
+        Assert.Equal(shown, ChatTabs.Applies(ChatTabs.All[ChatTabs.IndexOf(id)], noahKnight));
 
     [Fact]
     public void DefaultTabsShowTheirOwnLinesAndNotices()

@@ -26,9 +26,12 @@ public class QuestNpcInteractionService(
     IKingSystemRuntimeService kingSystemRuntimeService,
     IDrakiTowerService drakiTowerService,
     IDrakiStageProvider drakiStageProvider,
+    ITouchTrapService touchTrapService,
+    IChaosDungeonService chaosDungeonService,
     ILogger<QuestNpcInteractionService> logger) : IQuestNpcInteractionService
 {
     private const byte WarehouseRequest = 0x10;
+    private const byte NpcEventTouch = 2;
 
     public async Task HandleSelectMsgAsync(IClient client, Packet packet)
     {
@@ -196,7 +199,7 @@ public class QuestNpcInteractionService(
         if (session == null || packet.RemainingBytes < 5 || IsBusy(session))
             return;
 
-        packet.ReadByte();
+        var kind = packet.ReadByte();
         var npcUniqueId = packet.ReadInt();
 
         if (packet.RemainingBytes >= 4)
@@ -205,6 +208,15 @@ public class QuestNpcInteractionService(
         var npc = sessionManager.Regions.GetNpc(npcUniqueId);
         if (npc == null || !npc.IsAlive || npc.ZoneId != session.ZoneId || !IsInNpcRange(session, npc))
             return;
+
+        if (await chaosDungeonService.TryTouchCubeAsync(session, npc))
+            return;
+
+        if (kind == NpcEventTouch)
+        {
+            await touchTrapService.TryTouchAsync(session, npc);
+            return;
+        }
 
         session.Quest.EventNpcId = npc.NpcId;
         session.Quest.EventNpcUniqueId = npcUniqueId;

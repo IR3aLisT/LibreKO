@@ -5,7 +5,7 @@ using LibreKO.Common.Infrastructure.Network;
 namespace LibreKO.Game.Protocol.Writers;
 
 public readonly record struct PetItemInfo(
-    int Index, string Name, byte Attack, byte Level, ushort ExpPercent, short Satisfaction)
+    int Index, string Name, byte Attack, byte Level, ushort ExpPercent, short Satisfaction, byte Tail = ItemRecordWriter.PetBlockTail)
 {
     public const int ExpPercentScale = 10_000;
 
@@ -26,7 +26,10 @@ public static class ItemRecordWriter
     public const int NoExpiry = 0;
     public const byte PetBlockTail = 0;
 
-    public static void Write(Packet packet, int itemId, short durability, short count, byte flag, PetItemInfo? pet)
+    public static int ExpiryOnWire(long expiresAt) => (int)Math.Clamp(expiresAt, NoExpiry, int.MaxValue);
+
+    public static void Write(
+        Packet packet, int itemId, short durability, short count, byte flag, PetItemInfo? pet, int expiresAt = NoExpiry)
     {
         packet.WriteInt(itemId);
         packet.WriteShort(durability);
@@ -43,11 +46,11 @@ public static class ItemRecordWriter
             packet.WriteInt(NoUniqueId);
         }
 
-        packet.WriteInt(NoExpiry);
+        packet.WriteInt(expiresAt);
     }
 
     public static void Write(Packet packet, ItemSlot slot) =>
-        Write(packet, slot.ItemId, slot.Durability, (short)slot.Count, slot.Flag, null);
+        Write(packet, slot.ItemId, slot.Durability, (short)slot.Count, slot.Flag, null, ExpiryOnWire(slot.ExpiresAt));
 
     private static void WritePetBlock(Packet packet, PetItemInfo info)
     {
@@ -56,6 +59,6 @@ public static class ItemRecordWriter
         packet.WriteByte(info.Level);
         packet.WriteUShort(info.ExpPercent);
         packet.WriteShort(info.Satisfaction);
-        packet.WriteByte(PetBlockTail);
+        packet.WriteByte(info.Tail);
     }
 }

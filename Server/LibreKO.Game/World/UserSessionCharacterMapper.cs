@@ -39,6 +39,7 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
         session.Language = account.Language;
         session.LoadVipWarehouse(account.VipWarehouseItems);
         session.VipVaultExpiry = account.VipVaultExpiry;
+        session.VipVaultExpiryAnnounced = account.VipVaultExpiry <= DateTime.UtcNow;
         session.VipPassword = account.VipPassword ?? string.Empty;
         session.SealCode = account.SealCode ?? string.Empty;
         // Password challenge fires once per login: when a PIN exists, the first
@@ -82,6 +83,8 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
 
         session.GenieTime.Load(character.GenieRemainingSeconds);
         session.GenieOptions = character.GenieOptions;
+        session.Repurchases.Clear();
+        session.Repurchases.AddRange(RepurchaseRules.Decode(character.RepurchaseItems));
         session.DrakiStage = character.DrakiStage;
         session.DrakiSubStage = character.DrakiSubStage;
         session.DrakiEntranceLimit = character.DrakiEntranceLimit;
@@ -91,6 +94,8 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
         session.AttendanceClaimedDays = character.AttendanceClaimedDays;
         session.AttendanceClaimedBonus = character.AttendanceClaimedBonus;
         session.AttendanceCheckedOn = character.AttendanceCheckedOn;
+        session.SealedExperience = character.SealedExperience;
+        session.ExpSealOn = character.ExpSealOn;
 
         session.RebirthLevel = character.RebirthLevel;
         session.RebStr = character.RebStr;
@@ -159,6 +164,7 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
 
         character.GenieRemainingSeconds = session.GenieTime.RemainingSeconds;
         character.GenieOptions = session.GenieOptions;
+        character.RepurchaseItems = RepurchaseRules.Encode(session.Repurchases);
         character.DrakiStage = session.DrakiStage;
         character.DrakiSubStage = session.DrakiSubStage;
         character.DrakiEntranceLimit = session.DrakiEntranceLimit;
@@ -167,6 +173,8 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
         character.AttendanceClaimedDays = session.AttendanceClaimedDays;
         character.AttendanceClaimedBonus = session.AttendanceClaimedBonus;
         character.AttendanceCheckedOn = session.AttendanceCheckedOn;
+        character.SealedExperience = session.SealedExperience;
+        character.ExpSealOn = session.ExpSealOn;
 
         character.RebirthLevel = session.RebirthLevel;
         character.RebStr = session.RebStr;

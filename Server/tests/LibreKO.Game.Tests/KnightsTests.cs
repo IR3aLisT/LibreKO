@@ -42,7 +42,7 @@ public class KnightsTests : GameTestBase
                         Class = 101,
                         MapId = 1,
                         KnightsId = clanId,
-                        Fame = 3
+                        Fame = ClanRules.FameOfficer
                     },
                     new Character
                     {
@@ -81,7 +81,7 @@ public class KnightsTests : GameTestBase
         leader.Name = "Leader";
         leader.Nation = AccountNation.Karus;
         leader.KnightsId = clanId;
-        leader.KnightsFame = 3;
+        leader.KnightsFame = ClanRules.FameOfficer;
         leader.KnightsName = "Heroes";
 
         var recruit = sessionManager.CreateSession(recruitClient, recruitId, accountId: 2);
@@ -396,8 +396,13 @@ public class KnightsTests : GameTestBase
         var coordinator = provider.GetRequiredService<IKnightsPacketCoordinator>();
         await coordinator.HandleProcessAsync(client, packet);
 
-        sentPackets.Should().ContainSingle();
-        var sentPacket = sentPackets[0];
+        var replies = sentPackets.Where(p =>
+        {
+            p.ResetOffset();
+            return p.ReadByte() != (byte)KnightsSubOpcode.ClanBonus;
+        }).ToList();
+        replies.Should().ContainSingle();
+        var sentPacket = replies[0];
         sentPacket.ResetOffset();
         sentPacket.ReadByte().Should().Be(0x01);
         sentPacket.ReadByte().Should().Be(1);
@@ -575,7 +580,7 @@ public class KnightsTests : GameTestBase
                     Hp = 120,
                     Mp = 80,
                     KnightsId = clanId,
-                    Fame = 3
+                    Fame = ClanRules.FameOfficer
                 });
             });
 
@@ -602,7 +607,7 @@ public class KnightsTests : GameTestBase
         var session = await initializer.InitializeAsync(client);
 
         session.Should().NotBeNull();
-        session!.KnightsFame.Should().Be(3);
+        session!.KnightsFame.Should().Be(ClanRules.FameOfficer);
         session.KnightsName.Should().Be("Sentinels");
     }
 

@@ -7,5 +7,7 @@ public struct RankEntry
     public int KnightsId;
     public string ClanName;
     public int Loyalty;
+    public int Bonus;
+    public int Symbol;
     public int Place;
 }

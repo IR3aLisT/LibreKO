@@ -75,7 +75,6 @@ public partial class World
     private bool CharTabOpen()   => MainWindowOpen("Inventory");
     private bool SkillsTabOpen() => MainWindowOpen("Skills");
     private bool QuestsTabOpen() => MainWindowOpen("Quests");
-    private bool PartyTabOpen()  => MainWindowOpen("Party");
 
     private void MainPanelInit()
     {
@@ -94,9 +93,6 @@ public partial class World
         AddMainWindow(
             "Quests", "quests", "QUESTS", new Vector2(170, 86),
             _questsContent, 420, UiIcons.Get("system/scroll"));
-        AddMainWindow(
-            "Party", "party", "Party", new Vector2(1060, 82),
-            _partyContent, 252, UiIcons.Get("system/users-three"));
 
         RestoreMainWindows();
     }
@@ -194,11 +190,7 @@ public partial class World
                 RefreshSkillsEnabled();
                 break;
             case "Quests":
-                Net.I.SendQuestLogRequest();
                 RefreshQuestLog();
-                break;
-            case "Party":
-                RefreshPartyUI();
                 break;
         }
     }

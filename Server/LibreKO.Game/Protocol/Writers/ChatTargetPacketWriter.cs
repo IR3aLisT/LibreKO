@@ -39,6 +39,14 @@ public sealed class ChatTargetPacketWriter
     public static Packet WhisperTargetBlocked(string targetName) => Whisper(ChatTargetResult.TargetBlocked, targetName).Build();
     public static Packet WhisperCrossNationZone(string targetName) => Whisper(ChatTargetResult.CrossNationZone, targetName).Build();
     public static Packet WhisperSenderBlocked(string targetName) => Whisper(ChatTargetResult.SenderBlocked, targetName).Build();
+    public static Packet ClanAdmissionFailed()
+    {
+        var packet = new Packet(GameOpcodes.GS_CHAT_TARGET);
+        packet.WriteByte(TypeClanAdmission);
+        packet.WriteShort((short)ChatTargetResult.TargetBlocked);
+        return packet;
+    }
+
     public static Packet ClanAdmissionRequestSent(string targetName) => ClanAdmission(targetName, AdmissionRequestSent).Build();
     public static Packet ClanAdmissionRequestReceived(string targetName) => ClanAdmission(targetName, AdmissionRequestReceived).Build();
     private static ChatTargetPacketWriter ClanAdmission(string targetName, byte direction) => new()

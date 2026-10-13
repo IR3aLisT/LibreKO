@@ -44,6 +44,17 @@ public sealed class ZoneChangePacketWriter
         return packet;
     }
 
+    public const byte UserStatusSub = 2;
+
+    public static Packet UserStatus(byte statusType, bool applied)
+    {
+        var packet = new Packet(GameOpcodes.GS_ZONEABILITY);
+        packet.WriteByte(UserStatusSub);
+        packet.WriteByte(statusType);
+        packet.WriteByte(applied ? (byte)1 : (byte)0);
+        return packet;
+    }
+
     private static Packet Sub(ZoneChangeSubOpcode sub)
     {
         var packet = new Packet(GameOpcodes.GS_ZONE_CHANGE);

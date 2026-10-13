@@ -1,4 +1,5 @@
 ﻿using Godot;
+using LibreKO.Domain;
 using LibreKO.Network;
 
 namespace LibreKO;
@@ -20,6 +21,7 @@ public partial class World
     private ProgressBar _joinModalBar = null!;
     private StyleBoxFlat _joinModalBarFill = null!;
     private Label _joinModalStatus = null!;
+    private Label _joinModalCount = null!;
     private Button _joinModalBtn = null!;
     private Button _joinModalCloseBtn = null!;
     private PanelContainer? _inZoneLeaveBanner;
@@ -34,6 +36,10 @@ public partial class World
     private bool _bifrostPromptShown;
     private bool _isEventRegistered;
     private string _eventTitle = "Juraid Mountain";
+    private TempleEventType _eventType;
+
+    private const string JuraidSignUpText = "Sign up with the [Reserve Knight Captain] in your town.";
+    private static readonly Color MapOfChaosLogColour = new("ff7f50");
 
     private const int BifrostUrgentSecs = 30;
     private static readonly Color BifrostCalmCol   = new("c8a45a");
@@ -48,6 +54,7 @@ public partial class World
         Net.I.BifrostTimeEvent    += OnBifrostTime;
         Net.I.BifrostJoinEvent    += OnBifrostJoinResult;
         Net.I.BifrostDisbandEvent += OnBifrostDisband;
+        Net.I.TempleSignUpsEvent  += OnTempleSignUps;
 
         if (_worldReady) Net.I.SendBifrostTimeRequest();
     }
@@ -57,6 +64,7 @@ public partial class World
         Net.I.BifrostTimeEvent    -= OnBifrostTime;
         Net.I.BifrostJoinEvent    -= OnBifrostJoinResult;
         Net.I.BifrostDisbandEvent -= OnBifrostDisband;
+        Net.I.TempleSignUpsEvent  -= OnTempleSignUps;
 
         if (_bifrostLayer != null && IsInstanceValid(_bifrostLayer))
             _bifrostLayer.QueueFree();
@@ -90,11 +98,6 @@ public partial class World
             TooltipText = "Click to open registration window",
         };
         _bifrostBanner.AddThemeStyleboxOverride("panel", UiTheme.Panel(5, true));
-        _bifrostBanner.GuiInput += ev =>
-        {
-            if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
-                BifrostShowJoinPrompt();
-        };
         _bifrostLayer.AddChild(_bifrostBanner);
         const string bifrostBannerLayoutId = "hud_bifrost";
         var bifrostLayout = HudLayout.Attach(
@@ -102,6 +105,7 @@ public partial class World
             bifrostBannerLayoutId,
             _bifrostBanner,
             () => EventPlateSpot(_bifrostBanner));
+        bifrostLayout.Clicked += BifrostShowJoinPrompt;
         AddEventPlate(_bifrostBanner, bifrostLayout, bifrostBannerLayoutId);
 
         var m = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -225,6 +229,10 @@ public partial class World
         _joinModalStatus.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         vb.AddChild(_joinModalStatus);
 
+        _joinModalCount = UiTheme.Text("", 10, UiTheme.TextDim, HorizontalAlignment.Center);
+        _joinModalCount.Visible = false;
+        vb.AddChild(_joinModalCount);
+
         var btnRow = new HBoxContainer();
         btnRow.AddThemeConstantOverride("separation", 6);
         vb.AddChild(btnRow);
@@ -261,6 +269,9 @@ public partial class World
             return;
         }
 
+        if (eventType != _eventType && _joinModalCount != null && IsInstanceValid(_joinModalCount))
+            _joinModalCount.Visible = false;
+        _eventType = eventType;
         _eventTitle = eventType switch
         {
             TempleEventType.Chaos => "Chaos Dungeon",
@@ -293,10 +304,23 @@ public partial class World
         }
     }
 
+    private static readonly Color ChaosPickaxeColour = new("ff7f50");
+
+    private bool HoldsPickaxe() =>
+        ChaosBattle.IsPickaxe(ItemData.Get(Inv[InventoryConstants.RightHand].ItemId)?.Kind ?? 0)
+        || ChaosBattle.IsPickaxe(ItemData.Get(Inv[InventoryConstants.LeftHand].ItemId)?.Kind ?? 0);
+
     private void OnJoinModalToggle()
     {
         if (!_isEventRegistered)
         {
+            if (_eventType == TempleEventType.JuraidMountain) return;
+            if (_eventType == TempleEventType.Chaos && HoldsPickaxe())
+            {
+                ShowSkillMsgOut(ItemData.Text(ChaosBattle.PickaxeJoinText, "Disarm your Pickaxe and resubmit your request to participate."));
+                CombatNotice(ItemData.Text(ChaosBattle.PickaxeArmedText, ""), ChaosPickaxeColour);
+                return;
+            }
             Net.I.SendBifrostJoin();
             _isEventRegistered = true;
             UpdateJoinModalState();
@@ -314,7 +338,14 @@ public partial class World
         if (_joinModalStatus == null || !IsInstanceValid(_joinModalStatus)) return;
         if (_joinModalBtn == null || !IsInstanceValid(_joinModalBtn)) return;
 
-        if (_isEventRegistered)
+        bool npcSignUp = _eventType == TempleEventType.JuraidMountain;
+        _joinModalBtn.Visible = !npcSignUp || _isEventRegistered;
+        if (npcSignUp && !_isEventRegistered)
+        {
+            _joinModalStatus.Text = JuraidSignUpText;
+            _joinModalStatus.AddThemeColorOverride("font_color", UiTheme.TextHi);
+        }
+        else if (_isEventRegistered)
         {
             _joinModalStatus.Text = "✓ Registered! You will be teleported automatically.";
             _joinModalStatus.AddThemeColorOverride("font_color", UiTheme.Good);
@@ -330,18 +361,32 @@ public partial class World
         }
     }
 
-    private void OnBifrostJoinResult(bool joined, int zone)
+    private void OnBifrostJoinResult(byte result, int zone)
     {
-        _isEventRegistered = joined;
+        _isEventRegistered = TempleJoin.SignedUp(result);
         UpdateJoinModalState();
-        if (joined)
+        if (result == TempleJoin.Joined)
         {
             CombatNotice($"[{_eventTitle}] You have registered! Prepare for battle.");
+            return;
         }
-        else
+        if (result == TempleJoin.NeedsMapOfChaos)
         {
-            CombatNotice($"[{_eventTitle}] Unable to register for the event at this time.");
+            ShowSkillMsgOut(ItemData.Text(TempleJoin.MapOfChaosCentreText, ""));
+            CombatLogAdd(ItemData.Text(TempleJoin.TextId(result), ""), CombatLogKind.Status, MapOfChaosLogColour);
+            return;
         }
+        string text = result == TempleJoin.LevelTooHigh
+            ? TempleJoin.LevelTooHighText
+            : ItemData.Text(TempleJoin.TextId(result), "");
+        if (text.Length > 0) CombatNotice(text);
+    }
+
+    private void OnTempleSignUps(int eventId, int karus, int elMorad)
+    {
+        if (_joinModalCount == null || !IsInstanceValid(_joinModalCount)) return;
+        _joinModalCount.Text = TempleJoin.CountLine(eventId == (int)TempleEventType.Chaos, karus, elMorad);
+        _joinModalCount.Visible = true;
     }
 
     private void OnBifrostDisband()

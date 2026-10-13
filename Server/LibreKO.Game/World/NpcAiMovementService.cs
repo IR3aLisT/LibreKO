@@ -18,6 +18,7 @@ public interface INpcAiMovementService
 public class NpcAiMovementService(
     SessionManager sessionManager,
     INpcAiTargetingService npcAiTargetingService,
+    INpcLifecycleService npcLifecycleService,
     ILogger<NpcAiMovementService> logger) : INpcAiMovementService
 {
     private const float SpawnReturnDistSq = 1.0f;
@@ -118,6 +119,11 @@ public class NpcAiMovementService(
             if (arrived && NpcInstance.FollowsAPath(npc.MoveType))
             {
                 npc.CurrentWaypoint++;
+                if (npc.CurrentWaypoint >= npc.Waypoints.Length && npc.RollsToPathEnd)
+                {
+                    await npcLifecycleService.DespawnAsync(npc);
+                    return;
+                }
                 if (npc.CurrentWaypoint >= npc.Waypoints.Length)
                 {
                     if (npc.MoveType == NpcMoveType.PatrolOnce)

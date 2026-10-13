@@ -21,6 +21,7 @@ public partial class FxParticles : Node3D, IFxPooledPart, IFxPart
     private double _emitClock;
     private double[] _expiry = System.Array.Empty<double>();
     private int _expiryHead, _alive;
+    private float _lodCarry;
     private bool _burstDone;
     private static readonly System.Random Rng = new();
 
@@ -204,9 +205,6 @@ public partial class FxParticles : Node3D, IFxPooledPart, IFxPart
         want = System.Math.Min(want, template.Capacity - _alive);
         if (want <= 0) return;
 
-        _shared ??= FxEmitterPool.Acquire(this, PoolKey ?? default, template);
-        if (_shared == null) return;
-
         Transform3D world;
         if (_root != null)
         {
@@ -214,6 +212,12 @@ public partial class FxParticles : Node3D, IFxPooledPart, IFxPart
             world = _root.FrameXf * new Transform3D(Basis.Identity, _lastPosition);
         }
         else world = GlobalTransform;
+
+        want = FxLod.Thin(want, FxLod.Ratio(world.Origin), ref _lodCarry, template.SingleBurst);
+        if (want <= 0) return;
+
+        _shared ??= FxEmitterPool.Acquire(this, PoolKey ?? default, template);
+        if (_shared == null) return;
 
         Vector3 axis = EmitAxis(template.EmitAxis);
         bool aimed = axis.LengthSquared() > NoTravel;

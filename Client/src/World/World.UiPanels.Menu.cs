@@ -16,6 +16,7 @@ public partial class World
         var center = new CenterContainer();
         center.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         _escLayer.AddChild(center);
+        _escCore = center;
         var panel = new PanelContainer { CustomMinimumSize = new Vector2(300, 0) };
         panel.AddThemeStyleboxOverride("panel", UiTheme.WindowPanel(4));
         center.AddChild(panel);
@@ -42,14 +43,10 @@ public partial class World
         vb.AddThemeConstantOverride("separation", 6);
         margin.AddChild(vb);
 
-        AddEscButton(vb, "Resume", () => ToggleEsc(false), "Return to the world");
-        AddEscButton(vb, "Change Character", () =>
-        {
-            Net.I.ReturnToCharSelect();
-            GetTree().ChangeSceneToFile("res://scenes/CharSelect.tscn");
-        }, "Return to character selection");
-        AddEscButton(vb, "Settings", () => { ToggleEsc(false); SettingsPanel.Open(this); }, "Open graphics and game settings");
-        AddEscButton(vb, "Exit", OnExitGame, "Close the game");
+        _escTimed = BuildEscTimedItems();
+        vb.AddChild(_escTimed);
+        foreach (var row in ExitMenuRows())
+            AddEscButton(vb, row.Caption, row.Run, row.Tooltip);
 
         _hudEditLayer = new CanvasLayer { Layer = 109, Visible = false };
         AddChild(_hudEditLayer);
@@ -103,6 +100,8 @@ public partial class World
     {
         _escShown = show ?? !_escShown;
         _escLayer.Visible = _escShown;
+        if (_escShown) RefreshExitMenu();
+        else CloseExitMenuSkin();
     }
 
     private void SetHudEditMode(bool enabled)
@@ -126,8 +125,6 @@ public partial class World
         GD.Print($"[load] {progress * 100.0:0}% {status} (+{Now() - _loadStartedAt:0.0}s)" +
                  (string.IsNullOrWhiteSpace(detail) ? "" : $" — {detail}"));
         _loadingLayer?.Set(status, progress, detail);
-        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-        if (!Alive) return false;
         await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
         return Alive;
     }

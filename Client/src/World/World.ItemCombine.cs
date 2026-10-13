@@ -114,7 +114,7 @@ public partial class World
 
     private ItemSlotView CombineSocket(int index)
     {
-        var socket = new ItemSlotView(ItemCombineSocketSize) { Index = index };
+        var socket = new ItemSlotView(ItemCombineSocketSize) { Index = index, Veiled = true };
         socket.RightClicked += _ => ClearCombineSocket(index);
         socket.DoubleClicked += _ => ClearCombineSocket(index);
         socket.Hovered += s => { if (!s.Item.IsEmpty) ShowItemTooltip(-1, s.Item); };
@@ -146,7 +146,7 @@ public partial class World
         _itemCombineFooter.ResetStatus();
         _itemCombinePanel.Visible = true;
         _itemCombineShown = true;
-        _itemCombineCompanion ??= new BagCompanion(CombineTakeFromBag, CombineBagFit, _ => "", CloseItemCombine, CombineIntoBag);
+        _itemCombineCompanion ??= new BagCompanion(CombineTakeFromBag, CombineBagFit, _ => "", CloseItemCombine, (from, to, _) => CombineIntoBag(from, to));
         AttachBagCompanion(_itemCombineCompanion);
     }
 

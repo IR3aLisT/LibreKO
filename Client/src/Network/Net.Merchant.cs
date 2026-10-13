@@ -53,6 +53,7 @@ public partial class Net
     private const byte MerchantSubStallList = 0x31;
 
     private const byte MerchantInOutStallsInView = 1;
+    private const byte MerchantInOutShowcase = 2;
 
     public event Action<int>? MerchantOpenResultEvent;
     public event Action<bool, int, int, short, int, int, int>? MerchantItemAddEvent;
@@ -74,6 +75,7 @@ public partial class Net
 
     public event Action<StallOwner, int[]>? StallListEvent;
     public event Action<List<StallOwner>>? StallsInViewEvent;
+    public event Action<StallShowcaseReply>? StallShowcaseChangedEvent;
 
     private readonly Dictionary<int, StallOwner> _knownStalls = new();
 
@@ -294,7 +296,13 @@ public partial class Net
     private void HandleMerchantInOut(Packet p)
     {
         if (p.RemainingBytes < 3) return;
-        if (p.ReadByte() != MerchantInOutStallsInView) return;
+        byte sub = p.ReadByte();
+        if (sub == MerchantInOutShowcase)
+        {
+            if (StallShowcaseReply.Read(p) is { } showcase) StallShowcaseChangedEvent?.Invoke(showcase);
+            return;
+        }
+        if (sub != MerchantInOutStallsInView) return;
 
         int count = p.ReadShort();
         var owners = new List<StallOwner>(count > 0 ? count : 0);

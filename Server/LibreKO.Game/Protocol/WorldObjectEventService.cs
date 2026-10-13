@@ -18,12 +18,14 @@ public class WorldObjectEventService(
     SessionManager sessionManager,
     IWorldMovementService worldMovementService,
     IGameDataService gameDataService,
+    IKrowazTrapService krowazTrapService,
     ILogger<WorldObjectEventService> logger) : IWorldObjectEventService
 {
     private const byte ObjectEventFailed = 0;
     private const byte ObjectEventSucceeded = 1;
 
     private const float MaxObjectRangeSq = 100.0f;
+    private const float MaxKeyGateRangeSq = 1600.0f;
 
     private const byte ObjectBind = 0;
     private const byte ObjectGate = 1;
@@ -33,6 +35,7 @@ public class WorldObjectEventService(
     private const byte ObjectWarpGate = 5;
     private const byte ObjectRemoveBind = 7;
     private const byte ObjectAnvil = 8;
+    private const byte ObjectKeyGate = KrowazTrapService.KeyGateObject;
 
     public async Task HandleObjectEventAsync(IClient client, Packet packet)
     {
@@ -55,7 +58,7 @@ public class WorldObjectEventService(
         {
             var dx = session.X - objectEvent.PosX;
             var dz = session.Z - objectEvent.PosZ;
-            if (dx * dx + dz * dz > MaxObjectRangeSq)
+            if (dx * dx + dz * dz > (objectEvent.Type == ObjectKeyGate ? MaxKeyGateRangeSq : MaxObjectRangeSq))
             {
                 logger.LogDebug(
                     "Object event {Index} type {Type} out of range for {Name}: player=({PlayerX},{PlayerZ}) object=({ObjectX},{ObjectZ})",
@@ -115,6 +118,10 @@ public class WorldObjectEventService(
                     case ObjectAnvil:
                         await SendAnvilRequestAsync(session, objectEvent.Index);
                         return;
+
+                    case ObjectKeyGate:
+                        success = await krowazTrapService.TryOpenKeyGateAsync(session, objectEvent);
+                        break;
                 }
             }
         }

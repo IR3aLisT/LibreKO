@@ -367,13 +367,13 @@ public class SkillReagentAndBuffTests(ITestOutputHelper output) : GameTestBase
 
         var sessionManager = provider.GetRequiredService<SessionManager>();
         var caster = CreateCaster(provider, sessionManager, magic[Menissiah], items);
-        caster.ActiveBuffs[Menissiah] = new ActiveBuff
+        caster.SetBuff(Menissiah, new ActiveBuff
         {
             MagicId = Menissiah,
             CasterId = caster.CharacterId,
             Duration = 3600,
             ExpireTicks = DateTime.UtcNow.AddSeconds(3000).Ticks,
-        };
+        });
         caster.RebuildSpecialStates(provider.GetRequiredService<IGameDataService>());
 
         var sent = new List<Packet>();

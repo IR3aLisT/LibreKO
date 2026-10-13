@@ -42,6 +42,8 @@ public static class HudPlacement
     public static Slot MailIcon => SideIcon(3);
     public static Slot PowerUpStoreIcon => SideIcon(4);
     public static Slot LotteryIcon => SideIcon(5);
+    public static Slot DailyRankIcon => SideIcon(6);
+    public static Slot TimedItemsIcon => SideIcon(7);
 
     public static Slot QuestTracker => Platform.TouchUi
         ? new(HudAnchor.Spot.TopRight,
@@ -63,6 +65,10 @@ public static class HudPlacement
     public static float TrackerFontScale => Platform.TouchUi ? 1.45f : 1f;
 
     public static float LauncherButtonSize => Platform.TouchUi ? 92f : 44f;
+
+    private const float DesktopLauncherScale = 0.8f;
+
+    public static float HudLauncherButtonSize => Platform.TouchUi ? LauncherButtonSize : LauncherButtonSize * DesktopLauncherScale;
 
     public const float LauncherGlyphInset = 0.17f;
     private const float SideIconGlyphGap = 10f;

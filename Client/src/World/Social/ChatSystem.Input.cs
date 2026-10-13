@@ -18,6 +18,8 @@ internal sealed partial class ChatSystem
 
     private Label _counter = null!;
     private StyleBox? _inputRoomy;
+    private StyleBox? _inputActive;
+    private TextureButton _emoticonButton = null!;
     private StyleBox? _inputBare;
     private readonly ChatInputHistory _history = new();
     private readonly ChatLinkDraft _linkDraft = new();
@@ -57,9 +59,14 @@ internal sealed partial class ChatSystem
         {
             _inputBare = null;
             _inputRoomy = null;
+            _inputActive = null;
             ApplyInputStyle();
         };
         _inputRow.AddChild(_input);
+
+        _emoticonButton = EmoticonPicker.InputButton(EmoticonButtonSize, EmoticonInset);
+        _emoticonButton.Pressed += OpenEmoticons;
+        _input.AddChild(_emoticonButton);
 
         _counter = UiTheme.Text("", CounterFontSize, CounterColour);
         _counter.Visible = false;
@@ -67,16 +74,39 @@ internal sealed partial class ChatSystem
         _counter.SetAnchorsPreset(Control.LayoutPreset.CenterRight);
         _counter.GrowHorizontal = Control.GrowDirection.Begin;
         _counter.GrowVertical = Control.GrowDirection.Both;
-        _counter.OffsetRight = -CounterInset;
+        _counter.OffsetRight = -(CounterInset + EmoticonRoom);
         _input.AddChild(_counter);
     }
 
     private static bool GameMasterMode => Net.I.GmFxVisible(Net.I.LastEnter.CharId, Net.I.IsGm);
 
+    private const int EmoticonButtonSize = 18;
+    private const float EmoticonInset = 4f;
+    private const float EmoticonRoom = EmoticonButtonSize + EmoticonInset * 2;
+    private EmoticonPicker? _emoticons;
+
+    private bool EmoticonsOpen => _emoticons != null && _emoticons.Visible;
+
+    private void OpenEmoticons()
+    {
+        if (_emoticons == null)
+        {
+            _emoticons = new EmoticonPicker();
+            _ctx.Root.AddChild(_emoticons);
+            _emoticons.Picked += code =>
+            {
+                if (EmoticonPicker.Insert(_input, code) is { } refusal) Info(refusal);
+                Open();
+            };
+            _emoticons.PopupHide += () => Callable.From(() => { if (!_input.HasFocus()) Suspend(); }).CallDeferred();
+        }
+        _emoticons.ShowAt(_inputRow.GlobalPosition);
+    }
+
     private void UpdateInputColour()
     {
         byte channel = ChatPrefixes.ChannelFor(_input.Text, _sendChannel);
-        _input.AddThemeColorOverride("font_color", _colors.ForInput(channel, GameMasterMode));
+        _input.AddThemeColorOverride("font_color", _colors.ForInput(channel, GameMasterMode, Net.I.LastEnter.Nation));
     }
 
     private void OnInputKey(InputEvent ev)
@@ -124,17 +154,19 @@ internal sealed partial class ChatSystem
         string clean = ChatInputText.Paste(DisplayServer.ClipboardGet());
         if (clean.Length == 0) return;
         string text = _input.Text;
-        int from = _input.HasSelection() ? _input.GetSelectionFromColumn() : _input.CaretColumn;
-        int to = _input.HasSelection() ? _input.GetSelectionToColumn() : _input.CaretColumn;
+        int fromColumn = _input.HasSelection() ? _input.GetSelectionFromColumn() : _input.CaretColumn;
+        int toColumn = _input.HasSelection() ? _input.GetSelectionToColumn() : _input.CaretColumn;
+        int from = TextRunes.Utf16Index(text, fromColumn);
+        int to = TextRunes.Utf16Index(text, toColumn);
         string merged = text[..from] + clean + text[to..];
-        if (merged.Length > _input.MaxLength)
+        if (TextRunes.Count(merged) > _input.MaxLength)
         {
-            int room = Math.Max(0, _input.MaxLength - (text.Length - (to - from)));
-            clean = clean[..Math.Min(clean.Length, room)];
+            int room = Math.Max(0, _input.MaxLength - TextRunes.Count(text[..from] + text[to..]));
+            clean = TextRunes.Truncate(clean, room);
             merged = text[..from] + clean + text[to..];
         }
         _input.Text = merged;
-        _input.CaretColumn = from + clean.Length;
+        _input.CaretColumn = fromColumn + TextRunes.Count(clean);
         OnInputChanged(merged);
     }
 
@@ -170,7 +202,7 @@ internal sealed partial class ChatSystem
 
     private void UpdateCounter()
     {
-        int length = _input.Text.Length + _linkDraft.WireExtra;
+        int length = TextRunes.Count(_input.Text) + _linkDraft.WireExtra;
         string? counter = _active ? ChatInputText.Counter(length, ChatInputText.MaxLength) : null;
         if (_counter.Visible != (counter != null))
         {
@@ -197,13 +229,22 @@ internal sealed partial class ChatSystem
             _input.AddThemeStyleboxOverride("read_only", bare);
             return;
         }
-        if (!_counter.Visible) return;
+        if (!_counter.Visible)
+        {
+            if (_inputActive == null)
+            {
+                _inputActive = (StyleBox)normal.Duplicate();
+                _inputActive.ContentMarginRight = normal.GetMargin(Side.Right) + EmoticonRoom;
+            }
+            _input.AddThemeStyleboxOverride("normal", _inputActive);
+            return;
+        }
         if (_inputRoomy == null)
         {
             _inputRoomy = (StyleBox)normal.Duplicate();
             string shown = _counter.Text;
             _counter.Text = ChatInputText.Counter(ChatInputText.MaxLength, ChatInputText.MaxLength);
-            _inputRoomy.ContentMarginRight = normal.GetMargin(Side.Right) + _counter.GetCombinedMinimumSize().X + CounterInset;
+            _inputRoomy.ContentMarginRight = normal.GetMargin(Side.Right) + _counter.GetCombinedMinimumSize().X + CounterInset + EmoticonRoom;
             _counter.Text = shown;
         }
         _input.AddThemeStyleboxOverride("normal", _inputRoomy);
@@ -227,16 +268,16 @@ internal sealed partial class ChatSystem
     internal bool InsertItemLink(int itemId)
     {
         if (!_active || ItemData.Get(itemId) == null) return false;
-        var (text, caret) = _linkDraft.Insert(_input.Text, _input.CaretColumn, itemId, ItemData.DisplayName(itemId));
+        var (text, caret) = _linkDraft.Insert(_input.Text, TextRunes.Utf16Index(_input.Text, _input.CaretColumn), itemId, ItemData.DisplayName(itemId));
         if (text == _input.Text) return true;
-        if (text.Length + _linkDraft.WireExtra > ChatInputText.MaxLength)
+        if (TextRunes.Count(text) + _linkDraft.WireExtra > ChatInputText.MaxLength)
         {
             _linkDraft.Clear();
             return true;
         }
         ApplyInputLimit();
         _input.Text = text;
-        _input.CaretColumn = caret;
+        _input.CaretColumn = TextRunes.Column(text, caret);
         _lastInputText = text;
         UpdateCounter();
         _input.GrabFocus();

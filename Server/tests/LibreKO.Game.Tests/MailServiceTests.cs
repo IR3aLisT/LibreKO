@@ -398,6 +398,28 @@ public class MailServiceTests : GameTestBase
         UnreadPackets(bobSent).Should().Be(unreadBefore + 1, "a mail already read does not change the count");
     }
 
+    [Fact]
+    public async Task ReadingAnUnreadMailSendsTheNewUnreadCount()
+    {
+        using var provider = Provider();
+        var (bob, bobSent) = Online(provider, BobId, "Bob");
+        var mail = provider.GetRequiredService<IMailService>();
+        await mail.SendSystemMailAsync(BobId, "One", "First.", []);
+        await mail.SendSystemMailAsync(BobId, "Two", "Second.", []);
+        await mail.SendInboxAsync(bob);
+        var inbox = MailPacket(bobSent, MailPacketWriter.SubList);
+        inbox.ReadUShort();
+        var mailId = inbox.ReadInt();
+        bobSent.Clear();
+
+        await mail.ReadAsync(bob, mailId);
+        MailPacket(bobSent, MailPacketWriter.SubUnread).ReadUShort().Should().Be(1);
+
+        bobSent.Clear();
+        await mail.ReadAsync(bob, mailId);
+        bobSent.Should().NotContain(p => p.GetOpcode() == (byte)GameOpcodes.GS_MAIL && p.GetData()[0] == MailPacketWriter.SubUnread);
+    }
+
     private static int UnreadPackets(List<Packet> sent) =>
         sent.Count(p => p.GetOpcode() == (byte)GameOpcodes.GS_MAIL && p.GetData()[0] == MailPacketWriter.SubUnread);
 }

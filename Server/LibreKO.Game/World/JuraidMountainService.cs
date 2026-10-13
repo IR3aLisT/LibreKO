@@ -15,6 +15,7 @@ public interface IJuraidMountainService
     Task StartMatchesAsync(IReadOnlyList<int> participantCharacterIds, int durationSeconds);
     Task StartMatchForCallerAsync(UserSession session, int durationSeconds = TempleEventRules.JuraidMountainDurationSeconds);
     Task OnNpcKilledAsync(NpcInstance npc, UserSession killer);
+    Task OnPlayerKilledAsync(UserSession victim, UserSession killer);
     Task CancelAllMatchesAsync();
     Task TickAsync();
 }
@@ -39,6 +40,9 @@ public sealed class JuraidMatch
     public int KarusStage { get; set; } = 1;
     public int ElmoradStage { get; set; } = 1;
 
+    public int KarusKills { get; set; }
+    public int ElmoradKills { get; set; }
+
     public int KarusPartyIndex { get; set; } = -1;
     public int ElmoradPartyIndex { get; set; } = -1;
 
@@ -61,6 +65,7 @@ public sealed class JuraidMountainService(
     IUserNotificationService userNotificationService,
     ILoyaltyService loyaltyService,
     ICombatNotificationService combatNotificationService,
+    IPartyLevelProgressService partyLevelProgress,
     ILogger<JuraidMountainService> logger) : IJuraidMountainService
 {
     private const byte JuraidZoneId = (byte)ZoneId.JuradMountain;
@@ -220,6 +225,9 @@ public sealed class JuraidMountainService(
                 logger.LogError(ex, "Failed to warp {Name} to Juraid room {Room}", session.Name, match.RoomId);
             }
         }
+
+        await BroadcastToRoomAsync(match, EventPacketWriter.TempleScreenScores(0, 0));
+        await BroadcastToRoomAsync(match, BifrostPacketWriter.InstanceTimer((ushort)Math.Clamp((int)duration.TotalSeconds, 0, ushort.MaxValue)));
 
         var karusSessions = participants.Where(p => p.Nation == AccountNation.Karus).ToList();
         var elmoSessions = participants.Where(p => p.Nation == AccountNation.ElMorad).ToList();
@@ -394,10 +402,38 @@ public sealed class JuraidMountainService(
         return gameDataService.TempleEventRewards?.FirstOrDefault(r => r.Event == TempleEvent.JuraidMountain && r.Outcome == outcome);
     }
 
+    public async Task OnPlayerKilledAsync(UserSession victim, UserSession killer)
+    {
+        if (victim.ZoneId != JuraidZoneId || !_activeMatches.TryGetValue(victim.Room, out var match) || match.IsCompleted)
+            return;
+        if (killer.Room != match.RoomId || killer.Nation == victim.Nation)
+            return;
+
+        if (killer.Nation == AccountNation.Karus)
+            match.KarusKills++;
+        else if (killer.Nation == AccountNation.ElMorad)
+            match.ElmoradKills++;
+        else
+            return;
+
+        await BroadcastToRoomAsync(match, EventPacketWriter.TempleScreenScores(match.KarusKills, match.ElmoradKills));
+    }
+
+    private async Task BroadcastToRoomAsync(JuraidMatch match, Packet packet)
+    {
+        foreach (var charId in match.Participants)
+        {
+            var member = sessionManager.GetByCharacterId(charId);
+            if (member != null && member.Room == match.RoomId && member.ZoneId == JuraidZoneId)
+                await member.Client.SendPacket(packet);
+        }
+    }
+
     private async Task HandleDevabirdKilledAsync(JuraidMatch match, UserSession killer)
     {
         var winnerNation = killer.Nation != AccountNation.None ? killer.Nation : AccountNation.Karus;
         match.WinnerNation = winnerNation;
+        await BroadcastToRoomAsync(match, EventPacketWriter.TempleEventFinish(TempleEventRules.BorderDefenseWarIndunEvent, (byte)winnerNation, FinishedMatchClosureDelaySeconds));
 
         var winnerName = winnerNation == AccountNation.Karus ? "Karus" : "El Morad";
         var noticePkt = NoticePacketWriter.Broadcast(
@@ -666,6 +702,8 @@ public sealed class JuraidMountainService(
 
             var memberPacket = PartyPacketWriter.MemberInfo(MemberStateOf(memberSession), statusCode);
             await combatNotificationService.SendToPartyAsync(party, memberPacket);
+            await combatNotificationService.SendPartyBuffsAsync(memberSession);
+            await partyLevelProgress.AnnounceAsync(memberSession);
         }
 
         var partyCount = party.MemberCount;

@@ -19,8 +19,10 @@ public partial class World : Node3D
         EscapeCloses(() => _npcDialogShown, () => CloseNpcDialog());
         EscapeCloses(() => _tradePrompt.Visible, () => _tradePrompt.Close());
         EscapeCloses(() => _vendorShown, () => CloseVendor());
+        EscapeCloses(() => _lootLayer.Visible, () => CloseLoot());
         EscapeCloses(() => _repairShown, () => CloseRepair());
         EscapeCloses(() => _whAmount.Visible, () => _whAmount.Close());
+        EscapeCloses(() => _eventsPanel?.Visible == true, () => _eventsPanel.Visible = false);
         EscapeCloses(() => _whShown, () => CloseWarehouse());
         EscapeCloses(() => _upgradeShown, () => CloseUpgrade());
         EscapeCloses(() => _sealShown, CloseSealWindow);
@@ -44,7 +46,7 @@ public partial class World : Node3D
         EscapeCloses(() => _clanCreateShown, () => CloseClanCreate());
         EscapeCloses(() => _clanPointsShown, () => CloseClanPoints());
         EscapeCloses(() => _warpShown, () => CloseWarp());
-        EscapeCloses(() => _rankShown, () => ToggleRank());
+        EscapeCloses(() => _rankShown, CloseRank);
         EscapeCloses(() => _petHatchShown, ClosePetHatch);
         EscapeCloses(() => _petShown, () => TogglePet());
         EscapeCloses(() => _pusShown && _pusModal != PusModal.None, ClosePusModal);
@@ -87,7 +89,8 @@ public partial class World : Node3D
         EscapeCloses(() => _chatColorsWindow is { Visible: true }, CloseChatColors);
         EscapeCloses(() => _msgrShown, () => CloseMessenger());
         EscapeCloses(() => _forcesShown, () => CloseForces());
-        EscapeCloses(() => _chatRoomShown, () => CloseChatRoom());
+        EscapeCloses(() => ChatRoomExpanded, () => _roomWindow.SetMinimized(true));
+        EscapeCloses(() => _nationChatShown, () => CloseNationChat());
         EscapeCloses(() => _fortuneShown, () => CloseFortune());
         EscapeCloses(() => _combineBookShown, () => CloseCombineRecipeBook());
         EscapeCloses(() => _itemCombineShown, () => CloseItemCombine());

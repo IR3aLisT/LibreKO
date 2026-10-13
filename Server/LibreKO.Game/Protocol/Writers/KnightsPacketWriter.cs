@@ -13,7 +13,7 @@ public sealed class KnightsPacketWriter
     public const byte Failed = 0;
     public const byte Succeeded = 1;
     public const byte HandoverLeader = 1;
-    public const byte HandoverNotLeader = 2;
+    public const byte HandoverNotLeader = 4;
 
     public readonly record struct BrowseEntry(short ClanId, string Name);
 
@@ -117,6 +117,21 @@ public sealed class KnightsPacketWriter
     public static Packet MemberOnline(string name) => MemberPresence(KnightsSubOpcode.MemberOnline, name);
 
     public static Packet MemberOffline(string name) => MemberPresence(KnightsSubOpcode.MemberOffline, name);
+
+    public static Packet ClanBonus(int online)
+    {
+        var packet = Sub(KnightsSubOpcode.ClanBonus);
+        packet.WriteByte(Succeeded);
+        packet.WriteByte((byte)Math.Clamp(online, 0, byte.MaxValue));
+        return packet;
+    }
+
+    public static Packet ClanBonusCleared()
+    {
+        var packet = Sub(KnightsSubOpcode.ClanBonus);
+        packet.WriteByte(Failed);
+        return packet;
+    }
 
     private static Packet MemberPresence(KnightsSubOpcode sub, string name)
     {

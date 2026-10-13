@@ -7,6 +7,7 @@ public struct ItemSlot
     public short Count;
     public byte Flag;
     public int UniqueId;
+    public int ExpiresAt;
 
     public ItemFlag State => (ItemFlag)Flag;
 

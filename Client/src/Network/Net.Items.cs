@@ -7,7 +7,8 @@ public partial class Net
     private readonly struct PendingItemMove
     {
         public readonly byte Dir, Src, Dst;
-        public PendingItemMove(byte dir, byte src, byte dst) { Dir = dir; Src = src; Dst = dst; }
+        public readonly ushort Amount;
+        public PendingItemMove(byte dir, byte src, byte dst, ushort amount) { Dir = dir; Src = src; Dst = dst; Amount = amount; }
     }
     private PendingItemMove? _pendingItemMove;
     private int _pendingRemoveSlot = -1;
@@ -31,7 +32,7 @@ public partial class Net
             if (ok) ApplyPendingItemMove();
             else _pendingItemMove = null;
             ItemMoveResultEvent?.Invoke(ok);
-            if (ok && TryReadItemStats(p, out var stats))
+            if (ok && ItemStatsBlock.TryRead(p, out var stats))
             {
                 ApplyLastStats(stats);
                 ItemStatsEvent?.Invoke(stats);
@@ -41,7 +42,11 @@ public partial class Net
         {
             if (p.RemainingBytes < 1) return;
             bool ok = p.ReadByte() == 1;
-            if (!ok) return;
+            if (!ok)
+            {
+                InventoryArrangeFailedEvent?.Invoke();
+                return;
+            }
             if (p.RemainingBytes < InventoryConstants.HaveMax * 19) return;
             var items = new ItemSlot[InventoryConstants.HaveMax];
             for (int i = 0; i < items.Length; i++)
@@ -49,10 +54,11 @@ public partial class Net
                 int itemId = p.ReadInt();
                 short dur = UShortToShort(p.ReadUShort());
                 short count = UShortToShort(p.ReadUShort());
-                byte flag = p.ReadByte(); p.ReadUShort(); p.ReadInt(); p.ReadInt();
+                byte flag = p.ReadByte(); p.ReadUShort(); p.ReadInt();
+                int expiresAt = p.ReadInt();
                 items[i] = new ItemSlot
                 {
-                    ItemId = itemId, Durability = dur, Count = count, Flag = flag,
+                    ItemId = itemId, Durability = dur, Count = count, Flag = flag, ExpiresAt = expiresAt,
                 };
             }
             ApplyLastInventoryGridRefresh(items);
@@ -73,9 +79,11 @@ public partial class Net
             byte pos = p.ReadByte();
             int itemId = p.ReadInt();
             short count = IntToShort(p.ReadInt());
-            p.ReadByte();
+            byte flag = p.ReadByte();
             short dur = p.ReadShort();
             p.ReadInt();
+            if (kind is CountChangeReceived or CountChangeReceivedAlt) ItemReceivedEvent?.Invoke(itemId, false);
+            else if (flag == CountChangeNewItemFlag) ItemReceivedEvent?.Invoke(itemId, true);
             if (kind == 0 || pos >= InventoryConstants.HaveMax) continue;
 
             int abs = InventoryConstants.InventoryStart + pos;
@@ -86,53 +94,60 @@ public partial class Net
         }
     }
 
-    private const byte LootPartyCoins = 2;
+    public event Action? InventoryArrangeFailedEvent;
+    public event Action<int, bool>? ItemReceivedEvent;
+    private const byte CountChangeReceived = 2;
+    private const byte CountChangeReceivedAlt = 7;
+    private const byte CountChangeNewItemFlag = 100;
+    public event Action<int>? LootGoldEvent;
+    public event Action<int>? LootItemEvent;
+    public event Action<string, int>? PartyLootEvent;
+    public event Action<int, bool>? TemporaryLootEvent;
 
     private void HandleItemGet(Packet p)
     {
-        if (p.RemainingBytes < 1) return;
-        byte result = p.ReadByte();
-        if (result == LootPartyCoins)
+        if (ItemGetReply.Read(p) is not { } reply) return;
+        if (reply.Result == ItemGetReply.Failed)
         {
-            if (p.RemainingBytes < 13) return;
-            int coinBundle = p.ReadInt();
-            p.ReadByte();
-            int coinItem = p.ReadInt();
-            GoldChangeEvent?.Invoke(p.ReadInt());
-            LootTakenEvent?.Invoke(coinBundle, -1, coinItem);
+            LootFailEvent?.Invoke(reply.Failure);
             return;
         }
-        if (result != 1)
+        if (reply.Result == ItemGetReply.PartyMember)
         {
-            LootFailEvent?.Invoke(result == 0 && p.RemainingBytes >= 4 ? p.ReadInt() : 0);
+            PartyLootEvent?.Invoke(reply.Looter ?? "", reply.ItemId);
+            LootTakenEvent?.Invoke(reply.BundleId, reply.BundleSlot, reply.ItemId);
             return;
         }
-        if (p.RemainingBytes < 17) return;
-        int bundleId = p.ReadInt();
-        byte pos = p.ReadByte();
-        int itemId = p.ReadInt();
-        short count = UShortToShort(p.ReadUShort());
-        int money = p.ReadInt();
-        int bundleSlot = p.ReadUShort();
-        if (pos == 0xFF)
-            GoldChangeEvent?.Invoke(money);
-        else if (pos < InventoryConstants.HaveMax)
+        if (reply.Result is ItemGetReply.TemporaryKept or ItemGetReply.TemporaryLost)
         {
-            int abs = InventoryConstants.InventoryStart + pos;
-            var item = new ItemSlot { ItemId = itemId, Count = count };
+            TemporaryLootEvent?.Invoke(reply.ItemId, reply.Result == ItemGetReply.TemporaryLost);
+            return;
+        }
+        if (reply.IsGold)
+        {
+            LootGoldEvent?.Invoke(reply.Money);
+            GoldChangeEvent?.Invoke(reply.Money);
+        }
+        else if (reply.Position < InventoryConstants.HaveMax)
+        {
+            LootItemEvent?.Invoke(reply.ItemId);
+            int abs = InventoryConstants.InventoryStart + reply.Position;
+            var item = new ItemSlot { ItemId = reply.ItemId, Count = reply.Count };
             PreserveLastDurability(abs, ref item);
-            RaiseItemGained(abs, itemId, count);
+            RaiseItemGained(abs, reply.ItemId, reply.Count);
             SetLastInventorySlot(abs, item);
             InventorySlotEvent?.Invoke(abs, item);
         }
-        LootTakenEvent?.Invoke(bundleId, bundleSlot, itemId);
+        LootTakenEvent?.Invoke(reply.BundleId, reply.BundleSlot, reply.ItemId);
     }
+
+    private const int ItemRemoveNoReason = 0;
 
     private void HandleItemRemove(Packet p)
     {
         if (p.RemainingBytes < 1) return;
         bool ok = p.ReadByte() == 1;
-        if (!ok && p.RemainingBytes >= 1) p.ReadByte();
+        int reason = !ok && p.RemainingBytes >= 1 ? p.ReadByte() : ItemRemoveNoReason;
         if (ok && _pendingRemoveSlot >= 0)
         {
             int slot = _pendingRemoveSlot;
@@ -140,7 +155,7 @@ public partial class Net
             InventorySlotEvent?.Invoke(slot, default);
         }
         _pendingRemoveSlot = -1;
-        ItemRemoveResultEvent?.Invoke(ok);
+        ItemRemoveResultEvent?.Invoke(ok, reason);
     }
 
     private void HandleUserLookChange(Packet p)
@@ -176,46 +191,22 @@ public partial class Net
         PointChangeEvent?.Invoke(type, val, mhp, mmp, hit, mw);
     }
 
+    public event System.Action<GoldChangeReply>? GoldChangeLogEvent;
+
     private void HandleGoldChange(Packet p)
     {
-        if (p.RemainingBytes < 9) return;
-        p.ReadByte();
-        p.ReadInt();
-        GoldChangeEvent?.Invoke(p.ReadInt());
+        if (GoldChangeReply.Read(p) is not { } reply) return;
+        GoldChangeLogEvent?.Invoke(reply);
+        if (reply.ChangesBalance) GoldChangeEvent?.Invoke(reply.Total);
     }
 
     private void HandleExpChange(Packet p)
     {
         if (p.RemainingBytes < 1) return;
         byte sub = p.ReadByte();
-        if (sub == 4 && p.RemainingBytes >= 8) ExpChangeEvent?.Invoke(p.ReadLong());
+        if (sub == Domain.Jackpot.ExpSub && p.RemainingBytes >= 6) ExpJackpotEvent?.Invoke(p.ReadInt(), p.ReadUShort());
+        else if (sub == 4 && p.RemainingBytes >= 8) ExpChangeEvent?.Invoke(p.ReadLong());
         else if (sub == 5 && p.RemainingBytes >= 8) DeathExpLossEvent?.Invoke(p.ReadLong());
-    }
-
-    private static bool TryReadItemStats(Packet p, out DerivedStats stats)
-    {
-        stats = new DerivedStats();
-        if (p.RemainingBytes < 34)
-            return false;
-
-        stats.TotalHit = p.ReadShort();
-        stats.TotalAc = p.ReadShort();
-        stats.MaxWeight = p.ReadInt();
-        p.ReadByte(); p.ReadByte();
-        stats.MaxHp = p.ReadShort();
-        stats.MaxMp = p.ReadShort();
-        stats.StrBonus = p.ReadShort();
-        stats.StaBonus = p.ReadShort();
-        stats.DexBonus = p.ReadShort();
-        stats.IntBonus = p.ReadShort();
-        stats.ChaBonus = p.ReadShort();
-        stats.FireR = p.ReadShort();
-        stats.ColdR = p.ReadShort();
-        stats.LightningR = p.ReadShort();
-        stats.MagicR = p.ReadShort();
-        stats.DiseaseR = p.ReadShort();
-        stats.PoisonR = p.ReadShort();
-        return true;
     }
 
     private void ApplyPendingItemMove()
@@ -227,7 +218,7 @@ public partial class Net
             return;
         EnsureLastInventoryLength(Math.Max(from, to) + 1);
         var e = LastEnter;
-        ItemMove.ApplyConfirmed(e.Inventory, move.Dir, from, to, ItemData.Get(e.Inventory[from].ItemId)?.Countable ?? 0);
+        ItemMove.ApplyConfirmed(e.Inventory, move.Dir, from, to, ItemData.Get(e.Inventory[from].ItemId)?.Countable ?? 0, move.Amount);
         LastEnter = e;
         RefreshLastGear();
     }
@@ -252,6 +243,7 @@ public partial class Net
     {
         Vitals.ApplyMaxima(stats.MaxHp, stats.MaxMp);
         Sheet.ApplyDerived(stats);
+        HealStrikesEnemies = stats.HealStrikesEnemies;
     }
 
     private void ApplyLastInventoryGridRefresh(ItemSlot[] items)

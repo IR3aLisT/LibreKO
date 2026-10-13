@@ -13,16 +13,33 @@ public sealed partial class WarScoreStrip : PanelContainer
     private const float EmptyShare = 1f;
     private const float SidePadding = 12f;
     private const float EdgePadding = 5f;
+    private const float CloseSize = 18f;
+    private const int CloseIconWidth = 10;
 
-    private readonly Label _karus;
-    private readonly Label _elmorad;
+    private readonly string _leftName;
+    private readonly string _rightName;
+    private readonly Label _left;
+    private readonly Label _right;
     private readonly Label _centre;
     private readonly Label? _status;
-    private readonly ColorRect _karusBar;
-    private readonly ColorRect _elmoradBar;
+    private readonly Label? _clock;
+    private readonly Button? _ranking;
+    private readonly ColorRect _leftBar;
+    private readonly ColorRect _rightBar;
+
+    public event System.Action? RankingPressed;
+
+    public Button? CloseButton { get; }
 
     public WarScoreStrip(bool withStatus)
+        : this(withStatus, "Karus", KarusColour, "El Morad", ElmoradColour, closable: false)
     {
+    }
+
+    public WarScoreStrip(bool withStatus, string leftName, Color leftColour, string rightName, Color rightColour, bool closable)
+    {
+        _leftName = leftName;
+        _rightName = rightName;
         CustomMinimumSize = new Vector2(StripWidth, 0);
         var style = UiTheme.Panel(6, true);
         style.ContentMarginLeft = style.ContentMarginRight = SidePadding;
@@ -36,19 +53,30 @@ public sealed partial class WarScoreStrip : PanelContainer
         var scores = new HBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
         scores.AddThemeConstantOverride("separation", 6);
         rows.AddChild(scores);
-        _karus = Side(scores, KarusColour, HorizontalAlignment.Left);
+        _left = Side(scores, leftColour, HorizontalAlignment.Left);
         _centre = UiTheme.Text("", 14, UiTheme.GoldBright, HorizontalAlignment.Center);
         _centre.CustomMinimumSize = new Vector2(CentreWidth, 0);
         _centre.AddThemeConstantOverride("outline_size", 3);
         _centre.MouseFilter = MouseFilterEnum.Ignore;
         scores.AddChild(_centre);
-        _elmorad = Side(scores, ElmoradColour, HorizontalAlignment.Right);
+        _right = Side(scores, rightColour, HorizontalAlignment.Right);
+        if (closable)
+        {
+            var close = UiTheme.IconButton(UiIcons.Get("system/close"), "Close");
+            close.CustomMinimumSize = new Vector2(CloseSize, CloseSize);
+            close.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            close.AddThemeConstantOverride("icon_max_width", CloseIconWidth);
+            close.AddThemeColorOverride("icon_normal_color", new Color(UiTheme.TextHi, 0.7f));
+            close.AddThemeColorOverride("icon_hover_color", UiTheme.TextHi);
+            scores.AddChild(close);
+            CloseButton = close;
+        }
 
         var bar = new HBoxContainer { CustomMinimumSize = new Vector2(0, BarHeight), MouseFilter = MouseFilterEnum.Ignore };
         bar.AddThemeConstantOverride("separation", 0);
         rows.AddChild(bar);
-        _karusBar = BarPart(bar, KarusColour);
-        _elmoradBar = BarPart(bar, ElmoradColour);
+        _leftBar = BarPart(bar, leftColour);
+        _rightBar = BarPart(bar, rightColour);
 
         if (withStatus)
         {
@@ -56,19 +84,42 @@ public sealed partial class WarScoreStrip : PanelContainer
             _status.AddThemeConstantOverride("outline_size", 1);
             _status.MouseFilter = MouseFilterEnum.Ignore;
             rows.AddChild(_status);
+
+            var foot = new HBoxContainer { MouseFilter = MouseFilterEnum.Ignore };
+            foot.AddThemeConstantOverride("separation", 6);
+            rows.AddChild(foot);
+            _clock = UiTheme.Text("", 12, UiTheme.TextLo);
+            _clock.AddThemeConstantOverride("outline_size", 1);
+            _clock.MouseFilter = MouseFilterEnum.Ignore;
+            _clock.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            _clock.VerticalAlignment = VerticalAlignment.Center;
+            foot.AddChild(_clock);
+            _ranking = new Button { Text = "Ranking", FocusMode = FocusModeEnum.None, Visible = false };
+            _ranking.AddThemeFontSizeOverride("font_size", 11);
+            _ranking.Pressed += () => RankingPressed?.Invoke();
+            foot.AddChild(_ranking);
         }
         SetScores(0, 0);
     }
 
+    public bool RankingShown { set { if (_ranking != null) _ranking.Visible = value; } }
+
+    public void SetClock(string text)
+    {
+        if (_clock == null) return;
+        _clock.Text = text;
+        _clock.GetParent<Control>().Visible = text.Length > 0 || _ranking is { Visible: true };
+    }
+
     public string Centre { set => _centre.Text = value; }
 
-    public void SetScores(int karus, int elmorad)
+    public void SetScores(int left, int right)
     {
-        _karus.Text = $"Karus  {karus}";
-        _elmorad.Text = $"{elmorad}  El Morad";
-        bool empty = karus <= 0 && elmorad <= 0;
-        _karusBar.SizeFlagsStretchRatio = empty ? EmptyShare : Mathf.Max(0, karus);
-        _elmoradBar.SizeFlagsStretchRatio = empty ? EmptyShare : Mathf.Max(0, elmorad);
+        _left.Text = $"{_leftName}  {left}";
+        _right.Text = $"{right}  {_rightName}";
+        bool empty = left <= 0 && right <= 0;
+        _leftBar.SizeFlagsStretchRatio = empty ? EmptyShare : Mathf.Max(0, left);
+        _rightBar.SizeFlagsStretchRatio = empty ? EmptyShare : Mathf.Max(0, right);
     }
 
     public void SetStatus(string text, Color colour)

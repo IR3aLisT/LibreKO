@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -14,6 +15,9 @@ public partial class World
     private Button _skillPrevBtn = null!, _skillNextBtn = null!;
     private Label _skillDescLbl = null!, _skillMpLbl = null!, _skillPointLbl = null!, _skillLevelLbl = null!;
     private Label _skillItem0Lbl = null!, _skillItem1Lbl = null!, _skillItem2Lbl = null!;
+    private Label _skillStateLbl = null!;
+    private Godot.Timer? _masteryRepeat;
+    private int _masteryRepeatType;
 
     private const int MasteryTreeCount = MasteryPoints.LastTree - MasteryPoints.FirstTree + 1;
 
@@ -124,6 +128,9 @@ public partial class World
         info.AddThemeConstantOverride("separation", 1);
         root.AddChild(info);
 
+        _skillStateLbl = HudStyle.Label(12);
+        info.AddChild(_skillStateLbl);
+
         // ScrollContainer does not propagate child min size — an autowrapping Label would inflate this window.
         var descBox = new ScrollContainer
         {
@@ -178,6 +185,7 @@ public partial class World
         _skillSelected = -1;
         foreach (var (k, b) in _skillTabBtns) b.ButtonPressed = k == tab;
         RefreshSkillPage();
+        RefreshMasteryUI();
     }
 
     private void TurnSkillPage(int delta)
@@ -196,7 +204,7 @@ public partial class World
         for (int i = 0; i < _skillCells.Length; i++)
         {
             var s = first + i < skills.Count ? skills[first + i] : null;
-            _skillCells[i].Bind(s, s != null && SkillRequirementMet(s));
+            _skillCells[i].Bind(s, s != null ? SkillLearnOf(s).State : SkillLearnState.Locked);
             _skillCells[i].SetSelected(s != null && s.Id == _skillSelected);
         }
         int pages = CurrentTabPageCount();
@@ -219,12 +227,21 @@ public partial class World
         var s = _skillSelected >= 0 ? SkillData.Get(_skillSelected) : null;
         if (s == null)
         {
+            _skillStateLbl.Text = "";
             _skillDescLbl.Text = "";
             _skillMpLbl.Text = _skillPointLbl.Text = _skillLevelLbl.Text = "";
             _skillItem0Lbl.Text = _skillItem1Lbl.Text = _skillItem2Lbl.Text = "";
             return;
         }
 
+        var learn = SkillLearnOf(s);
+        _skillStateLbl.Text = SkillLearnText(s, learn);
+        _skillStateLbl.AddThemeColorOverride("font_color", learn.State switch
+        {
+            SkillLearnState.Learned => UiTheme.TextHi,
+            SkillLearnState.Learnable => UiTheme.Neutral,
+            _ => UiTheme.Bad,
+        });
         _skillDescLbl.Text = s.Desc.Replace('|', '\n');
         _skillMpLbl.Text = $"MP consumed : {s.Msp}";
         _skillPointLbl.Visible = SkillData.MasteryType(s.Tree) > 0;
@@ -248,21 +265,45 @@ public partial class World
         PluginNotifySkills();
     }
 
-    private bool SkillRequirementMet(SkillData.Skill s)
+    private bool SkillRequirementMet(SkillData.Skill s) => SkillLearnOf(s).State == SkillLearnState.Learned;
+
+    private SkillLearnInfo SkillLearnOf(SkillData.Skill s)
     {
         int mastery = SkillData.MasteryType(s.Tree);
-        if (mastery > 0) return Mastery.InTree(mastery) >= s.Level;
-        return Sheet.Level <= 0 || Sheet.Level >= s.Level;
+        return SkillLearn.For(mastery, s.Level, Mastery.InTree(mastery), _selfClass, Sheet.Level);
     }
 
+    private string SkillLearnText(SkillData.Skill s, SkillLearnInfo learn) => learn.State switch
+    {
+        SkillLearnState.Learned => "Learned",
+        SkillLearnState.Learnable =>
+            $"Spend {learn.PointsShort} more {(learn.PointsShort == 1 ? "point" : "points")} in {SkillData.PageName(_selfClass, SkillData.MasteryType(s.Tree))}",
+        _ when learn.NeedsClassChange => "Unlocks with your next class change",
+        _ => $"Reach level {learn.LevelNeeded}",
+    };
+
     private bool SkillAssignable(int id) =>
-        SkillData.Get(id) is not { } s || SkillRequirementMet(s);
+        SkillData.Get(id) is not { } s
+        || (InChaosZone ? s.Tree == ChaosBattle.SkillTree : SkillRequirementMet(s));
 
     private void BuildMasteryBlock(VBoxContainer root)
     {
         root.AddChild(UiTheme.SectionTitle("Mastery"));
         _masteryPoolLbl = HudStyle.Label(14);
-        root.AddChild(_masteryPoolLbl);
+        _masteryPoolLbl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        var poolRow = new HBoxContainer();
+        poolRow.AddChild(_masteryPoolLbl);
+        var preset = new Button
+        {
+            Text = "Skill Preset",
+            FocusMode = Control.FocusModeEnum.None,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            TooltipText = "Plan a mastery spread",
+        };
+        preset.AddThemeFontSizeOverride("font_size", 12);
+        preset.Pressed += TogglePreset;
+        poolRow.AddChild(preset);
+        root.AddChild(poolRow);
 
         var grid = new GridContainer { Columns = 3 };
         grid.AddThemeConstantOverride("h_separation", 10);
@@ -278,8 +319,14 @@ public partial class World
             _masteryValLbls[idx] = HudStyle.Label(13, HorizontalAlignment.Right);
             _masteryValLbls[idx].CustomMinimumSize = new Vector2(36, 0);
             grid.AddChild(_masteryValLbls[idx]);
-            _masteryBtns[idx] = new Button { Text = "+", CustomMinimumSize = new Vector2(28, 22), FocusMode = Control.FocusModeEnum.None };
+            _masteryBtns[idx] = new Button
+            {
+                Text = "+", CustomMinimumSize = new Vector2(28, 22), FocusMode = Control.FocusModeEnum.None,
+                ActionMode = BaseButton.ActionModeEnum.Press,
+            };
             _masteryBtns[idx].Pressed += () => OnMasterySpend(t);
+            _masteryBtns[idx].ButtonDown += () => StartMasteryRepeat(t);
+            _masteryBtns[idx].ButtonUp += StopMasteryRepeat;
             grid.AddChild(_masteryBtns[idx]);
         }
         root.AddChild(new HSeparator());
@@ -287,6 +334,32 @@ public partial class World
     }
 
     private bool CanSpendMastery(int type) => Mastery.CanSpend(_selfClass, type, Sheet.Level);
+
+    private void StartMasteryRepeat(int type)
+    {
+        if (_masteryRepeat == null)
+        {
+            _masteryRepeat = new Godot.Timer { OneShot = false };
+            _masteryRepeat.Timeout += OnMasteryRepeat;
+            _skillsContent.AddChild(_masteryRepeat);
+        }
+        _masteryRepeatType = type;
+        _masteryRepeat.Start(SkillLearn.RepeatDelaySeconds);
+    }
+
+    private void StopMasteryRepeat() => _masteryRepeat?.Stop();
+
+    private void OnMasteryRepeat()
+    {
+        if (_masteryRepeat == null) return;
+        if (!CanSpendMastery(_masteryRepeatType))
+        {
+            StopMasteryRepeat();
+            return;
+        }
+        OnMasterySpend(_masteryRepeatType);
+        _masteryRepeat.Start(SkillLearn.RepeatEverySeconds);
+    }
 
     private string MasteryHint(int type)
     {
@@ -319,6 +392,7 @@ public partial class World
         if (!ok) return;
         Mastery.ResetTrees(pool);
         RefreshSkillsEnabled();
+        ClearHotbar();
     }
 
     private void SyncMasteryPool(int pool)
@@ -346,6 +420,8 @@ public partial class World
             bool eligibleTree = type != MasteryPoints.MasterTree
                 || MasteryPoints.ClassHasTree(_selfClass, type);
             _masteryNameLbls[idx].Visible = eligibleTree;
+            _masteryNameLbls[idx].AddThemeColorOverride("font_color",
+                type == SkillData.MasteryType(_skillTab) ? UiTheme.GoldBright : UiTheme.TextHi);
             _masteryValLbls[idx].Visible = eligibleTree;
             _masteryBtns[idx].Visible = eligibleTree;
             _masteryBtns[idx].Disabled = !CanSpendMastery(type);
@@ -366,6 +442,7 @@ public partial class World
         private readonly Label _name;
         private readonly StyleBoxFlat _frame;
         private bool _met;
+        private const float LearnableIconShade = 0.55f;
 
         public SkillCell()
         {
@@ -397,16 +474,26 @@ public partial class World
             row.AddChild(_name);
         }
 
-        public void Bind(SkillData.Skill? skill, bool met)
+        public void Bind(SkillData.Skill? skill, SkillLearnState state)
         {
             Skill = skill;
-            _met = met;
+            _met = state == SkillLearnState.Learned;
             Visible = skill != null;
             if (skill == null) { TooltipText = ""; return; }
 
-            _icon.Texture = met ? SkillData.Icon(skill.Id) ?? SkillData.EnigmaIcon() : SkillData.EnigmaIcon();
+            _icon.Texture = state == SkillLearnState.Locked
+                ? SkillData.EnigmaIcon()
+                : SkillData.Icon(skill.Id) ?? SkillData.EnigmaIcon();
+            _icon.SelfModulate = state == SkillLearnState.Learnable
+                ? new Color(LearnableIconShade, LearnableIconShade, LearnableIconShade)
+                : Colors.White;
             _name.Text = skill.Name;
-            _name.AddThemeColorOverride("font_color", met ? UiTheme.TextHi : UiTheme.TextLo);
+            _name.AddThemeColorOverride("font_color", state switch
+            {
+                SkillLearnState.Learned => UiTheme.TextHi,
+                SkillLearnState.Learnable => UiTheme.Neutral,
+                _ => UiTheme.TextLo,
+            });
             TooltipText = SkillTooltip(skill);
         }
 
@@ -423,7 +510,7 @@ public partial class World
                 OnSelect?.Invoke(this);
                 AcceptEvent();
             }
-            else if (mb.ButtonIndex == MouseButton.Right && _met)
+            else if (mb.ButtonIndex == MouseButton.Right && _met && HotbarAssign.CanAdd(Skill.Id, Skill.Type1))
             {
                 OnAdd?.Invoke(Skill.Id);
                 AcceptEvent();
@@ -432,7 +519,7 @@ public partial class World
 
         public override Variant _GetDragData(Vector2 atPosition)
         {
-            if (Skill == null || !_met) return default;
+            if (Skill == null || !_met || !HotbarAssign.CanDrag(Skill.Type1, Skill.Type2)) return default;
             var preview = new PanelContainer { CustomMinimumSize = new Vector2(48, 48) };
             var icon = SkillData.Icon(Skill.Id);
             if (icon != null)

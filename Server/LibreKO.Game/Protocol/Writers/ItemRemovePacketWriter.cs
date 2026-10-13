@@ -8,6 +8,14 @@ public enum ItemRemoveResult : byte
     Removed = 1,
 }
 
+public enum ItemRemoveSource : byte
+{
+    Inventory = 0,
+    Equipment = 1,
+    Bag = 2,
+    MagicBag = 3,
+}
+
 public enum ItemRemoveReason : byte
 {
     SystemError = 20,

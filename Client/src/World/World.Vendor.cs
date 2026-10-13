@@ -13,9 +13,13 @@ public partial class World
     private const int LoyaltyMerchantGroup = 249000;
     private const int TradeRefusedNoMoney = 3;
     private const int TradeRefusedNoRoom = 4;
+    private const int SellConfirmText = 11500;
     private const string VendorHint = "Right-click or drag to trade";
     private const string VendorUntradableText = "This item cannot be sold.";
     private const string VendorStaleText = "The item or quantity changed. Please try again.";
+
+    private static string VendorTariffHint(int tariff, bool loyaltyShop) =>
+        tariff > 0 && !loyaltyShop ? $"Purchases pay a {tariff}% tariff" : VendorHint;
 
     private struct PendingTrade
     {
@@ -173,11 +177,12 @@ public partial class World
         _vendorResults = System.Array.Empty<int>();
         _vendorSelected = 0;
         _vendorPanel.Title = _vendorNpcName;
+        _vendorFooter.Hint = VendorTariffHint(Net.I.CurrentZoneAbility.Tariff, LoyaltyShop);
         _vendorSearch.Text = "";
         RefreshVendorWallet();
         _vendorPanel.Visible = true;
         _vendorShown = true;
-        _vendorCompanion ??= new BagCompanion(VendorTakeFromBag, VendorBagFit, VendorBagNote, CloseVendor, VendorIntoBag);
+        _vendorCompanion ??= new BagCompanion(VendorTakeFromBag, VendorBagFit, VendorBagNote, CloseVendor, (from, to, _) => VendorIntoBag(from, to));
         AttachBagCompanion(_vendorCompanion);
         ShowVendorPage(0);
     }
@@ -190,6 +195,7 @@ public partial class World
         _vendorShown = false;
         _vendorPanel.Visible = false;
         if (_vendorCompanion != null) DetachBagCompanion(_vendorCompanion);
+        PluginNotifyVendor();
     }
 
     private void OnVendorSearch()
@@ -211,6 +217,7 @@ public partial class World
             : _vendorCatalogue.Pages.Count == 0 ? new int[ShopCatalogue.PageSize] : _vendorCatalogue.Page(_vendorCatalogue.Pages[page]));
         SelectVendorItem(_vendorSelected != 0 && _vendorCellIds.Contains(_vendorSelected)
             ? _vendorSelected : _vendorCellIds.FirstOrDefault(id => id != 0));
+        PluginNotifyVendor();
     }
 
     private void FillVendorCells(int[] ids)
@@ -277,7 +284,7 @@ public partial class World
 
     private void OnVendorCellHovered(ItemSlotView cell)
     {
-        if (_vendorCellIds[cell.Index] != 0) ShowItemTooltip(-1, TooltipItem(_vendorCellIds[cell.Index]));
+        if (_vendorCellIds[cell.Index] != 0) ShowItemTooltip(-1, TooltipItem(_vendorCellIds[cell.Index]), shopGoods: true);
     }
 
     private bool VendorIntoBag(int cell, int abs)
@@ -349,14 +356,17 @@ public partial class World
     private BagFit VendorBagFit(int abs)
     {
         if (LoyaltyShop || !InMainBag(abs)) return BagFit.Unfit;
-        return VendorSellUnit(Inv[abs].ItemId) > 0 ? BagFit.Normal : BagFit.Unfit;
+        return VendorSellUnit(Inv[abs].ItemId) > 0 && UseRefusal(ItemUse.NpcSell, Inv[abs]) == ItemUseRules.Allowed
+            ? BagFit.Normal
+            : BagFit.Unfit;
     }
 
     private string VendorBagNote(int abs)
     {
         if (LoyaltyShop || !InMainBag(abs)) return "";
         int unit = VendorSellUnit(Inv[abs].ItemId);
-        return unit > 0 ? $"Sells for {(long)unit * Mathf.Max(1, (int)Inv[abs].Count):n0} gold" : "";
+        if (unit <= 0) return "";
+        return Inv[abs].Count > 1 ? $"Sells for {unit:n0} gold each" : $"Sells for {unit:n0} gold";
     }
 
     private static int VendorSellUnit(int itemId) => ItemData.IsSellable(itemId) ? ItemData.SellPrice(itemId) : 0;
@@ -378,9 +388,9 @@ public partial class World
             return;
         }
         var slot = Inv[abs];
-        if (!slot.IsTradable)
+        if (UseRefusal(ItemUse.NpcSell, slot) is not ItemUseRules.Allowed and var sellRefusal)
         {
-            _vendorFooter.Status(VendorUntradableText, bad: true);
+            _vendorFooter.Status(ItemData.Text(sellRefusal, "Non tradable item"), bad: true);
             return;
         }
         int unit = VendorSellUnit(slot.ItemId);
@@ -391,7 +401,11 @@ public partial class World
         }
         if (slot.Count <= 1 || ItemData.Get(slot.ItemId) is not { Countable: not 0 })
         {
-            SellSlot(abs, 1, slot.ItemId);
+            int soldId = slot.ItemId;
+            Notice.Confirm(this,
+                $"{ItemData.Text(SellConfirmText, "Will you sell %s?").Replace("%s", ItemData.DisplayName(soldId))}\n{unit:n0} gold",
+                "Sell", "Cancel",
+                () => { if (InMainBag(abs) && Inv[abs].ItemId == soldId) SellSlot(abs, 1, soldId); });
             return;
         }
         _tradePrompt.Open(ItemData.Icon(slot.ItemId), $"Sell {ItemData.DisplayName(slot.ItemId)}",
@@ -448,7 +462,14 @@ public partial class World
         _vendorFooter.Status(_pendingTrade.Buy
             ? $"Bought {ItemData.DisplayName(_pendingTrade.ItemId)} (−{price:n0})"
             : $"Sold {ItemData.DisplayName(_pendingTrade.ItemId)} (+{price:n0})", bad: false);
+        int textId = !_pendingTrade.Buy ? ShopReceivedText : LoyaltyShop ? ShopUsedContText : ShopPaidText;
+        CombatLogAdd(ItemData.Text(textId, "%d").Replace("%d", price.ToString("n0")), CombatLogKind.Resource, ShopLogTint, tab: LogTab.Item);
     }
+
+    private const int ShopPaidText = 7683;
+    private const int ShopReceivedText = 7682;
+    private const int ShopUsedContText = 15717;
+    private static readonly Color ShopLogTint = Color.Color8(255, 102, 0);
 
     private void OnTradeMoved()
     {

@@ -81,7 +81,8 @@ public partial class World
         root.AddThemeConstantOverride("separation", 8);
 
         root.AddChild(UiTheme.SectionTitle("What you want to buy"));
-        _wishCells = BuildMerchantGrid(root, StallSlots, StallColumns, OnWishSlotClicked);
+        _wishCells = BuildMerchantGrid(root, StallSlots, StallColumns, OnWishSlotClicked,
+            acceptKey: "invFrom", onDropFrom: WishFromBag);
 
         var summary = UiTheme.Section();
         root.AddChild(summary);
@@ -142,6 +143,7 @@ public partial class World
         root.AddChild(UiTheme.SectionTitle("Wanted"));
         _wantedCells = BuildMerchantGrid(root, StallSlots, StallColumns, null,
             acceptKey: "bagFrom", onDropFrom: SellToWanted);
+        foreach (var cell in _wantedCells) cell.OnSecondary = SellWantedFromBag;
 
         var money = UiTheme.Section();
         root.AddChild(money);
@@ -150,6 +152,9 @@ public partial class World
         root.AddChild(UiTheme.SectionTitle("Your bags"));
         _wantedBagCells = BuildMerchantGrid(root, GridCount, StallBagColumns, null,
             dragKey: "bagFrom");
+        foreach (var cell in _wantedBagCells) cell.OnSecondary = SellBagToWanted;
+
+        root.AddChild(UiTheme.Text("Right-click a wanted item or a matching bag item to sell it.", 11, UiTheme.TextDim));
 
         _wantedStatus = UiTheme.Text("", 12, UiTheme.TextLo);
         _wantedStatus.AutowrapMode = TextServer.AutowrapMode.WordSmart;
@@ -210,14 +215,45 @@ public partial class World
         bool stackable = hit.Def.Countable > 0;
         int most = stackable ? MerchantWishMaxStack : 1;
         var preview = new ItemSlot { ItemId = hit.Id, Count = 1, Durability = (short)hit.Def.Duration };
+        int carried = CarriedCount(hit.Id);
+        string hint = carried > 0 ? $"Gold Offered per Item   ·   You have {carried:n0} of these" : "Gold Offered per Item";
 
-        AskAmount(preview, "Gold Offered per Item", ItemData.BuyPrice(hit.Id), most, stackable,
+        AskAmount(preview, hint, ItemData.BuyPrice(hit.Id), most, stackable,
             (wantCount, price) =>
             {
                 _wishes[slot] = new MerchantWishItem { ItemId = hit.Id, Count = wantCount, Price = price };
                 CloseWishFind();
                 RefreshWishList();
             }, defaultCount: 1, marketPriceItem: hit.Id);
+    }
+
+    private void WishFromBag(int abs, int target)
+    {
+        if (!_wishShown || abs < 0 || abs >= Inv.Length || Inv[abs].IsEmpty) return;
+        var def = ItemData.Get(Inv[abs].ItemId);
+        if (def == null) return;
+        if (!ItemSearch.IsTradeable(def)) { SetWishStatus("This item cannot be traded.", true); return; }
+        int slot = target >= 0 && target < _wishes.Length && _wishes[target].IsEmpty ? target : FirstEmptyWish();
+        if (slot < 0) { SetWishStatus($"The list only holds {StallSlots} items.", true); return; }
+        _wishFindTarget = slot;
+        OnWishItemPicked(new ItemSearchHit(def, ItemData.ExtFor(Inv[abs].ItemId)), 1);
+    }
+
+    private int FirstEmptyWish()
+    {
+        for (int i = 0; i < _wishes.Length; i++) if (_wishes[i].IsEmpty) return i;
+        return -1;
+    }
+
+    private int CarriedCount(int itemId)
+    {
+        int total = 0;
+        for (int abs = 0; abs < Inv.Length; abs++)
+        {
+            if (Inv[abs].ItemId != itemId || !BagSearch.Searchable(abs)) continue;
+            total += ItemData.Get(itemId) is { IsChargeItem: true } || Inv[abs].Count <= 0 ? 1 : Inv[abs].Count;
+        }
+        return total;
     }
 
     private void RefreshWishList()
@@ -348,7 +384,10 @@ public partial class World
         for (int i = 0; i < _wantedCells.Length; i++)
         {
             var item = _wantedItems[i];
-            _wantedCells[i].Set(StallSlot(item), PriceNote("Pays", item.Price, item.Count));
+            int carried = item.IsEmpty ? 0 : CarriedCount(item.ItemId);
+            string note = PriceNote("Pays", item.Price, item.Count);
+            _wantedCells[i].Set(StallSlot(item), carried > 0 ? $"{note}\nYou have {carried:n0} of these" : note);
+            _wantedCells[i].Modulate = item.IsEmpty || carried > 0 ? Colors.White : WantedUnheldTint;
         }
         for (int i = 0; i < _wantedBagCells.Length; i++)
         {
@@ -357,17 +396,35 @@ public partial class World
             var cell = _wantedBagCells[i];
             cell.TipSlot = absSlot;
             cell.Set(slot);
-            cell.Modulate = WantedMatch(slot) ? Colors.White : new Color(1, 1, 1, 0.45f);
+            cell.Modulate = WantedMatch.FirstWanted(_wantedItems, slot.ItemId) >= 0 ? Colors.White : WantedUnheldTint;
         }
         _wantedBalance.Text = Sheet.Gold.ToString("n0");
     }
 
-    private bool WantedMatch(ItemSlot slot)
+    private static readonly Color WantedUnheldTint = new(1, 1, 1, 0.45f);
+
+    private void SellWantedFromBag(int wantedSlot)
     {
-        if (slot.IsEmpty) return false;
-        foreach (var wanted in _wantedItems)
-            if (!wanted.IsEmpty && wanted.ItemId == slot.ItemId) return true;
-        return false;
+        if (wantedSlot < 0 || wantedSlot >= _wantedItems.Length || _wantedItems[wantedSlot].IsEmpty) return;
+        int gridIndex = WantedMatch.FirstBagSlot(BagGrid(), _wantedItems[wantedSlot].ItemId);
+        if (gridIndex < 0) { SetWantedStatus("You don't have that item.", true); return; }
+        SellToWanted(gridIndex, wantedSlot);
+    }
+
+    private void SellBagToWanted(int gridIndex)
+    {
+        int absSlot = GridStart + gridIndex;
+        if (absSlot >= Inv.Length || Inv[absSlot].IsEmpty) return;
+        int wantedSlot = WantedMatch.FirstWanted(_wantedItems, Inv[absSlot].ItemId);
+        if (wantedSlot < 0) { SetWantedStatus("They don't want that item.", true); return; }
+        SellToWanted(gridIndex, wantedSlot);
+    }
+
+    private ItemSlot[] BagGrid()
+    {
+        var grid = new ItemSlot[GridCount];
+        for (int i = 0; i < GridCount && GridStart + i < Inv.Length; i++) grid[i] = Inv[GridStart + i];
+        return grid;
     }
 
     private void SellToWanted(int gridIndex, int wantedSlot)

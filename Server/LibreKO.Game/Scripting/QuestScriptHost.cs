@@ -43,6 +43,7 @@ public sealed class QuestScriptHost(
     public bool IsInParty => context.ClanParty.IsInParty(0);
     public bool IsPartyLeader => context.ClanParty.IsPartyLeader(0);
     public bool IsKing => context.Player.IsKing(0);
+    public bool KrowazOpen => context.Player.IsKrowazOpen();
     public bool ActionFailed => context.ActionFailed;
 
     public int ItemCount(int itemId) => context.Items.HowmuchItem(0, itemId);
@@ -185,6 +186,9 @@ public sealed class QuestScriptHost(
     public void GiveAchievement(int achievementId) => context.PendingAchievements.Add(achievementId);
 
     public void JoinTempleEvent() => context.PendingTempleEventJoin = true;
+    public void JoinSoccerTeam(bool blue) => context.PendingSoccerTeam = blue ? SoccerService.TeamBlue : SoccerService.TeamRed;
+    public void StartSoccerGame() => context.PendingSoccerStart = true;
+    public void ShowRankBoard() => context.PendingRankBoard = true;
 
     public void SetPlayerLevel(int level) => context.PendingLevel = level;
 
@@ -288,6 +292,7 @@ public sealed class QuestScriptHost(
     }
     public void TeleportToZone(int zoneId, int x, int z) => context.Dialog.ZoneChange(zoneId, x, z);
     public void TeleportClanToZone(int zoneId, int x, int z) => context.RequestClanZoneChange(zoneId, x, z);
+    public void TeleportPartyToZone(int zoneId, int x, int z) => context.RequestPartyZoneChange(zoneId, x, z);
     public void EnterInstance(int zoneId, int set, int x, int z) => context.RequestInstance(zoneId, set, x, z);
     public void EnterClanInstance(int zoneId, int set, int x, int z) => context.RequestClanInstance(zoneId, set, x, z);
     public void CastSkill(int skillId)
@@ -311,6 +316,8 @@ public sealed class QuestScriptHost(
     public void OpenJobChangePanel() => context.Dialog.SendJobChangePanel();
     public void OpenClanRenamePanel() => context.Dialog.SendClanNameChange();
     public void OpenRebirthPanel() => context.Dialog.SendRebirthPanel();
+    public void OpenRebirthResetPanel() => context.Dialog.SendRebirthResetPanel();
+    public void OpenRepurchaseWindow() => context.Dialog.SendRepurchaseWindow();
     public void OpenFamiliarPanel() => context.Dialog.SendFamiliarPanel();
     public void OpenFamiliarShop() => context.Dialog.SendFamiliarShop();
     public void OpenGenderChangePanel() => context.Dialog.SendGenderChangePanel();
@@ -318,6 +325,7 @@ public sealed class QuestScriptHost(
     public void OpenSpecialAuctionPanel() => context.Dialog.SendSpecialAuctionPanel();
     public void OpenItemCombinePanel() => context.Dialog.SendItemCombinePanel();
     public void OpenCombineRecipeBook() => context.Dialog.SendCombineRecipeBook();
+    public void OpenDisassembleWindow() => context.Dialog.SendDisassemblePanel();
     public void OpenNationTransferPanel() => context.RequestNationTransfer();
 
     public void Unsupported(string what)

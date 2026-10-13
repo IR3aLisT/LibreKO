@@ -9,4 +9,5 @@ public enum ItemFlag : byte
     Sealed = 4,
     NotBound = 7,
     Bound = 8,
+    SealedPremium = 12,
 }

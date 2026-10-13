@@ -1,4 +1,4 @@
-namespace LibreKO.Game.Protocol;
+﻿namespace LibreKO.Game.Protocol;
 
 public enum WarehouseSubOpcode : byte
 {
@@ -16,6 +16,9 @@ public enum ClanWarehouseResult : byte
 {
     Failed = 0,
     Succeeded = 1,
+    NotInClan = 2,
+    NoRights = 3,
+    NotStorable = 4,
 }
 
 public enum VipWarehouseResult : byte
@@ -24,6 +27,8 @@ public enum VipWarehouseResult : byte
     Succeeded = 1,
     Rejected = 2,
     Expired = 3,
+    NotAVaultKey = 4,
+    RentalAtCap = 5,
 }
 
 public enum VipWarehouseSubOpcode : byte
@@ -34,6 +39,7 @@ public enum VipWarehouseSubOpcode : byte
     Store = 4,
     InventoryMove = 5,
     UseVault = 6,
+    KeyExpired = 7,
     SetPassword = 8,
     CancelPassword = 9,
     ChangePassword = 10,

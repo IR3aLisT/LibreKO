@@ -23,6 +23,9 @@ public partial class CharSelect : Node3D
     private ColorPickerButton _hairColour = null!;
     private Button _createConfirm = null!;
     private readonly Label[] _statValues = new Label[5];
+    private readonly Label[] _statNames = new Label[5];
+    private Label _createDesc = null!;
+    private const string RecommendedHint = "Recommended for this class";
     private readonly Button[] _statUp = new Button[5];
     private readonly Button[] _statDown = new Button[5];
     private readonly int[] _alloc = new int[5];
@@ -107,6 +110,11 @@ public partial class CharSelect : Node3D
             form.AddChild(_jobBox);
         }
 
+        _createDesc = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
+        _createDesc.AddThemeFontSizeOverride("font_size", 12);
+        _createDesc.AddThemeColorOverride("font_color", UiTheme.TextLo);
+        form.AddChild(_createDesc);
+
         form.AddChild(SectionLabel("Stats"));
         for (int i = 0; i < 5; i++) form.AddChild(BuildStatRow(i));
         _createBonus = new Label { HorizontalAlignment = HorizontalAlignment.Right };
@@ -131,7 +139,7 @@ public partial class CharSelect : Node3D
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             EditAlpha = false,
         };
-        _hairColour.ColorChanged += _ => RefreshCreatePreview();
+        _hairColour.ColorChanged += OnHairColourChanged;
         colourRow.AddChild(_hairColour);
         form.AddChild(colourRow);
 
@@ -169,9 +177,15 @@ public partial class CharSelect : Node3D
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 6);
 
-        var label = new Label { Text = StatLabels[index], CustomMinimumSize = new Vector2(44, 0) };
+        var label = new Label
+        {
+            Text = StatLabels[index],
+            CustomMinimumSize = new Vector2(44, 0),
+            MouseFilter = Control.MouseFilterEnum.Stop,
+        };
         label.AddThemeFontSizeOverride("font_size", 13);
         label.AddThemeColorOverride("font_color", UiTheme.TextHi);
+        _statNames[index] = label;
         row.AddChild(label);
 
         _statDown[index] = Ui.MenuButton("◀", 26, 13);
@@ -198,6 +212,23 @@ public partial class CharSelect : Node3D
         row.AddChild(_statUp[index]);
         return row;
     }
+
+    private void RefreshCreateGuide()
+    {
+        string race = Text(StarterStats.RaceTextId(_createRace));
+        string job = Text(StarterStats.ClassTextId(_createClass));
+        _createDesc.Text = race.Length > 0 && job.Length > 0 ? $"{race}\n\n{job}" : race + job;
+        _createDesc.Visible = _createDesc.Text.Length > 0;
+        for (int i = 0; i < _statNames.Length; i++)
+        {
+            bool recommended = StarterStats.Recommended(_createClass, i);
+            _statNames[i].AddThemeColorOverride("font_color", recommended ? UiTheme.GoldVivid : UiTheme.TextHi);
+            string hint = Text(StarterStats.StatHintTextId(i));
+            _statNames[i].TooltipText = recommended ? $"{RecommendedHint}\n{hint}" : hint;
+        }
+    }
+
+    private static string Text(int id) => id > 0 ? ItemData.Text(id, "") : "";
 
     private static Label BuildStepperRow(Control parent, string label, System.Action<int> step)
     {
@@ -313,22 +344,23 @@ public partial class CharSelect : Node3D
             b.SetMeta("job", cls);
             _jobBox.AddChild(b);
         }
-        PickClass(classes[0]);
         _createFace = Mathf.Clamp(_createFace, 0, Mathf.Max(0, CharacterPreview.FaceCount(race) - 1));
         _createHair = Mathf.Clamp(_createHair, 0, Mathf.Max(0, CharacterPreview.HairCount(race) - 1));
-        RefreshCreateState();
-        RefreshCreatePreview();
+        PickClass(classes[0]);
     }
 
     private void PickClass(int cls)
     {
         _createClass = cls;
+        RefreshCreateGuide();
         foreach (Node c in _jobBox.GetChildren())
             if (c is Button b && b.HasMeta("job"))
                 Ui.MarkSelected(b, b.GetMeta("job").AsInt32() == cls);
 
         System.Array.Clear(_alloc, 0, _alloc.Length);
+        _createHelmetOff = false;
         RefreshCreateState();
+        RefreshCreatePreview();
     }
 
     private void StepStat(int index, int dir)
@@ -357,6 +389,7 @@ public partial class CharSelect : Node3D
     {
         int n = Mathf.Max(1, CharacterPreview.FaceCount(_createRace));
         _createFace = WrapRange(_createFace + dir, 0, n - 1);
+        _createHelmetOff = true;
         RefreshCreateState();
         RefreshCreatePreview();
     }
@@ -365,6 +398,7 @@ public partial class CharSelect : Node3D
     {
         int n = Mathf.Max(1, CharacterPreview.HairCount(_createRace));
         _createHair = WrapRange(_createHair + dir, 0, n - 1);
+        _createHelmetOff = true;
         RefreshCreateState();
         RefreshCreatePreview();
     }
@@ -398,12 +432,34 @@ public partial class CharSelect : Node3D
         _createConfirm.Disabled = _creating || !named || left != 0;
     }
 
+    private bool _createHelmetOff;
+    private System.Collections.Generic.Dictionary<(int Race, int Class), NewCharacterLook>? _newLooks;
+
+    private int[] CreatePreviewGear()
+    {
+        if (_newLooks == null)
+        {
+            using var f = Godot.FileAccess.Open(NewCharacterLooks.ResourcePath, Godot.FileAccess.ModeFlags.Read);
+            _newLooks = f != null ? NewCharacterLooks.Parse(f.GetAsText()) : new();
+        }
+        return _newLooks.TryGetValue((_createRace, _createClass), out var look)
+            ? NewCharacterLooks.Gear(look, helmet: !_createHelmetOff)
+            : System.Array.Empty<int>();
+    }
+
+    private void OnHairColourChanged(Color colour)
+    {
+        bool hairShown = _createHelmetOff;
+        _createHelmetOff = true;
+        if (hairShown && _characterModel != null && CharacterPreview.RetintHair(_characterModel, colour)) return;
+        RefreshCreatePreview();
+    }
+
     private void RefreshCreatePreview()
     {
-        if (_characterModel != null && GodotObject.IsInstanceValid(_characterModel))
-            _characterModel.QueueFree();
+        DetachCharacterModel();
         _characterModel = CharacterPreview.Build(_createRace, _createFace,
-            System.Array.Empty<int>(), _createHair, _hairColour.Color);
+            CreatePreviewGear(), _createHair, _hairColour.Color);
         if (_characterModel == null) return;
         _characterModel.Position = Vector3.Zero;
         _characterAnchor.RotationDegrees = new Vector3(0, _stageStandYaw, 0);
@@ -440,15 +496,9 @@ public partial class CharSelect : Node3D
             Net.I.RequestCharList();
             return;
         }
-        _createStatus.Text = code switch
-        {
-            3 => "That name is already taken.",
-            5 => "Invalid name.",
-            6 => "That name is not allowed.",
-            7 => "Invalid race for that nation.",
-            9 => "Invalid job for that race.",
-            _ => $"Create failed (code {code}).",
-        };
+        string message = ItemData.Text(CreateCharacterTexts.TextFor(code), $"Create failed (code {code}).");
+        _createStatus.Text = message;
+        Notice.Show(this, message, ItemData.Text(CreateCharacterTexts.TitleText, "Failed creating character"));
         RefreshCreateState();
     }
 }

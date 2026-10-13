@@ -171,7 +171,7 @@ public class KnightsManagementPacketService(
                 live?.Level ?? member.Level,
                 live?.Class ?? member.Class,
                 live != null,
-                string.Empty,
+                member.Memo,
                 hours));
         }
 
@@ -360,10 +360,18 @@ public class KnightsManagementPacketService(
 
     public async Task HandleUpdateMemoAsync(UserSession session, Packet packet)
     {
-        if (session.KnightsId <= 0 || packet.RemainingBytes < 1)
+        if (packet.RemainingBytes < 1)
             return;
 
         var memoType = packet.ReadByte();
+        if (session.KnightsId <= 0)
+        {
+            if (memoType == 3)
+                await session.Client.SendPacket(KnightsPacketWriter.MemoUpdate(
+                    KnightsSubOpcode.UpdateMemo, 3, KnightsPacketConstants.MemoNotInClan, string.Empty));
+            return;
+        }
+
         switch (memoType)
         {
             case 2:
@@ -377,13 +385,15 @@ public class KnightsManagementPacketService(
                     if (memo.Length > KnightsPacketConstants.MaxMemoLength)
                     {
                         await session.Client.SendPacket(KnightsPacketWriter.MemoUpdate(
-                            KnightsSubOpcode.UpdateMemo, 3, KnightsPacketWriter.Failed, memo));
+                            KnightsSubOpcode.UpdateMemo, 3, KnightsPacketConstants.MemoLengthRefused, string.Empty));
                         return;
                     }
 
-                    await knightsRuntimeService.NotifyOnlineClanMembersAsync(session.KnightsId,
-                        KnightsPacketWriter.MemoUpdate(
-                            KnightsSubOpcode.UpdateMemo, 3, KnightsPacketWriter.Succeeded, memo));
+                    using (var scope = scopeFactory.CreateScope())
+                        await scope.ServiceProvider.GetRequiredService<IKnightsRepository>().SetClanMemoAsync(session.CharacterId, memo);
+
+                    await session.Client.SendPacket(KnightsPacketWriter.MemoUpdate(
+                        KnightsSubOpcode.UpdateMemo, 3, KnightsPacketWriter.Succeeded, memo));
                 }
                 return;
 

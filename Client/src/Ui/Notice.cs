@@ -12,6 +12,9 @@ public partial class Notice : CanvasLayer
     private System.Action? _onClose;
     private System.Action? _onConfirm;
     private System.Action? _onCancel;
+    private System.Action<string>? _onSubmit;
+    private VBoxContainer? _column;
+    private LineEdit? _field;
 
     public static Notice Show(Node parent, string message, string title = "Notice",
                               System.Action? onClose = null)
@@ -27,6 +30,25 @@ public partial class Notice : CanvasLayer
         var n = new Notice { Layer = 220, _onConfirm = onConfirm, _onCancel = onCancel };
         parent.AddChild(n);
         n.Build(message, title, dismissable: true, confirmText, cancelText);
+        return n;
+    }
+
+    public static Notice AskText(Node parent, string message, System.Action<string> onSubmit, string title = "Notice",
+                                 string initial = "", string placeholder = "", int maxLength = 0, bool secret = false,
+                                 string confirmText = "OK", string cancelText = "Cancel", System.Action? onCancel = null)
+    {
+        var n = new Notice { Layer = 220, _onSubmit = onSubmit, _onCancel = onCancel };
+        parent.AddChild(n);
+        if (PluginHost.Ui.TextInputBuilder is { } build)
+        {
+            n.AddChild(build(new TextRequest(title, message, initial, placeholder, maxLength, secret,
+                confirmText, cancelText, n.Submit, n.Decline)));
+            return n;
+        }
+        n.Build(message, title, dismissable: true, confirmText, cancelText, allowPlugin: false);
+        n._field = new LineEdit { Text = initial, PlaceholderText = placeholder, MaxLength = maxLength, Secret = secret };
+        n._column!.AddChild(n._field);
+        n._field.CallDeferred(Control.MethodName.GrabFocus);
         return n;
     }
 
@@ -55,9 +77,9 @@ public partial class Notice : CanvasLayer
     }
 
     private void Build(string message, string title, bool dismissable,
-                       string? confirmText = null, string? cancelText = null)
+                       string? confirmText = null, string? cancelText = null, bool allowPlugin = true)
     {
-        if (PluginHost.Ui.DialogBuilder is { } pluginDialog)
+        if (allowPlugin && PluginHost.Ui.DialogBuilder is { } pluginDialog)
         {
             _request = new DialogRequest(title, message, confirmText ?? "OK",
                 confirmText == null ? null : cancelText ?? "Cancel", dismissable, Accept, Decline, Close);
@@ -120,7 +142,10 @@ public partial class Notice : CanvasLayer
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         };
         _message.AddThemeColorOverride("font_color", UiTheme.TextHi);
-        body.AddChild(_message);
+        _column = new VBoxContainer();
+        _column.AddThemeConstantOverride("separation", 10);
+        body.AddChild(_column);
+        _column.AddChild(_message);
 
         if (!dismissable) return;
 
@@ -151,8 +176,22 @@ public partial class Notice : CanvasLayer
         row.AddChild(_cancel);
     }
 
+    private void Submit(string text)
+    {
+        var submit = _onSubmit;
+        _onSubmit = null;
+        _onCancel = null;
+        Close();
+        submit?.Invoke(text);
+    }
+
     private void Accept()
     {
+        if (_field != null)
+        {
+            Submit(_field.Text);
+            return;
+        }
         var confirm = _onConfirm;
         _onConfirm = null;
         _onCancel = null;
@@ -165,14 +204,19 @@ public partial class Notice : CanvasLayer
         var cancel = _onCancel;
         _onConfirm = null;
         _onCancel = null;
+        _onSubmit = null;
         Close();
         cancel?.Invoke();
     }
+
+    private bool TypingElsewhere() =>
+        GetViewport().GuiGetFocusOwner() is (LineEdit or TextEdit) and var owner && !IsAncestorOf(owner);
 
     public override void _Input(InputEvent ev)
     {
         if (_ok == null) return;
         if (ev is not InputEventKey { Pressed: true, Echo: false } k) return;
+        if (k.Keycode is Key.Enter or Key.KpEnter or Key.Space && TypingElsewhere()) return;
 
         if (_cancel != null)
         {

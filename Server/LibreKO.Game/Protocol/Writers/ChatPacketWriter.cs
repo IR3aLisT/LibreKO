@@ -67,15 +67,15 @@ public sealed class ChatPacketWriter
         }.Build();
 
     public static Packet DeathNotice(
-        byte victimNation, byte killerNation, byte noticeType,
+        byte killerNation, byte victimNation, bool victimIsKing, byte noticeType,
         int killerId, string killerName, int victimId, string victimName,
         short victimX, short victimZ)
     {
         var packet = new Packet(GameOpcodes.GS_CHAT);
         packet.WriteByte(TypeDeathNotice);
-        packet.WriteByte(victimNation);
         packet.WriteByte(killerNation);
-        packet.WriteByte(0);
+        packet.WriteByte(victimNation);
+        packet.WriteByte(victimIsKing ? (byte)1 : (byte)0);
         packet.WriteByte(noticeType);
         packet.WriteInt(killerId);
         packet.WriteSByteString(killerName);

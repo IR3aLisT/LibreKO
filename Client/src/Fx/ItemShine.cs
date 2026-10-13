@@ -18,6 +18,23 @@ public static class ItemShine
     internal const float DefaultAlphaCutoff = 0.01f;
 
     private const string MetaKey = "gko_shine";
+    internal const string ClassicParam = "item_shine_classic";
+    private static bool _globalsReady;
+
+    internal static void EnsureGlobals()
+    {
+        if (_globalsReady) return;
+        _globalsReady = true;
+        RenderingServer.GlobalShaderParameterAdd(ClassicParam, RenderingServer.GlobalShaderParameterType.Float, ClassicValue);
+    }
+
+    private static float ClassicValue => Config.Shine == LibreKO.Domain.ShineStyle.Classic ? 1f : 0f;
+
+    internal static void ApplyStyle()
+    {
+        if (!_globalsReady) return;
+        RenderingServer.GlobalShaderParameterSet(ClassicParam, ClassicValue);
+    }
 
     private static readonly float[] PeakByLevel = { 0.45f, 0.60f, 0.78f, 1.0f };
     private static readonly bool[] PulsesByLevel = { true, true, true, false };
@@ -219,7 +236,14 @@ public static class ItemShine
     }
 
     private static Shader? _shineShader;
-    private static Shader ShineShader => _shineShader ??= GD.Load<Shader>("res://shaders/item_shine.gdshader");
+    private static Shader ShineShader
+    {
+        get
+        {
+            EnsureGlobals();
+            return _shineShader ??= GD.Load<Shader>("res://shaders/item_shine.gdshader");
+        }
+    }
 }
 
 public partial class ItemShineDriver : Node
@@ -231,6 +255,7 @@ public partial class ItemShineDriver : Node
 
     public void Restore(MeshInstance3D mesh)
     {
+        if (mesh.Mesh == null) return;
         foreach (var s in Surfaces)
             if (s.Index < mesh.GetSurfaceOverrideMaterialCount() && mesh.GetSurfaceOverrideMaterial(s.Index) == s.Surface)
                 mesh.SetSurfaceOverrideMaterial(s.Index, s.Original);

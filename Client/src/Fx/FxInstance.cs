@@ -17,6 +17,7 @@ public partial class FxInstance : Node3D
     public Vector3 FollowOffset;
     public Vector3 FollowDirection = Vector3.Back;
     public bool InheritFollowScale = true;
+    public bool FollowRotation;
 
     public bool Asleep;
     internal bool Driven { get; private set; }
@@ -30,7 +31,7 @@ public partial class FxInstance : Node3D
     private readonly List<IFxPart> _parts = new();
 
     public void Pin(Node3D anchor, Node3D facing, Vector3 offset, Vector3 direction,
-        bool inheritScale = true)
+        bool inheritScale = true, bool followRotation = false)
     {
         TopLevel = true;
         FollowNode = anchor;
@@ -38,6 +39,7 @@ public partial class FxInstance : Node3D
         FollowOffset = offset;
         FollowDirection = direction;
         InheritFollowScale = inheritScale;
+        FollowRotation = followRotation;
         _pinnedValid = false;
         TickAim(0f);
     }
@@ -181,11 +183,16 @@ public partial class FxInstance : Node3D
             if (!GodotObject.IsInstanceValid(FollowNode)) { FollowNode = null; _pinnedValid = false; return; }
             if (!IsInsideTree() || !FollowNode.IsInsideTree()) { _pinnedValid = false; return; }
             var follow = FollowNode.GlobalTransform;
-            Vector3 facing;
-            if (FacingNode == FollowNode) facing = follow.Basis * FollowDirection;
-            else if (FacingNode != null && GodotObject.IsInstanceValid(FacingNode)) facing = FacingNode.GlobalBasis * FollowDirection;
-            else facing = _pinnedValid ? _pinned.Basis.Z : GlobalBasis.Z;
-            var basis = AimBasis(facing);
+            Basis basis;
+            if (FollowRotation) basis = follow.Basis.Orthonormalized() * AimBasis(FollowDirection);
+            else
+            {
+                Vector3 facing;
+                if (FacingNode == FollowNode) facing = follow.Basis * FollowDirection;
+                else if (FacingNode != null && GodotObject.IsInstanceValid(FacingNode)) facing = FacingNode.GlobalBasis * FollowDirection;
+                else facing = _pinnedValid ? _pinned.Basis.Z : GlobalBasis.Z;
+                basis = AimBasis(facing);
+            }
             float scale = InheritFollowScale ? follow.Basis.Scale.Y : 1f;
             if (scale <= 0.001f) scale = 1f;
             var pinned = new Transform3D(basis.Scaled(Vector3.One * scale), follow * FollowOffset);

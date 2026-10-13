@@ -7,6 +7,8 @@ public sealed class ItemGetPacketWriter
     public const byte ResultError = 0;
     public const byte ResultSuccess = 1;
     public const byte ResultPartyCoins = 2;
+    public const byte ResultPartyMember = 3;
+    public const int FailureRetry = -7;
     public const int FailureNoRoom = -11;
 
     public const byte PositionGold = byte.MaxValue;
@@ -19,9 +21,12 @@ public sealed class ItemGetPacketWriter
     public ushort Count { get; set; }
     public int Money { get; set; }
     public ushort BundleSlot { get; set; }
+    public string LooterName { get; set; } = "";
 
-    public static Packet Failed(byte result) => new ItemGetPacketWriter() { Result = result }.Build();
-    public static Packet NoRoom() => new ItemGetPacketWriter() { Result = ResultError, Failure = FailureNoRoom }.Build();
+    public static Packet Failed(int bundleId) =>
+        new ItemGetPacketWriter() { Result = ResultError, BundleId = bundleId, Failure = FailureRetry }.Build();
+    public static Packet NoRoom(int bundleId) =>
+        new ItemGetPacketWriter() { Result = ResultError, BundleId = bundleId, Failure = FailureNoRoom }.Build();
     public static Packet Looted(
         int bundleId, byte position, int itemId, ushort count, int money, ushort bundleSlot) => new ItemGetPacketWriter()
         {
@@ -43,18 +48,34 @@ public sealed class ItemGetPacketWriter
             ItemId = itemId,
             Money = money,
         }.Build();
+    public static Packet PartyMemberLooted(int bundleId, int itemId, string looterName, ushort bundleSlot) =>
+        new ItemGetPacketWriter()
+        {
+            Result = ResultPartyMember,
+            BundleId = bundleId,
+            ItemId = itemId,
+            LooterName = looterName,
+            BundleSlot = bundleSlot,
+        }.Build();
     private Packet Build()
     {
         var packet = new Packet(GameOpcodes.GS_ITEM_GET);
         packet.WriteByte(Result);
 
+        packet.WriteInt(BundleId);
+        if (Result == ResultPartyMember)
+        {
+            packet.WriteInt(ItemId);
+            packet.WriteString(LooterName);
+            packet.WriteUShort(BundleSlot);
+            return packet;
+        }
         if (Result != ResultSuccess && Result != ResultPartyCoins)
         {
-            if (Failure is { } failure) packet.WriteInt(failure);
+            packet.WriteInt(Failure ?? FailureRetry);
             return packet;
         }
 
-        packet.WriteInt(BundleId);
         packet.WriteByte(Position);
         packet.WriteInt(ItemId);
         if (Result == ResultPartyCoins)

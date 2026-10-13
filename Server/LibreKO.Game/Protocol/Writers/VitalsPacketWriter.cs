@@ -15,6 +15,19 @@ public sealed class VitalsPacketWriter
         return packet;
     }
 
+    public const byte StaminaBar = 1;
+    public const byte StaminaBarShown = 1;
+
+    public static Packet StaminaChange(short maxSp, short sp)
+    {
+        var packet = new Packet(GameOpcodes.GS_SP_CHANGE);
+        packet.WriteByte(StaminaBar);
+        packet.WriteByte(StaminaBarShown);
+        packet.WriteByte((byte)Math.Clamp((int)maxSp, 0, byte.MaxValue));
+        packet.WriteByte((byte)Math.Clamp((int)sp, 0, byte.MaxValue));
+        return packet;
+    }
+
     public static Packet MpChange(short maxMp, short mp)
     {
         var packet = new Packet(GameOpcodes.GS_MSP_CHANGE);

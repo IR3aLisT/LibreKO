@@ -19,6 +19,8 @@ uniform float rise_seconds = 1.0;
 uniform float hold_seconds = 1.0;
 uniform float fall_seconds = 1.0;
 uniform float cycle_seconds = 1.0;
+global uniform float item_shine_classic;
+const float classic_gain = 0.6;
 
 varying vec3 surface_position;
 
@@ -46,7 +48,10 @@ void fragment() {
     vec4 texel = albedo_color;
     if (use_texture) texel *= texture(albedo_texture, uv);
     float coverage = use_alpha ? texel.a * step(alpha_cutoff, texel.a) : 1.0;
-
+    if (item_shine_classic > 0.5) {
+        if (coverage < 0.005) discard;
+        ALBEDO = texel.rgb * coverage * envelope() * classic_gain;
+    } else {
     float rim = pow(1.0 - abs(dot(normalize(NORMAL), normalize(VIEW))), 2.8);
     float edge = 0.0;
     float halo = 0.0;
@@ -68,4 +73,5 @@ void fragment() {
         + edge * (1.1 + filament * 0.6) + halo * 0.7) * strength;
     vec3 gold = mix(vec3(1.0, 0.65, 0.28), vec3(1.0, 0.94, 0.78), smoothstep(0.2, 1.2, energy));
     ALBEDO = gold * energy * pulse;
+    }
 }

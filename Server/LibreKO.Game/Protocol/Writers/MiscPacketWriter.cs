@@ -1,4 +1,5 @@
 ﻿using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Game.World;
 
 namespace LibreKO.Game.Protocol.Writers;
 
@@ -26,6 +27,18 @@ public sealed class MiscPacketWriter
 
     private const byte GateFlagChanged = 1;
 
+    public const byte ObjectTurnType = 10;
+
+    public static Packet ObjectTurn(byte direction, int objectId, short degrees)
+    {
+        var packet = new Packet(GameOpcodes.GS_OBJECT_EVENT);
+        packet.WriteByte(ObjectTurnType);
+        packet.WriteByte(direction);
+        packet.WriteInt(objectId);
+        packet.WriteShort(degrees);
+        return packet;
+    }
+
     public static Packet ObjectEvent(byte objectType, byte result, int objectId)
     {
         var packet = new Packet(GameOpcodes.GS_OBJECT_EVENT);
@@ -35,12 +48,26 @@ public sealed class MiscPacketWriter
         return packet;
     }
 
-    public static Packet Premium(byte accountStatus, byte premiumType, int premiumSeconds)
+    public const byte PremiumList = 1;
+
+    public static Packet Premium(byte premiumType, int premiumHours, IReadOnlyList<PremiumBonus> bonuses)
     {
         var packet = new Packet(GameOpcodes.GS_PREMIUM);
-        packet.WriteByte(accountStatus);
-        packet.WriteByte(premiumType);
-        packet.WriteInt(premiumSeconds);
+        packet.WriteByte(PremiumList);
+        bool active = premiumType != 0 && premiumHours > 0;
+        packet.WriteByte(active ? (byte)1 : (byte)0);
+        if (active)
+        {
+            packet.WriteByte(premiumType);
+            packet.WriteUShort((ushort)Math.Min(premiumHours, ushort.MaxValue));
+        }
+        packet.WriteByte(active ? premiumType : (byte)0);
+        packet.WriteByte((byte)bonuses.Count);
+        foreach (var bonus in bonuses)
+        {
+            packet.WriteByte((byte)bonus.Kind);
+            packet.WriteShort(bonus.Value);
+        }
         return packet;
     }
 

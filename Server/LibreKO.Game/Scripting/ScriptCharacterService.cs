@@ -74,7 +74,7 @@ public class ScriptCharacterService(
         session.PremiumExpiry = standing.AddDays(days);
         session.AccountStatus = UserSession.AccountStatusPremium;
         queuedPackets.Add(MiscPacketWriter.Premium(
-            session.AccountStatus, session.PremiumType, session.PremiumTime));
+            session.PremiumType, session.PremiumTime, PremiumBonusList.For(session, gameData)));
         return true;
     }
 
@@ -270,7 +270,7 @@ public class ScriptCharacterService(
             BonusAttackSpeed = type4Data.AttackSpeed
         };
 
-        session.ActiveBuffs[skillId] = buff;
+        session.SetBuff(skillId, buff);
         if (buff.HasStatModifiers)
             session.RecalculateStatsWithBuffs(gameData);
         return true;

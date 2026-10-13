@@ -105,7 +105,7 @@ public class ItemEquipmentEffectService(
             BonusAttackSpeed = type4Data.AttackSpeed
         };
 
-        session.ActiveBuffs[skillId] = buff;
+        session.SetBuff(skillId, buff);
         session.RecalculateStatsWithBuffs(gameDataService);
 
         await sessionManager.Regions.SendToRegion(
@@ -132,7 +132,7 @@ public class ItemEquipmentEffectService(
             if (HasOtherEquippedItemOp(session, itemId, operation.SkillId))
                 continue;
 
-            if (!session.ActiveBuffs.TryRemove(operation.SkillId, out var removedBuff))
+            if (!session.RemoveBuff(operation.SkillId, out var removedBuff))
                 continue;
 
             removedBuffs.Add((operation.SkillId, removedBuff));

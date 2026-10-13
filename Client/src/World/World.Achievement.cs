@@ -37,7 +37,17 @@ public partial class World
     private VBoxContainer _achList = null!;
     private HBoxContainer _achTabs = null!;
     private Label _achSummary = null!;
+    private Label _achTitleBanner = null!;
+    private const float AchRewardSlotSize = 36f;
+    private const float AchRowBarHeight = 4f;
+    private const int AchCategoryWidth = 136;
+    private HBoxContainer _achListRow = null!;
+    private VBoxContainer _achCategoryBox = null!;
+    private int _achGroup = AchievementData.AllGroups;
     private CheckButton _achHideClaimed = null!;
+    private LineEdit _achSearch = null!;
+    private OptionButton _achStatus = null!;
+    private AchievementStatusFilter _achStatusFilter = AchievementStatusFilter.All;
     private bool _achShown;
 
     private bool _achOnSummary = true;
@@ -81,6 +91,21 @@ public partial class World
             _achTabs.AddChild(btn);
         }
 
+        var banner = new PanelContainer();
+        banner.AddThemeStyleboxOverride("panel", UiTheme.HeaderBand(2));
+        root.AddChild(banner);
+        var bannerRow = new HBoxContainer();
+        bannerRow.AddThemeConstantOverride("separation", 8);
+        banner.AddChild(bannerRow);
+        _achTitleBanner = UiTheme.Text("", 13, UiTheme.GoldBright);
+        _achTitleBanner.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _achTitleBanner.VerticalAlignment = VerticalAlignment.Center;
+        bannerRow.AddChild(_achTitleBanner);
+        var changeTitle = new Button { Text = "Change title", FocusMode = Control.FocusModeEnum.None };
+        changeTitle.AddThemeFontSizeOverride("font_size", 12);
+        changeTitle.Pressed += ToggleTitlePicker;
+        bannerRow.AddChild(changeTitle);
+
         var summaryRow = new HBoxContainer();
         summaryRow.AddThemeConstantOverride("separation", 10);
         root.AddChild(summaryRow);
@@ -94,13 +119,44 @@ public partial class World
         _achHideClaimed.Toggled += _ => RebuildAchievementList(keepScroll: false);
         summaryRow.AddChild(_achHideClaimed);
 
+        var filterRow = new HBoxContainer();
+        filterRow.AddThemeConstantOverride("separation", 6);
+        root.AddChild(filterRow);
+        _achSearch = new LineEdit
+        {
+            PlaceholderText = "Search achievements",
+            ClearButtonEnabled = true,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        _achSearch.AddThemeFontSizeOverride("font_size", 12);
+        _achSearch.TextChanged += _ => RebuildAchievementList(keepScroll: false);
+        filterRow.AddChild(_achSearch);
+        _achStatus = new OptionButton { FocusMode = Control.FocusModeEnum.None };
+        _achStatus.AddThemeFontSizeOverride("font_size", 12);
+        foreach (var (_, label) in AchievementFilter.Options) _achStatus.AddItem(label);
+        _achStatus.ItemSelected += index =>
+        {
+            _achStatusFilter = AchievementFilter.Options[index].Filter;
+            RebuildAchievementList(keepScroll: false);
+        };
+        filterRow.AddChild(_achStatus);
+
         _achScroll = new ScrollContainer
         {
             CustomMinimumSize = new Vector2(AchListWidth, AchListHeight),
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
         };
-        root.AddChild(_achScroll);
+        _achListRow = new HBoxContainer();
+        _achListRow.AddThemeConstantOverride("separation", 6);
+        root.AddChild(_achListRow);
+        var categoryPanel = UiTheme.Section();
+        categoryPanel.CustomMinimumSize = new Vector2(AchCategoryWidth, 0);
+        _achListRow.AddChild(categoryPanel);
+        _achCategoryBox = new VBoxContainer();
+        _achCategoryBox.AddThemeConstantOverride("separation", 2);
+        categoryPanel.AddChild(_achCategoryBox);
+        _achListRow.AddChild(_achScroll);
         _achList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         _achList.AddThemeConstantOverride("separation", 3);
         _achScroll.AddChild(_achList);
@@ -118,6 +174,7 @@ public partial class World
         Net.I.AchievementListEvent += OnAchievementList;
         Net.I.AchievementSummaryEvent += OnAchievementSummary;
         Net.I.AchievementClaimEvent += OnAchievementClaim;
+        Net.I.TitleAnswerEvent += OnTitleAnswer;
         Net.I.TitleChangedEvent += OnEntityTitle;
         ApplyAchievementPageVisibility();
         RefreshAchievementCounts();
@@ -132,6 +189,7 @@ public partial class World
         Net.I.AchievementListEvent -= OnAchievementList;
         Net.I.AchievementSummaryEvent -= OnAchievementSummary;
         Net.I.AchievementClaimEvent -= OnAchievementClaim;
+        Net.I.TitleAnswerEvent -= OnTitleAnswer;
         Net.I.TitleChangedEvent -= OnEntityTitle;
         if (_trophyBlink != null && _trophyBlink.IsValid()) _trophyBlink.Kill();
         _trophyBlink = null;
@@ -158,10 +216,48 @@ public partial class World
     {
         if (_achTab == category && !_achOnSummary) return;
         _achTab = category;
+        _achGroup = AchievementData.AllGroups;
         _achOnSummary = false;
         ApplyAchievementPageVisibility();
         RefreshAchievementCounts();
         RebuildAchievementList(keepScroll: false);
+    }
+
+    private void SelectAchievementGroup(int group)
+    {
+        if (_achGroup == group) return;
+        _achGroup = group;
+        RebuildAchievementList(keepScroll: false);
+    }
+
+    private void RebuildAchievementCategories()
+    {
+        foreach (var child in _achCategoryBox.GetChildren()) child.QueueFree();
+        _achCategoryBox.AddChild(BuildAchievementCategoryRow("All", AchievementData.AllGroups));
+        foreach (int group in AchievementData.CategoriesOf(_achTab))
+            _achCategoryBox.AddChild(BuildAchievementCategoryRow(AchievementData.CategoryName(group), group));
+    }
+
+    private Control BuildAchievementCategoryRow(string name, int group)
+    {
+        bool chosen = _achGroup == group;
+        var row = new PanelContainer
+        {
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            MouseDefaultCursorShape = Control.CursorShape.PointingHand,
+        };
+        var box = UiTheme.Row(selected: true);
+        if (!chosen) { box.BgColor = Colors.Transparent; box.BorderColor = Colors.Transparent; }
+        row.AddThemeStyleboxOverride("panel", box);
+        var label = UiTheme.Text(name, 12, chosen ? UiTheme.GoldBright : UiTheme.TextLo);
+        label.ClipText = true;
+        row.AddChild(label);
+        row.GuiInput += ev =>
+        {
+            if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
+                SelectAchievementGroup(group);
+        };
+        return row;
     }
 
     private void ShowAchievementSummaryPage()
@@ -175,9 +271,10 @@ public partial class World
 
     private void ApplyAchievementPageVisibility()
     {
-        _achScroll.Visible = !_achOnSummary;
+        _achListRow.Visible = !_achOnSummary;
         _achSummaryPage.Visible = _achOnSummary;
         _achHideClaimed.Visible = !_achOnSummary;
+        _achSearch.GetParent<Control>().Visible = !_achOnSummary;
         _achSummary.Visible = !_achOnSummary;
     }
 
@@ -225,12 +322,20 @@ public partial class World
 
         RefreshTrophy(claimable);
         RefreshAchievementTabs();
+        RefreshAchievementTitleBanner();
         if (_titleShown) RebuildTitleList();
 
         _achSummary.Text = _achEntries.Count == 0
             ? "Waiting for the server…"
             : $"{AchievementData.TabName(_achTab)} {claimedInCategory} / {inCategory}"
               + $"   ·   {claimed} of {_achEntries.Count} earned   ·   {points} points";
+    }
+
+    private void RefreshAchievementTitleBanner()
+    {
+        if (!GodotObject.IsInstanceValid(_achTitleBanner)) return;
+        string worn = AchievementData.TitleOf(Net.I.DisplayTitleId) is { } title ? title.Name : "None";
+        _achTitleBanner.Text = $"Title: {worn}";
     }
 
     private void RebuildAchievementSummary()
@@ -291,8 +396,20 @@ public partial class World
 
         col.AddChild(BuildAchievementProgressRow("Total", doneTotal, ofTotal, UiTheme.GoldBright, bold: true));
         col.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4) });
-        foreach (var row in rows)
-            col.AddChild(BuildAchievementProgressRow(row.Name, row.Done, row.Of, UiTheme.Bronze));
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var row = BuildAchievementProgressRow(rows[i].Name, rows[i].Done, rows[i].Of, UiTheme.Bronze);
+            var tab = AchievementData.Tabs[i];
+            row.MouseFilter = Control.MouseFilterEnum.Stop;
+            row.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
+            row.TooltipText = $"Open {rows[i].Name}";
+            row.GuiInput += ev =>
+            {
+                if (ev is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
+                    SelectAchievementTab(tab);
+            };
+            col.AddChild(row);
+        }
 
         return section;
     }
@@ -445,13 +562,16 @@ public partial class World
     {
         int scrollBack = keepScroll ? _achScroll.ScrollVertical : 0;
         foreach (var child in _achList.GetChildren()) child.QueueFree();
+        RebuildAchievementCategories();
 
         _achVisible.Clear();
         foreach (var entry in _achEntries)
         {
             if (AchievementData.Get(entry.Id) is not { } info) continue;
-            if (info.Tab != _achTab) continue;
+            if (_achGroup == AchievementData.AllGroups ? info.Tab != _achTab : info.Group != _achGroup) continue;
             if (_achHideClaimed.ButtonPressed && entry.Claimed) continue;
+            if (!AchievementFilter.Passes(_achStatusFilter, entry.Claimable || entry.Claimed)) continue;
+            if (!AchievementFilter.Matches(info.Name, info.Objective, _achSearch.Text)) continue;
             _achVisible.Add(entry);
         }
         _achVisible.Sort(CompareAchievements);
@@ -465,7 +585,9 @@ public partial class World
         if (_achVisible.Count == 0 && _achEntries.Count > 0)
         {
             var empty = HudStyle.Label(13);
-            empty.Text = _achHideClaimed.ButtonPressed
+            empty.Text = _achSearch.Text.Trim().Length > 0 || _achStatusFilter != AchievementStatusFilter.All
+                ? $"No achievement in {AchievementData.TabName(_achTab)} matches."
+                : _achHideClaimed.ButtonPressed
                 ? $"Everything in {AchievementData.TabName(_achTab)} is claimed."
                 : $"Nothing in {AchievementData.TabName(_achTab)} yet.";
             _achList.AddChild(empty);
@@ -527,6 +649,12 @@ public partial class World
         text.AddChild(UiTheme.Text(
             $"{entry.ProgressText}   ·   {info.Points} pts",
             11, entry.Claimable ? UiTheme.Gold : UiTheme.TextDim));
+        if (!entry.Claimed)
+        {
+            var bar = QuestHuntBar((int)(entry.Fraction * 100f), 100);
+            bar.CustomMinimumSize = new Vector2(0, AchRowBarHeight);
+            text.AddChild(bar);
+        }
 
         if (info.TitleId != 0 && AchievementData.TitleOf(info.TitleId) is { } unlocked)
         {
@@ -537,6 +665,14 @@ public partial class World
             text.AddChild(titleLine);
         }
 
+        if (info.ItemId != 0 && ItemData.Get(info.ItemId) != null)
+        {
+            var reward = new ItemSlotView(AchRewardSlotSize) { SizeFlagsVertical = Control.SizeFlags.ShrinkCenter };
+            reward.Set(new ItemSlot { ItemId = info.ItemId, Count = (short)Math.Max(1, info.ItemCount), Durability = 1 });
+            reward.Hovered += view => ShowItemTooltip(-1, view.Item);
+            reward.Unhovered += _ => HideItemTooltip();
+            columns.AddChild(reward);
+        }
         columns.AddChild(BuildAchievementAction(entry, info));
         return row;
     }
@@ -549,6 +685,16 @@ public partial class World
 
     private Control BuildAchievementAction(AchievementEntry entry, AchievementData.Info info)
     {
+        if (entry.Claimed && info.TitleId != 0 && AchievementData.TitleOf(info.TitleId) != null)
+        {
+            if (Net.I.DisplayTitleId == info.TitleId)
+                return UiTheme.Text("Worn", 12, UiTheme.Gold);
+            int titleId = info.TitleId;
+            var equip = new Button { Text = "Equip", FocusMode = Control.FocusModeEnum.None };
+            equip.Pressed += () => Net.I.SendTitleSelect(titleId);
+            return equip;
+        }
+
         if (entry.Claimed)
             return UiTheme.Text("Claimed", 12, UiTheme.TextDim);
 
@@ -557,26 +703,48 @@ public partial class World
 
         int id = entry.Id;
         var claim = new Button { Text = "Claim", FocusMode = Control.FocusModeEnum.None };
-        claim.Pressed += () => Net.I.SendAchievementClaim(id);
+        claim.Pressed += () =>
+        {
+            _achClaimPending = id;
+            Net.I.SendAchievementClaim(id);
+        };
         return claim;
     }
 
+    private const int TextItemIssued = 11411;
+    private const int TextInventoryFull = 2301;
+    private const int TextItemMissing = 19383;
+    private const int TextErrorCode = 1517;
+    private const int TextTitleSucceeded = 6651;
+    private const int TextTitleFailed = 6652;
+    private const int TextUseAfterSeconds = 30702;
+
+    private int _achClaimPending;
+
     private void OnAchievementClaim(int achievementId, int result)
     {
-        if (result == Net.AchievementClaimIssued)
+        string text = result switch
         {
-            CombatNotice($"{AchievementData.NameOf(achievementId)} — reward received.");
+            Net.AchievementClaimIssued => SystemText(TextItemIssued, "Item has been issued."),
+            Net.AchievementClaimInventoryFull => SystemText(TextInventoryFull, "You cannot pick up the item because your item inventory is full."),
+            Net.AchievementClaimItemMissing => SystemText(TextItemMissing, "Item doesn't exist."),
+            _ => SystemText(TextErrorCode, "Error code (%d)", result.ToString()),
+        };
+        if (achievementId == _achClaimPending)
+        {
+            _achClaimPending = 0;
+            Notice.Show(this, text);
             return;
         }
-
-        CombatNotice(result switch
-        {
-            Net.AchievementClaimInventoryFull => "Your inventory is too full for that reward.",
-            Net.AchievementClaimItemMissing => "That reward no longer exists.",
-            Net.AchievementClaimNotAvailable => "That achievement is not complete yet.",
-            _ => $"The reward could not be issued. ({result})",
-        });
+        CombatNotice(result == Net.AchievementClaimIssued
+            ? $"Achievement completed: {AchievementData.NameOf(achievementId)}."
+            : text);
     }
+
+    private void OnTitleAnswer(AchievementTitleAnswer answer) =>
+        Notice.Show(this, answer.Result == AchievementTitleAnswer.Done ? SystemText(TextTitleSucceeded, "Succeeded.")
+            : answer.Cooldown ? SystemText(TextUseAfterSeconds, "You can use it after %d seconds.", answer.Seconds.ToString())
+            : SystemText(TextTitleFailed, "Failed."));
 
     private void BuildTrophy()
     {

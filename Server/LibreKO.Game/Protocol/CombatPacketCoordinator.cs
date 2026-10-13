@@ -3,6 +3,7 @@ using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol.Writers;
+using LibreKO.Game.Scripting;
 using LibreKO.Game.World;
 using Microsoft.Extensions.Logging;
 
@@ -22,6 +23,8 @@ public class CombatPacketCoordinator(
     IMagicItemUsageService magicItemUsageService,
     ICombatLifecycleService combatLifecycleService,
     IStealthService stealthService,
+    IResurrectionOfferService resurrectionOfferService,
+    IQuestDefinitionSource questDefinitions,
     ILogger<CombatPacketCoordinator> logger) : ICombatPacketCoordinator
 {
     private const short MaxSwingInterval = 500;
@@ -30,7 +33,7 @@ public class CombatPacketCoordinator(
     public async Task HandleAttackAsync(IClient client, Packet packet)
     {
         var session = sessionManager.GetByClientId(client.Id);
-        if (session == null || session.Hp <= 0)
+        if (session == null || session.Hp <= 0 || session.IsBlinking)
             return;
 
         if (packet.RemainingBytes < 10)
@@ -153,10 +156,43 @@ public class CombatPacketCoordinator(
     public async Task HandleRegeneAsync(IClient client, Packet packet)
     {
         var session = sessionManager.GetByClientId(client.Id);
-        if (session == null)
+        if (session == null || packet.RemainingBytes < 1)
             return;
 
-        await combatLifecycleService.HandleRegeneAsync(client, session, packet.ReadByte());
+        var regeneType = packet.ReadByte();
+        switch (regeneType)
+        {
+            case RegeneResurrectChoice when packet.RemainingBytes >= 5:
+                await HandleResurrectChoiceAsync(client, session, packet.ReadByte(), packet.ReadInt());
+                break;
+            case RegeneResurrectAccept when packet.RemainingBytes >= 4:
+                await resurrectionOfferService.AcceptAsync(session, packet.ReadInt());
+                break;
+            case RegeneResurrectChoice or RegeneResurrectAccept:
+                break;
+            default:
+                await combatLifecycleService.HandleRegeneAsync(client, session, regeneType);
+                break;
+        }
+    }
+
+    private const byte RegeneResurrectChoice = 4;
+    private const byte RegeneResurrectAccept = 5;
+
+    private async Task HandleResurrectChoiceAsync(IClient client, UserSession session, byte choice, int casterId)
+    {
+        resurrectionOfferService.Withdraw(session, casterId);
+        if (session.Hp > 0)
+            return;
+
+        if (choice != ResurrectionOfferService.ChoiceInPlace)
+        {
+            await combatLifecycleService.HandleRegeneAsync(client, session, RegenePacketWriter.RespawnNormal);
+            return;
+        }
+
+        if (await resurrectionOfferService.PayInPlaceAsync(session))
+            await combatLifecycleService.RespawnInPlaceAsync(client, session);
     }
 
     public async Task HandleSkillDataAsync(IClient client, Packet packet)
@@ -214,8 +250,8 @@ public class CombatPacketCoordinator(
         if (npc == null || !npc.IsAlive || npc.ZoneId != session.ZoneId)
             return;
 
-        var npcResult = BuildTargetHpPacket(targetId, echo, npc.MaxHp, npc.Hp, 0);
-        await client.SendPacket(npcResult);
+        var drops = TargetQuestDrops.For(session, npc, gameDataService, questDefinitions);
+        await client.SendPacket(TargetHpPacketWriter.Polled(targetId, echo, npc.MaxHp, npc.Hp, 0, drops));
     }
 
     private static Packet BuildTargetHpPacket(int targetId, byte echo, int maxHp, int hp, int damage)
