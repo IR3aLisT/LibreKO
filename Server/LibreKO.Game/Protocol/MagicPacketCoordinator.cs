@@ -82,6 +82,13 @@ public class MagicPacketCoordinator(
             return;
         }
 
+        if (RequiresLearnedSkill((MagicProcessOpcode)magicOpcode) && MagicSkillRequirement.IsClassPassive(magic))
+        {
+            logger.LogWarning("Refusing passive skill {SkillId} from {Name}", skillId, session.Name);
+            await SendMagicFailAsync(session, skillId, MagicFailCode.ForStage((MagicProcessOpcode)magicOpcode));
+            return;
+        }
+
         if (RequiresLearnedSkill((MagicProcessOpcode)magicOpcode)
             && !MagicSkillRequirement.IsGranted(magic, session.TransformId))
         {

@@ -18,18 +18,28 @@ public class MagicSkillRequirementTests : GameTestBase
     private const int Slash = 101003;
     private const int LogosHorns = 106019;
     private const int SweepingPotion = 490201;
+    private const int Endure = 105620;
+    private const int Awakening = 115802;
+    private const int ElmoradAwakening = 215802;
+    private const int Shouting = 130013;
+    private const int ElmoradAssault = 230014;
+    private const int MonsterStone = 610064;
+    private const int EventTreeSkill = 491330;
+    private const int KurianMaster = 115;
 
     private const int IceTree = 6;
     private const int LightningTree = 7;
+    private const int MasterTree = 8;
 
-    private static MagicData Magic(int id, int tree, int skillLevel, byte type1 = 3, int recastTenths = 0) =>
+    private static MagicData Magic(int id, int tree, int skillLevel, byte type1 = 3, int recastTenths = 0, int msp = 0) =>
         new()
         {
             Id = id,
             Skill = (short)tree,
             SkillLevel = (short)skillLevel,
             Type1 = type1,
-            ReCastTime = (short)recastTenths
+            ReCastTime = (short)recastTenths,
+            Msp = (short)msp
         };
 
     private static byte[] Mastery(int fire = 0, int ice = 0, int lightning = 0, int master = 0)
@@ -120,6 +130,51 @@ public class MagicSkillRequirementTests : GameTestBase
         MagicSkillRequirement.IsMet(potion, level: 1, Mastery()).Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData(Awakening, 1158, 0, true)]
+    [InlineData(ElmoradAwakening, 2158, 0, true)]
+    [InlineData(Endure, 1056, 0, true)]
+    [InlineData(Slash, 1010, 1, false)]
+    [InlineData(Shouting, 0, 0, false)]
+    [InlineData(ElmoradAssault, 1000, 0, false)]
+    [InlineData(MonsterStone, 0, 0, false)]
+    [InlineData(EventTreeSkill, 3200, 0, false)]
+    public void OnlyAPassiveSkillOfAClassTreeIsRefused(int skillId, int tree, int type1, bool passive)
+    {
+        MagicSkillRequirement.IsClassPassive(Magic(skillId, tree, skillLevel: 1, (byte)type1)).Should().Be(passive);
+    }
+
+    [Fact]
+    public async Task TheCoordinatorRefusesALearnedPassiveSkillAndKeepsTheMana()
+    {
+        using var provider = CreateProvider(
+            _ => { },
+            gameData => gameData.GetMagic(Awakening)
+                .Returns(Magic(Awakening, tree: 1158, skillLevel: 2, type1: 0, msp: 300)));
+
+        var client = Substitute.For<IClient>();
+        client.Id.Returns(Guid.NewGuid());
+        client.SendPacket(Arg.Any<Packet>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var sessionManager = provider.GetRequiredService<SessionManager>();
+        var kurian = sessionManager.CreateSession(client, characterId: 903, accountId: 904);
+        kurian.Name = "Brann";
+        kurian.Class = KurianMaster;
+        kurian.Level = 80;
+        kurian.ZoneId = 21;
+        kurian.Hp = 1000;
+        kurian.MaxHp = 1000;
+        kurian.Mp = 1000;
+        kurian.MaxMp = 1000;
+        kurian.SkillPoints[MasterTree] = 2;
+        sessionManager.Regions.AddToRegion(kurian);
+
+        var coordinator = provider.GetRequiredService<IMagicPacketCoordinator>();
+        await coordinator.HandleAsync(client, CastPacket(Awakening, kurian.CharacterId, MagicProcessOpcode.Effecting));
+
+        kurian.Mp.Should().Be(1000);
+    }
+
     [Fact]
     public async Task TheCoordinatorDropsACastOfAnUnlearnedSkill()
     {
@@ -156,10 +211,10 @@ public class MagicSkillRequirementTests : GameTestBase
         mage.SkillCooldowns.Should().NotBeEmpty();
     }
 
-    private static Packet CastPacket(int skillId, int casterId)
+    private static Packet CastPacket(int skillId, int casterId, MagicProcessOpcode stage = MagicProcessOpcode.Casting)
     {
         var packet = new Packet(GameOpcodes.GS_MAGIC_PROCESS);
-        packet.WriteByte((byte)MagicProcessOpcode.Casting);
+        packet.WriteByte((byte)stage);
         packet.WriteInt(skillId);
         packet.WriteInt(casterId);
         packet.WriteInt(casterId);

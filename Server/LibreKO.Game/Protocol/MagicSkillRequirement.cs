@@ -1,4 +1,6 @@
 ﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Enums;
+using LibreKO.Game.World;
 
 namespace LibreKO.Game.Protocol;
 
@@ -14,6 +16,7 @@ public static class MagicSkillRequirement
     private const int NationBuffBand = 1000;
     private const int FirstNationBuffLine = 1;
     private const int LastNationBuffLine = 5;
+    private const int TreesPerClass = 10;
 
     public const int NoNationRole = 0;
     public const int NationRoleFirstBand = 1;
@@ -57,6 +60,16 @@ public static class MagicSkillRequirement
         }
 
         return tree % 10 != CommandTreeDigit || CommandForms.Contains(transformId);
+    }
+
+    public static bool IsClassPassive(MagicData magic) =>
+        magic.PrimaryType == MagicSkillType.None && IsClassTree(magic.Skill);
+
+    private static bool IsClassTree(int skillTree)
+    {
+        var classId = (short)(skillTree / TreesPerClass);
+        return ClassIdHelper.GetNation(classId) is AccountNation.Karus or AccountNation.ElMorad
+            && ClassIdHelper.GetSubtype(classId) is >= (int)ClassSubtype.WarriorBeginner and <= (int)ClassSubtype.KurianMastered;
     }
 
     public static string Describe(MagicData magic)
