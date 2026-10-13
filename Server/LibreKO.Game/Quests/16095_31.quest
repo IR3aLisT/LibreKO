@@ -1,0 +1,19 @@
+﻿Bind Npc 16095 Zone 31
+
+On greeting
+    Say "Do you wish to enter the Lost Chamber to face Ultima? You will need a Crystal of Trial to unlock the portal."
+    Topic "Enter the Lost Chamber." goto enter_chamber
+    Topic "Cancel" goto close
+    Goto close
+
+On enter_chamber
+    If player has 389190000
+        Take 1 of 389190000
+        If player leads a party
+            Teleport party to 31 at 940 186
+        Else
+            Teleport 31 at 940 186
+    Else
+        Say "You do not have a Crystal of Trial. You need to obtain one before entering the Lost Chamber."
+        Topic "Confirm" goto close
+    Goto close
