@@ -1,38 +1,34 @@
 ﻿Bind Npc 16095 Zone 31
 
 On greeting
-    Say "Do you wish to enter the Lost Chamber to face Ultima? You will need a Crystal of Trial to unlock the portal."
+    Say "Do you wish to enter the Lost Chamber to face Ultima? You will need a Crystal of Trial and the Fragments of Lechery, Jealousy, and Avarice to unlock the portal."
     Topic "Enter the Lost Chamber." goto enter_chamber
     Topic "Craft Crystal of Trial." goto craft_crystal
     Topic "Cancel" goto close
     Goto close
 
 On enter_chamber
-    If player has 389190000
+    If player has 389190000 and player has 389164000 and player has 389165000 and player has 389166000
         Take 1 of 389190000
-        If player leads a party
-            Teleport party to 31 at 940 186
-        Else
-            Teleport 31 at 940 186
+        Take 1 of 389164000
+        Take 1 of 389165000
+        Take 1 of 389166000
+        Teleport party to 31 at 940 186
     Else
-        Say "You do not have a Crystal of Trial. You need to obtain one before entering the Lost Chamber."
+        Say "You need a Crystal of Trial and the Fragments of Lechery, Jealousy, and Avarice to enter the Lost Chamber."
         Topic "Confirm" goto close
     Goto close
 
 On craft_crystal
-    If player has 389160000 and player has 389161000 and player has 389162000 and player has 389163000 and player has 389164000 and player has 389165000 and player has 389166000
+    If player has 389160000 and player has 389161000 and player has 389162000 and player has 389163000
         Take 1 of 389160000
         Take 1 of 389161000
         Take 1 of 389162000
         Take 1 of 389163000
-        Take 1 of 389164000
-        Take 1 of 389165000
-        Take 1 of 389166000
         Give 1 of 389190000
         Say "The fragments of sin merge into a Crystal of Trial! You may now use it to enter the Lost Chamber."
         Topic "Confirm" goto close
     Else
-        Say "To craft a Crystal of Trial, you need 1x of each of the 7 Fragments of Sin (Arrogance, Gluttony, Rage, Sloth, Lechery, Jealousy, and Avarice)."
+        Say "To craft a Crystal of Trial, you need 1x of each of the 4 Fragments: Arrogance, Gluttony, Rage, and Sloth."
         Topic "Confirm" goto close
     Goto close
-

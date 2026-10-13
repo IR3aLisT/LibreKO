@@ -21,12 +21,4 @@ public interface ICharacterRepository
     Task<IReadOnlyList<int>> GetPlayerIdsByLoyalty(AccountNation nation, int count, bool monthly);
 
     Task<int> ResetDailyLoyaltyAll();
-
-    Task<int> RelocateCharactersFromZoneAsync(
-        byte fromZoneId,
-        byte toZoneId,
-        float karusX,
-        float karusZ,
-        float elMoradX,
-        float elMoradZ);
 }

@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LibreKO.Quests;
 using LibreKO.Quests.Binding;
@@ -48,18 +48,23 @@ public class BifrostQuestTests
                 && buttons.Any(b => b.Label.Text!.Contains("Cancel"))));
     }
 
-    private static readonly int[] FragmentIds =
+    private static readonly int[] CraftFragmentIds =
     [
-        389160000, 389161000, 389162000, 389163000, 389164000, 389165000, 389166000
+        389160000, 389161000, 389162000, 389163000
+    ];
+
+    private static readonly int[] EnterItemIds =
+    [
+        CrystalOfTrial, 389164000, 389165000, 389166000
     ];
 
     [Fact]
-    public void RothenQuest_CraftCrystal_WithAll7Fragments_TakesAll7AndGivesCrystal()
+    public void RothenQuest_CraftCrystal_With4Fragments_Takes4AndGivesCrystal()
     {
         var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
         var compilation = QuestCompilation.Create(text, "16095_31.quest");
         var host = Substitute.For<IQuestHost>();
-        foreach (var fragId in FragmentIds)
+        foreach (var fragId in CraftFragmentIds)
         {
             host.ItemCount(fragId).Returns(1);
         }
@@ -69,7 +74,7 @@ public class BifrostQuestTests
 
         interpreter.Run(craftEventId).Failure.Should().BeNull();
 
-        foreach (var fragId in FragmentIds)
+        foreach (var fragId in CraftFragmentIds)
         {
             host.Received(1).TakeItem(fragId, 1);
         }
@@ -82,14 +87,10 @@ public class BifrostQuestTests
         var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
         var compilation = QuestCompilation.Create(text, "16095_31.quest");
         var host = Substitute.For<IQuestHost>();
-        // Only 4 of the 7 fragments
         host.ItemCount(389160000).Returns(1);
         host.ItemCount(389161000).Returns(1);
         host.ItemCount(389162000).Returns(1);
-        host.ItemCount(389163000).Returns(1);
-        host.ItemCount(389164000).Returns(0);
-        host.ItemCount(389165000).Returns(0);
-        host.ItemCount(389166000).Returns(0);
+        host.ItemCount(389163000).Returns(0);
 
         var interpreter = new QuestInterpreter(compilation.Program, host);
         compilation.Program.EventNames.TryGetValue("craft_crystal", out var craftEventId).Should().BeTrue();
@@ -101,55 +102,44 @@ public class BifrostQuestTests
         host.Received(1).ShowDialog(
             DialogStyle.Talk,
             Arg.Any<int>(),
-            Arg.Is<DialogLine>(l => l.Text!.Contains("7 Fragments of Sin")),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("Arrogance, Gluttony, Rage, and Sloth")),
             Arg.Any<IReadOnlyList<DialogButton>>());
     }
 
     [Fact]
-    public void RothenQuest_Enter_With_Crystal_As_Party_Leader_Takes_Item_And_Teleports_Party()
+    public void RothenQuest_Enter_With_Crystal_And_Remaining_Fragments_Takes_Items_And_Teleports_Party()
     {
         var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
         var compilation = QuestCompilation.Create(text, "16095_31.quest");
         var host = Substitute.For<IQuestHost>();
-        host.ItemCount(CrystalOfTrial).Returns(1);
-        host.IsPartyLeader.Returns(true);
+        foreach (var itemId in EnterItemIds)
+        {
+            host.ItemCount(itemId).Returns(1);
+        }
 
         var interpreter = new QuestInterpreter(compilation.Program, host);
         compilation.Program.EventNames.TryGetValue("enter_chamber", out var enterEventId).Should().BeTrue();
 
         interpreter.Run(enterEventId).Failure.Should().BeNull();
 
-        host.Received(1).TakeItem(CrystalOfTrial, 1);
+        foreach (var itemId in EnterItemIds)
+        {
+            host.Received(1).TakeItem(itemId, 1);
+        }
         host.Received(1).TeleportPartyToZone(31, 940, 186);
         host.DidNotReceive().TeleportToZone(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<int>());
     }
 
     [Fact]
-    public void RothenQuest_Enter_With_Crystal_As_Solo_Takes_Item_And_Teleports_Individual()
+    public void RothenQuest_Enter_Missing_Any_Item_Does_Not_Take_Items_And_Warns_Player()
     {
         var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
         var compilation = QuestCompilation.Create(text, "16095_31.quest");
         var host = Substitute.For<IQuestHost>();
         host.ItemCount(CrystalOfTrial).Returns(1);
-        host.IsPartyLeader.Returns(false);
-
-        var interpreter = new QuestInterpreter(compilation.Program, host);
-        compilation.Program.EventNames.TryGetValue("enter_chamber", out var enterEventId).Should().BeTrue();
-
-        interpreter.Run(enterEventId).Failure.Should().BeNull();
-
-        host.Received(1).TakeItem(CrystalOfTrial, 1);
-        host.Received(1).TeleportToZone(31, 940, 186);
-        host.DidNotReceive().TeleportPartyToZone(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<int>());
-    }
-
-    [Fact]
-    public void RothenQuest_Enter_Without_Crystal_Does_Not_Take_Item_And_Warns_Player()
-    {
-        var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
-        var compilation = QuestCompilation.Create(text, "16095_31.quest");
-        var host = Substitute.For<IQuestHost>();
-        host.ItemCount(CrystalOfTrial).Returns(0);
+        host.ItemCount(389164000).Returns(1);
+        host.ItemCount(389165000).Returns(0); // missing Jealousy
+        host.ItemCount(389166000).Returns(1);
 
         var interpreter = new QuestInterpreter(compilation.Program, host);
         compilation.Program.EventNames.TryGetValue("enter_chamber", out var enterEventId).Should().BeTrue();
@@ -163,7 +153,7 @@ public class BifrostQuestTests
         host.Received(1).ShowDialog(
             DialogStyle.Talk,
             Arg.Any<int>(),
-            Arg.Is<DialogLine>(l => l.Text!.Contains("do not have a Crystal of Trial")),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("Crystal of Trial")),
             Arg.Any<IReadOnlyList<DialogButton>>());
     }
 

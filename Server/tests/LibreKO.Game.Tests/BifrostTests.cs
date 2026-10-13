@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
@@ -46,7 +46,7 @@ public class BifrostTests
     [Fact]
     public async Task MonumentKilled_ByKarusPlayer_TransitionsToFarmingPhaseWithKarusAsWinner()
     {
-        _bifrostService.Start(monumentMinutes: 30, loserDelayMinutes: 30, farmingMinutes: 120);
+        _bifrostService.Start(monumentMinutes: 30, loserDelayMinutes: 30, farmingMinutes: 60);
 
         var killerSession = CreateSession(1, "KarusHero");
         killerSession.Nation = AccountNation.Karus;
@@ -62,7 +62,7 @@ public class BifrostTests
 
         _bifrostService.Phase.Should().Be(BifrostPhase.Farming);
         _bifrostService.WinnerNation.Should().Be(AccountNation.Karus);
-        _bifrostService.RemainingSecs.Should().Be(120 * 60);
+        _bifrostService.RemainingSecs.Should().Be(60 * 60);
         _bifrostService.LoserDelayRemainingSecs.Should().Be(30 * 60);
     }
 
@@ -146,8 +146,8 @@ public class BifrostTests
         playerInBifrost.ZoneId = BifrostRules.ZoneBifrost;
         _sessions.RegisterSession(playerInBifrost);
 
-        // Simulate ticks until farming expires
-        for (int i = 0; i < 120 * 60; i++)
+        // Simulate ticks until farming expires (default 60 minutes)
+        for (int i = 0; i < 60 * 60; i++)
         {
             await bifrostService.TickAsync();
         }
@@ -156,79 +156,12 @@ public class BifrostTests
         await transitionMock.Received().ChangeZoneAsync(
             playerInBifrost,
             BifrostRules.ZoneRonarkLand,
-            BifrostRules.RonarkLandKarusX,
-            BifrostRules.RonarkLandKarusZ);
+            0f,
+            0f);
     }
 
     [Fact]
-    public async Task UltimaKilled_EndsEventAndSweepsOnlineAndOfflineCharactersToRonarkLand()
-    {
-        var transitionMock = Substitute.For<IZoneTransitionService>();
-        var charRepoMock = Substitute.For<ICharacterRepository>();
-        var scopeFactoryMock = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
-        var scopeMock = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScope>();
-        var serviceProviderMock = Substitute.For<IServiceProvider>();
-
-        scopeFactoryMock.CreateScope().Returns(scopeMock);
-        scopeMock.ServiceProvider.Returns(serviceProviderMock);
-        serviceProviderMock.GetService(typeof(ICharacterRepository)).Returns(charRepoMock);
-
-        var bifrostService = new BifrostEventService(
-            _sessions,
-            transitionMock,
-            Substitute.For<ILogger<BifrostEventService>>(),
-            scopeFactoryMock);
-
-        bifrostService.SetWinner(AccountNation.Karus);
-
-        var karusPlayer = CreateSession(11, "KarusFarmer");
-        karusPlayer.Nation = AccountNation.Karus;
-        karusPlayer.ZoneId = BifrostRules.ZoneBifrost;
-        _sessions.RegisterSession(karusPlayer);
-
-        var elmoPlayer = CreateSession(12, "ElmoFarmer");
-        elmoPlayer.Nation = AccountNation.ElMorad;
-        elmoPlayer.ZoneId = BifrostRules.ZoneBifrost;
-        _sessions.RegisterSession(elmoPlayer);
-
-        var ultima = new NpcInstance
-        {
-            NpcId = BifrostRules.UltimaNpcId,
-            ZoneId = BifrostRules.ZoneBifrost,
-            Hp = 0
-        };
-
-        await bifrostService.OnUltimaKilledAsync(ultima, karusPlayer);
-
-        bifrostService.IsActive.Should().BeFalse();
-        bifrostService.Phase.Should().Be(BifrostPhase.Inactive);
-
-        // Assert Karus online teleported to Ronark Land Karus base
-        await transitionMock.Received(1).ChangeZoneAsync(
-            karusPlayer,
-            BifrostRules.ZoneRonarkLand,
-            BifrostRules.RonarkLandKarusX,
-            BifrostRules.RonarkLandKarusZ);
-
-        // Assert El Morad online teleported to Ronark Land El Morad base
-        await transitionMock.Received(1).ChangeZoneAsync(
-            elmoPlayer,
-            BifrostRules.ZoneRonarkLand,
-            BifrostRules.RonarkLandElMoradX,
-            BifrostRules.RonarkLandElMoradZ);
-
-        // Assert offline character DB relocation called
-        await charRepoMock.Received(1).RelocateCharactersFromZoneAsync(
-            BifrostRules.ZoneBifrost,
-            BifrostRules.ZoneRonarkLand,
-            BifrostRules.RonarkLandKarusX,
-            BifrostRules.RonarkLandKarusZ,
-            BifrostRules.RonarkLandElMoradX,
-            BifrostRules.RonarkLandElMoradZ);
-    }
-
-    [Fact]
-    public void CharacterReconnectZoneRepair_RepairsZone31_ToRonarkLand()
+    public void CharacterReconnectZoneRepair_RepairsZone31_ToMoradon()
     {
         var karusChar = new LibreKO.Common.Domain.Entities.Character
         {
@@ -242,9 +175,7 @@ public class BifrostTests
             Substitute.For<IGameDataService>());
 
         repaired.Should().BeTrue();
-        karusChar.MapId.Should().Be(BifrostRules.ZoneRonarkLand);
-        karusChar.X.Should().Be(BifrostRules.RonarkLandKarusX);
-        karusChar.Z.Should().Be(BifrostRules.RonarkLandKarusZ);
+        karusChar.MapId.Should().Be(CharacterReconnectZoneRepair.SafeReconnectZoneId);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Scripting;
@@ -206,7 +206,7 @@ public class QuestNpcInteractionService(
         if (await chaosDungeonService.TryTouchCubeAsync(session, npc))
             return;
 
-        if (npc.NpcId == BifrostRules.GateNpcId)
+        if (npc.NpcId == BifrostRules.GateNpcId && !npc.IsMonster && npc.ZoneId == BifrostRules.ZoneRonarkLand)
         {
             await bifrostEventService.TryEnterAsync(session);
             return;

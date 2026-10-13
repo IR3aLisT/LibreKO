@@ -1,4 +1,4 @@
-﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
@@ -104,9 +104,6 @@ public class CombatRewardService(
 
         if (npc.ZoneId == BifrostRules.ZoneRonarkLand && npc.NpcId == BifrostRules.MonumentNpcId)
             await bifrostEventService.OnMonumentKilledAsync(npc, killer);
-
-        if (npc.ZoneId == BifrostRules.ZoneBifrost && npc.NpcId == BifrostRules.UltimaNpcId)
-            await bifrostEventService.OnUltimaKilledAsync(npc, killer);
 
         var damagerIds = npc.WithLock(n => n.DamageMap.Keys.ToArray());
         foreach (var charId in damagerIds)

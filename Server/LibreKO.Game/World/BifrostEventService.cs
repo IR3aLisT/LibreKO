@@ -1,10 +1,9 @@
-﻿using LibreKO.Common.Enums;
+using LibreKO.Common.Enums;
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
 using LibreKO.Common.Domain.Services;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +22,6 @@ public interface IBifrostEventService
     void Close();
     void SetWinner(AccountNation nation, string killerName = "GM");
     Task OnMonumentKilledAsync(NpcInstance npc, UserSession killer);
-    Task OnUltimaKilledAsync(NpcInstance npc, UserSession killer);
     BifrostEntryResult CanEnter(UserSession session);
     Task<bool> TryEnterAsync(UserSession session);
     Task TickAsync();
@@ -34,7 +32,6 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
     private readonly SessionManager sessionManager;
     private readonly IZoneTransitionService zoneTransitionService;
     private readonly ILogger<BifrostEventService> logger;
-    private readonly IServiceScopeFactory? scopeFactory;
 
     private readonly object stateLock = new();
     private long remainingSecs;
@@ -50,15 +47,12 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
     public BifrostEventService(
         SessionManager sessionManager,
         IZoneTransitionService zoneTransitionService,
-        ILogger<BifrostEventService> logger,
-        IServiceScopeFactory? scopeFactory = null)
+        ILogger<BifrostEventService> logger)
     {
         this.sessionManager = sessionManager;
         this.zoneTransitionService = zoneTransitionService;
         this.logger = logger;
-        this.scopeFactory = scopeFactory;
 
-        NpcHostility.IsBifrostMonumentAttackable = () => IsActive && Phase == BifrostPhase.MonumentFight;
         this.zoneTransitionService.ZoneAbilitySent += OnZoneAbilitySentAsync;
     }
 
@@ -112,13 +106,12 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
         var monument = sessionManager.Regions.GetNpcByProtoId(BifrostRules.ZoneRonarkLand, BifrostRules.MonumentNpcId);
         if (monument != null)
         {
-            monument.WithLock(n =>
+            monument.IsMonumentAttackable = true;
+            if (monument.IsDead)
             {
-                n.Hp = n.MaxHp;
-                n.DeathTimeTicks = 0;
-                n.State = NpcState.Standing;
-            });
-            _ = sessionManager.Regions.BroadcastFromNpc(monument, Protocol.NpcPacketMapper.BuildInOutPacket(monument, InOutType.In));
+                monument.Respawn();
+                sessionManager.Regions.UpdateNpcRegion(monument);
+            }
         }
 
         _ = BroadcastNoticeAsync(BifrostRules.NoticeStart);
@@ -146,6 +139,11 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
         if (wasActive)
         {
             logger.LogInformation("Bifrost event closed");
+            var monument = sessionManager.Regions.GetNpcByProtoId(BifrostRules.ZoneRonarkLand, BifrostRules.MonumentNpcId);
+            if (monument != null)
+                monument.IsMonumentAttackable = false;
+
+            await BroadcastNoticeAsync(BifrostRules.NoticeFinish);
             await BroadcastRemainingAsync();
             await SweepPlayersAsync();
         }
@@ -163,6 +161,10 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
             logger.LogInformation("Bifrost forced winner: {Nation} by {Killer}", nation, killerName);
         }
 
+        var monument = sessionManager.Regions.GetNpcByProtoId(BifrostRules.ZoneRonarkLand, BifrostRules.MonumentNpcId);
+        if (monument != null)
+            monument.IsMonumentAttackable = false;
+
         _ = BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation, killerName));
         _ = BroadcastRemainingAsync();
     }
@@ -171,6 +173,8 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
     {
         if (npc.ZoneId != BifrostRules.ZoneRonarkLand || npc.NpcId != BifrostRules.MonumentNpcId)
             return;
+
+        npc.IsMonumentAttackable = false;
 
         bool shouldTransition = false;
         AccountNation nation = killer.Nation;
@@ -194,16 +198,6 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
             await BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation, killerName));
             await BroadcastRemainingAsync();
         }
-    }
-
-    public async Task OnUltimaKilledAsync(NpcInstance npc, UserSession killer)
-    {
-        if (npc.ZoneId != BifrostRules.ZoneBifrost || npc.NpcId != BifrostRules.UltimaNpcId)
-            return;
-
-        logger.LogInformation("Ultima defeated by {Killer}. Bifrost event ending.", killer.Name);
-        await BroadcastNoticeAsync(BifrostRules.NoticeUltimaDefeated(killer.Name));
-        await CloseAsync();
     }
 
     public BifrostEntryResult CanEnter(UserSession session)
@@ -328,8 +322,12 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
 
         if (monumentTimedOut)
         {
-            logger.LogInformation("Bifrost event ended in draw (monument phase elapsed without kill)");
-            await BroadcastNoticeAsync(BifrostRules.NoticeDraw);
+            logger.LogInformation("Bifrost event ended without monument kill (monument phase elapsed)");
+            var monument = sessionManager.Regions.GetNpcByProtoId(BifrostRules.ZoneRonarkLand, BifrostRules.MonumentNpcId);
+            if (monument != null)
+                monument.IsMonumentAttackable = false;
+
+            await BroadcastNoticeAsync(BifrostRules.NoticeFinish);
             await BroadcastRemainingAsync();
         }
         else if (loserDelayJustEnded)
@@ -354,43 +352,16 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
             {
                 try
                 {
-                    float targetX = session.Nation == AccountNation.Karus
-                        ? BifrostRules.RonarkLandKarusX
-                        : BifrostRules.RonarkLandElMoradX;
-                    float targetZ = session.Nation == AccountNation.Karus
-                        ? BifrostRules.RonarkLandKarusZ
-                        : BifrostRules.RonarkLandElMoradZ;
-
                     await zoneTransitionService.ChangeZoneAsync(
                         session,
                         BifrostRules.ZoneRonarkLand,
-                        targetX,
-                        targetZ);
+                        0f,
+                        0f);
                 }
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "Failed to sweep player {Player} from Bifrost zone", session.Name);
                 }
-            }
-        }
-
-        if (scopeFactory != null)
-        {
-            try
-            {
-                using var scope = scopeFactory.CreateScope();
-                var characterRepository = scope.ServiceProvider.GetRequiredService<ICharacterRepository>();
-                await characterRepository.RelocateCharactersFromZoneAsync(
-                    BifrostRules.ZoneBifrost,
-                    BifrostRules.ZoneRonarkLand,
-                    BifrostRules.RonarkLandKarusX,
-                    BifrostRules.RonarkLandKarusZ,
-                    BifrostRules.RonarkLandElMoradX,
-                    BifrostRules.RonarkLandElMoradZ);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to relocate offline characters from Bifrost zone");
             }
         }
     }
@@ -400,16 +371,13 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
         var pkt = NoticePacketWriter.Broadcast(text);
         foreach (var session in sessionManager.GetAll())
         {
-            if (session.ZoneId == BifrostRules.ZoneBifrost || session.ZoneId == BifrostRules.ZoneRonarkLand)
+            try
             {
-                try
-                {
-                    await session.Client.SendPacket(pkt);
-                }
-                catch
-                {
-                    // best-effort
-                }
+                await session.Client.SendPacket(pkt);
+            }
+            catch
+            {
+                // best-effort
             }
         }
     }

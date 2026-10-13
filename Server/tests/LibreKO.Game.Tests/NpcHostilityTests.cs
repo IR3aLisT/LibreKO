@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.World;
@@ -88,13 +88,11 @@ public class NpcHostilityTests : GameTestBase
             MaxHp = 350000,
         };
 
-        NpcHostility.IsBifrostMonumentAttackable = () => true;
+        monument.IsMonumentAttackable = true;
         NpcHostility.IsAttackableBy(monument, player).Should().BeTrue();
 
-        NpcHostility.IsBifrostMonumentAttackable = () => false;
+        monument.IsMonumentAttackable = false;
         NpcHostility.IsAttackableBy(monument, player).Should().BeFalse();
-
-        NpcHostility.IsBifrostMonumentAttackable = null;
     }
 
     private static UserSession CreatePlayer(ServiceProvider provider, byte zoneId)
