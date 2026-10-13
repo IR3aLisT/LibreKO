@@ -1,4 +1,4 @@
-﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Gameplay;
@@ -499,6 +499,52 @@ public class AdminPacketCoordinator(
                 break;
             }
 
+            case "bifrost":
+            case "beef":
+            case "bifroststart":
+            case "bifrostclose":
+            {
+                var input = (cmd == "bifrostclose" ? "close" : (cmd == "bifroststart" ? $"start {arg}" : arg)).Trim();
+                var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var subcmd = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
+
+                if (subcmd is "open" or "start")
+                {
+                    int? minutes = null;
+                    if (parts.Length > 1 && int.TryParse(parts[1], out var parsed) && parsed is > 0 and <= 720)
+                    {
+                        minutes = parsed;
+                    }
+                    bifrostEventService.Start(monumentMinutes: minutes);
+                    await SendNoticeAsync(session, $"[Bifrost] Event started (Monument fight{(minutes.HasValue ? $", {minutes.Value}m" : "")})!");
+                }
+                else if (subcmd is "close" or "cancel" or "stop")
+                {
+                    await bifrostEventService.CloseAsync();
+                    await SendNoticeAsync(session, "[Bifrost] Event closed!");
+                }
+                else if (subcmd is "enter" or "warp")
+                {
+                    await bifrostEventService.TryEnterAsync(session);
+                }
+                else if (subcmd == "winner")
+                {
+                    if (parts.Length < 2 || (parts[1].ToLowerInvariant() != "karus" && parts[1].ToLowerInvariant() != "elmorad"))
+                    {
+                        await SendNoticeAsync(session, "Usage: +bifrost winner <karus|elmorad>");
+                        break;
+                    }
+                    var nation = parts[1].ToLowerInvariant() == "karus" ? AccountNation.Karus : AccountNation.ElMorad;
+                    bifrostEventService.SetWinner(nation, session.Name);
+                    await SendNoticeAsync(session, $"[Bifrost] Forced winner {nation}! Farming phase started.");
+                }
+                else
+                {
+                    await SendNoticeAsync(session, "Usage: +bifrost start [minutes] | close | enter | winner <karus|elmorad>");
+                }
+                break;
+            }
+
             case "jrcancel":
             case "templecancel":
                 if (await eventSchedulerService.CancelTempleEventAsync())
@@ -678,14 +724,6 @@ public class AdminPacketCoordinator(
             case "kc":
             case "knightcash":
                 await HandleKnightCashAsync(session, arg);
-                break;
-
-            case "bifroststart":
-                await HandleBifrostStartAsync(session, arg);
-                break;
-
-            case "bifrostclose":
-                await HandleBifrostCloseAsync(session);
                 break;
 
             default:
@@ -944,29 +982,6 @@ public class AdminPacketCoordinator(
 
         await SendNoticeAsync(session, $"Account {account.Login} KC {(amount >= 0 ? "+" : "")}{amount} (now {account.KnightCash})");
         logger.LogInformation("GM {Gm} adjusted KC of {Login} by {Amount}", session.Name, account.Login, amount);
-    }
-
-    private async Task HandleBifrostStartAsync(UserSession session, string arg)
-    {
-        int? minutes = null;
-        var trimmed = arg.Trim();
-        if (trimmed.Length > 0)
-        {
-            if (!int.TryParse(trimmed, out var parsed) || parsed <= 0 || parsed > 720)
-            {
-                await SendNoticeAsync(session, "Usage: +bifroststart [minutes 1-720]");
-                return;
-            }
-            minutes = parsed;
-        }
-        bifrostEventService.Start(minutes);
-        await SendNoticeAsync(session, $"Bifrost event started ({minutes ?? 120} min monument phase)");
-    }
-
-    private async Task HandleBifrostCloseAsync(UserSession session)
-    {
-        bifrostEventService.Close();
-        await SendNoticeAsync(session, "Bifrost event closed");
     }
 
     private async Task HandleSummonMonsterAsync(UserSession session, string arg)

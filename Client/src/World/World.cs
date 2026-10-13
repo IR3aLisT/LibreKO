@@ -191,6 +191,7 @@ public partial class World : Node3D, IWorldContext
         ShowChaosGuideOnEntry();
         ShowFullMoonCaptionOnEntry();
         ReleaseEntryPopups();
+        BifrostRequestTime();
     }
 
     private async System.Threading.Tasks.Task WaitForServerEnvironment(double timeoutSec)

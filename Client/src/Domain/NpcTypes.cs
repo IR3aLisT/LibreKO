@@ -32,6 +32,7 @@ public static class NpcTypes
     public const int Scarecrow = 171;
     public const int DestroyedArtifact = 61;
     public const int BattleMonument = 211;
+    public const int BifrostMonument = 155;
     public const int KeyGate = 180;
     public const int GuardSummon = 255;
 
@@ -39,7 +40,7 @@ public static class NpcTypes
 
     public static bool IsGuard(int npcType) => npcType >= Guard && npcType <= WarGuard;
 
-    public static bool IsStructure(int npcType) => npcType is Gate or Lever or KeyGate or BattleMonument;
+    public static bool IsStructure(int npcType) => npcType is Gate or Lever or KeyGate or BattleMonument or BifrostMonument;
 
     public static bool KeepsSpawnFacing(float direction, int npcType, bool hasWalkCycle) =>
         direction != 0 || IsStructure(npcType) || !hasWalkCycle;

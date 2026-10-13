@@ -196,7 +196,7 @@ public class QuestScriptProtocolTests : GameTestBase
         _session.Quest.SelectMessageEvents[0] = 123;
         var interaction = new QuestNpcInteractionService(_sessions, _data, _runner,
             Substitute.For<IKingSystemRuntimeService>(), Substitute.For<IDrakiTowerService>(), Substitute.For<IDrakiStageProvider>(),
-            Substitute.For<ITouchTrapService>(), Substitute.For<IChaosDungeonService>(), Substitute.For<ILogger<QuestNpcInteractionService>>());
+            Substitute.For<ITouchTrapService>(), Substitute.For<IChaosDungeonService>(), Substitute.For<IBifrostEventService>(), Substitute.For<ILogger<QuestNpcInteractionService>>());
         Packet Click()
         {
             var packet = new Packet(GameOpcodes.GS_SELECT_MSG);
@@ -224,7 +224,7 @@ public class QuestScriptProtocolTests : GameTestBase
         _session.Quest.SelectMessageRewards[menuIndex] = 2;
         var interaction = new QuestNpcInteractionService(_sessions, _data, _runner,
             Substitute.For<IKingSystemRuntimeService>(), Substitute.For<IDrakiTowerService>(), Substitute.For<IDrakiStageProvider>(),
-            Substitute.For<ITouchTrapService>(), Substitute.For<IChaosDungeonService>(), Substitute.For<ILogger<QuestNpcInteractionService>>());
+            Substitute.For<ITouchTrapService>(), Substitute.For<IChaosDungeonService>(), Substitute.For<IBifrostEventService>(), Substitute.For<ILogger<QuestNpcInteractionService>>());
         var packet = new Packet(GameOpcodes.GS_SELECT_MSG);
         packet.WriteByte(menuIndex);
         packet.WriteSByteString("choices.quest");
@@ -245,7 +245,7 @@ public class QuestScriptProtocolTests : GameTestBase
         _session.Quest.SelectMessageEvents[1] = -1;
         var interaction = new QuestNpcInteractionService(_sessions, _data, _runner,
             Substitute.For<IKingSystemRuntimeService>(), Substitute.For<IDrakiTowerService>(), Substitute.For<IDrakiStageProvider>(),
-            Substitute.For<ITouchTrapService>(), Substitute.For<IChaosDungeonService>(), Substitute.For<ILogger<QuestNpcInteractionService>>());
+            Substitute.For<ITouchTrapService>(), Substitute.For<IChaosDungeonService>(), Substitute.For<IBifrostEventService>(), Substitute.For<ILogger<QuestNpcInteractionService>>());
         var packet = new Packet(GameOpcodes.GS_SELECT_MSG);
         packet.WriteByte(1);
         packet.WriteSByteString("reward.quest");

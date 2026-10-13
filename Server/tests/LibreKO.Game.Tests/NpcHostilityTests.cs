@@ -73,6 +73,28 @@ public class NpcHostilityTests : GameTestBase
         NpcHostility.IsAttackableBy(merchant, karus).Should().BeFalse();
     }
 
+    [Fact]
+    public void ABifrostMonumentIsAttackableOnlyWhenEventAllowsIt()
+    {
+        using var provider = CreateProvider(_ => { });
+        var player = CreatePlayer(provider, BifrostRules.ZoneRonarkLand);
+
+        var monument = new NpcInstance
+        {
+            ZoneId = BifrostRules.ZoneRonarkLand,
+            NpcId = BifrostRules.MonumentNpcId,
+            NpcType = LibreKO.Common.Domain.Entities.GameData.NpcData.TypeBifrostMonument,
+            Hp = 350000,
+            MaxHp = 350000,
+        };
+
+        monument.IsMonumentAttackable = true;
+        NpcHostility.IsAttackableBy(monument, player).Should().BeTrue();
+
+        monument.IsMonumentAttackable = false;
+        NpcHostility.IsAttackableBy(monument, player).Should().BeFalse();
+    }
+
     private static UserSession CreatePlayer(ServiceProvider provider, byte zoneId)
     {
         var client = Substitute.For<IClient>();

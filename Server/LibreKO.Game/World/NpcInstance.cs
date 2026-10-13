@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using LibreKO.Common.Domain.Entities.GameData;
 
 using LibreKO.Common.Enums;
@@ -331,6 +331,7 @@ public class NpcInstance
     public ConcurrentDictionary<int, int> PetDamage { get; } = new();
     public bool IsSoccerBall => NpcType == NpcData.TypeSoccerBall;
     public bool IsAttackable => ((IsMonster && !IsGuardSummon) || IsScarecrow || NpcType is NpcData.TypeDestroyedArtifact or NpcData.TypeBattleMonument) && !IsSoccerBall; // Anything players can hit
+    public bool IsMonumentAttackable { get; set; }
     public bool IsGuard => NpcType is >= NpcData.TypeGuard and <= NpcData.TypeWarGuard;
     public bool IsNationOwned => Nation is EntityNation.Karus or EntityNation.ElMorad;
     public bool HasAi => !IsSoccerBall && (IsMonster || IsGuard || IsScarecrow || IsNationOwned || IsPet || FollowsAPath(MoveType));

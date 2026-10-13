@@ -1,4 +1,4 @@
-﻿namespace LibreKO.Game.Protocol;
+namespace LibreKO.Game.Protocol;
 
 public readonly record struct GmCommand(string Group, string Syntax, string Description);
 
@@ -52,7 +52,7 @@ public static class GmCommandCatalog
         new(Events, "+siegewar on|countdown|off", "Open the castle siege war now, after the 10-minute countdown, or close it"),
         new(Events, "+wanted on|off", "Run the Wanted event in Ronark Land and Ronark Land Base, or stop it"),
         new(Events, "+clanmatch <clan> <clan>|off", "Send up to 8 online members of each clan to Party Battle 1 for a 20-minute match, or end it"),
-        new(Events, "+bifroststart [minutes] / +bifrostclose", "Bifrost event"),
+        new(Events, "+bifrost start [minutes] | close | enter | winner <karus|elmorad>", "Bifrost event"),
         new(Events, "+jr / +bdw / +chaos [sec|min] / +templecancel", "Temple events: Juraid Mountain, Border Defense War, Chaos Dungeon"),
         new(Events, "+utc open|close", "Under the Castle"),
         new(Events, "+krowaz open|close", "Krowaz's Dominion"),

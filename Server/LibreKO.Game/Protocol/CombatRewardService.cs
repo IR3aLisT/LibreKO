@@ -1,4 +1,4 @@
-﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
@@ -36,6 +36,7 @@ public class CombatRewardService(
     IUnderTheCastleService underTheCastleService,
     IForgottenTempleService forgottenTempleService,
     IDrakiTowerService drakiTowerService,
+    IBifrostEventService bifrostEventService,
     ILogger<CombatRewardService> logger) : ICombatRewardService
 {
     private const int CoinRollMinPercent = 70;
@@ -100,6 +101,9 @@ public class CombatRewardService(
 
         if (npc.ZoneId == (byte)ZoneId.NereidsIsland)
             await nereidMonuments.OnNpcKilledAsync(npc, killer);
+
+        if (npc.ZoneId == BifrostRules.ZoneRonarkLand && npc.NpcId == BifrostRules.MonumentNpcId)
+            await bifrostEventService.OnMonumentKilledAsync(npc, killer);
 
         var damagerIds = npc.WithLock(n => n.DamageMap.Keys.ToArray());
         foreach (var charId in damagerIds)

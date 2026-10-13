@@ -27,6 +27,7 @@ public class NpcData
     public const byte TypeGate = 50;
     public const byte TypeDestroyedArtifact = 61;
     public const byte TypeBattleMonument = 211;
+    public const byte TypeBifrostMonument = 155;
     public const byte TypeTalk = 64;
     public const byte TypeRankerKarusFirst = 82;
     public const byte TypeRankerElMoradFirst = 85;

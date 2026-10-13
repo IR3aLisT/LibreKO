@@ -1,0 +1,19 @@
+﻿Bind Npc 16094 Zone 31
+
+On greeting
+    Say "Do you wish to leave Bi-Frost and return to your lands?"
+    Topic "Return to Ronark Land." goto leave_bifrost
+    Topic "Cancel" goto close
+    Goto close
+
+On leave_bifrost
+    If player level < 30
+        If player is Karus
+            Teleport 1 at 441 1625
+        Else
+            Teleport 2 at 1595 412
+    Else
+        If player is Karus
+            Teleport 71 at 1014 1020
+        Else
+            Teleport 71 at 1026 984

@@ -37,4 +37,12 @@ public class NpcHostilityTests
         var mob = new EntitySnapshot { IsNpc = true, IsMonster = true, NpcType = NpcTypes.Monster };
         Assert.True(NpcHostility.IsHostile(mob, Nations.Karus, npcsAreTargets: false));
     }
+
+    [Fact]
+    public void ABifrostMonumentIsAlwaysATargetRegardlessOfNation()
+    {
+        var monument = new EntitySnapshot { IsNpc = true, IsMonster = false, NpcType = NpcTypes.BifrostMonument, Nation = 0 };
+        Assert.True(NpcHostility.IsHostile(monument, Nations.Karus, npcsAreTargets: false));
+        Assert.True(NpcHostility.IsHostile(monument, Nations.ElMorad, npcsAreTargets: false));
+    }
 }
