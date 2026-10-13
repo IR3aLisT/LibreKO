@@ -11,7 +11,8 @@ public readonly record struct PhysicalDefender(
     WeaponResistances Resistances,
     short ClassId = 0,
     short AcBonusClassType = 0,
-    short AcBonusClassPercent = 0)
+    short AcBonusClassPercent = 0,
+    ElementResistances Elements = default)
 {
     public static PhysicalDefender Of(UserSession target) => new(
         target.Stats.TotalAc,
@@ -21,15 +22,19 @@ public readonly record struct PhysicalDefender(
         WeaponResistances.Of(target.Stats),
         target.Class,
         target.Stats.AcBonusClassType,
-        target.Stats.AcBonusClassPercent);
+        target.Stats.AcBonusClassPercent,
+        ElementResistances.Of(target.Stats));
 
     public static PhysicalDefender Of(NpcInstance target) => new(
         target.TotalAc,
         target.EvadeRate,
         IsPlayer: false,
         BlocksPhysical: false,
-        default);
+        default,
+        Elements: ElementResistances.Of(target));
 }
+
+public readonly record struct PhysicalHit(int Damage, int DrainBase, ItemHit Items);
 
 public static class PhysicalDamageCalculator
 {
@@ -64,10 +69,14 @@ public static class PhysicalDamageCalculator
     }
 
     public static int Calculate(
+        UserSession attacker, PhysicalDefender defender, IGameDataService gameData) =>
+        CalculateHit(attacker, defender, gameData).Damage;
+
+    public static PhysicalHit CalculateHit(
         UserSession attacker, PhysicalDefender defender, IGameDataService gameData)
     {
         if (defender.BlocksPhysical)
-            return 0;
+            return default;
 
         var armour = Math.Max(0, defender.Armour);
         var attackPower = attacker.Stats.TotalHit * attacker.AttackAmount;
@@ -77,16 +86,18 @@ public static class PhysicalDamageCalculator
         attackPower = ApplyClassTypedBonuses(attacker, defender, attackPower);
 
         var hitBase = attackPower * ArmourPenetration / (armour + ArmourSoftening);
-        if (hitBase <= 0)
-            return 0;
-
         var rate = attacker.Stats.TotalHitrate / Math.Max(1f, defender.EvasionRate) + 1f;
-        if (CombatUtils.GetHitRate(rate) == AttackHitResult.Fail)
-            return 0;
+        var landed = hitBase > 0 && CombatUtils.GetHitRate(rate) != AttackHitResult.Fail;
+        var damage = landed
+            ? (int)(BaseDamageShare * hitBase + RandomDamageShare * Random.Shared.Next(0, hitBase + 1))
+            : 0;
 
-        var damage = (int)(BaseDamageShare * hitBase
-            + RandomDamageShare * Random.Shared.Next(0, hitBase + 1));
+        var items = ItemCombatBonus.Of(attacker, defender.Elements, gameData);
+        damage += items.Element;
+        if (!landed && damage <= 0)
+            return default;
 
+        var drainBase = HasFixedDamage(attacker.ZoneId) ? 0 : damage;
         if (defender.IsPlayer)
         {
             damage = CombatUtils.ApplyWeaponTypeResistance(
@@ -94,9 +105,13 @@ public static class PhysicalDamageCalculator
             damage /= PlayerDamageDivisor;
         }
 
-        damage = Math.Max(MinimumLandedDamage, damage);
-        return Math.Clamp(ZoneDamage(attacker.ZoneId, damage), 0, CombatUtils.MaxDamage);
+        if (landed)
+            damage = Math.Max(MinimumLandedDamage, damage);
+        return new PhysicalHit(Math.Clamp(ZoneDamage(attacker.ZoneId, damage), 0, CombatUtils.MaxDamage), drainBase, items);
     }
+
+    private static bool HasFixedDamage(byte zoneId) =>
+        zoneId is ZoneSnowBattle or ZoneChaosDungeon or ZoneDungeonDefence;
 
     private static int ZoneDamage(byte zoneId, int damage) => zoneId switch
     {

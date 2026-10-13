@@ -173,6 +173,72 @@ public sealed class EventPacketWriter
         return packet;
     }
 
+    public const byte DrakiLeaveSubCodeFirst = 0x0C;
+    public const byte DrakiLeaveSubCodeSecond = 0x04;
+    public const uint DrakiDefaultFinishTime = 3600;
+    public const uint DrakiDefaultStage = 1;
+
+    public static Packet DrakiList(
+        IReadOnlyList<(byte Rank, string Name, uint FinishTime, uint Stage)> topRanks,
+        byte userRank, string userName, uint userFinishTime, uint userStage, uint userMaxStage, uint userEntranceLimit)
+    {
+        var packet = new Packet(GameOpcodes.GS_EVENT);
+        packet.WriteByte((byte)TempleSubOpcode.DrakiList);
+        for (int i = 0; i < 5; i++)
+        {
+            if (i < topRanks.Count)
+            {
+                var entry = topRanks[i];
+                packet.WriteByte(entry.Rank);
+                packet.WriteSByteString(entry.Name);
+                packet.WriteUInt(entry.FinishTime);
+                packet.WriteUInt(entry.Stage);
+            }
+            else
+            {
+                packet.WriteByte((byte)(i + 1));
+                packet.WriteSByteString(string.Empty);
+                packet.WriteUInt(DrakiDefaultFinishTime);
+                packet.WriteUInt(DrakiDefaultStage);
+            }
+        }
+        packet.WriteByte(userRank);
+        packet.WriteSByteString(userName);
+        packet.WriteUInt(userFinishTime);
+        packet.WriteUInt(userStage);
+        packet.WriteUInt(userMaxStage);
+        packet.WriteUInt(userEntranceLimit);
+        return packet;
+    }
+
+    public static Packet DrakiEnterResult(DrakiEnterResult resultCode)
+    {
+        var packet = new Packet(GameOpcodes.GS_EVENT);
+        packet.WriteByte((byte)TempleSubOpcode.DrakiEnter);
+        packet.WriteByte((byte)resultCode);
+        return packet;
+    }
+
+    public static Packet DrakiLeaveFirst()
+    {
+        var packet = new Packet(GameOpcodes.GS_EVENT);
+        packet.WriteByte((byte)TempleSubOpcode.DrakiLeaveFirst);
+        return packet;
+    }
+
+    public static Packet DrakiLeaveSecond(ushort stage, ushort subStage, uint elapsedSeconds, bool completed = false)
+    {
+        var packet = new Packet(GameOpcodes.GS_EVENT);
+        packet.WriteByte((byte)TempleSubOpcode.DrakiLeaveSecond);
+        packet.WriteByte(DrakiLeaveSubCodeFirst);
+        packet.WriteByte(DrakiLeaveSubCodeSecond);
+        packet.WriteUShort(stage);
+        packet.WriteUShort(subStage);
+        packet.WriteUInt(elapsedSeconds);
+        packet.WriteByte(completed ? (byte)0 : (byte)1);
+        return packet;
+    }
+
     public static Packet BattleZoneState(byte sub, byte open, byte zone, int secondsRemaining)
     {
         var packet = Battle(sub);

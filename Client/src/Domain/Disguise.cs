@@ -22,10 +22,8 @@ public static class Disguise
     public const int WithoutPremium = 2;
     public const int PremiumOnly = 3;
 
-    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true, TypeInfoResolver = DomainJson.Default };
-
     public static DisguiseForm[] Parse(string json) =>
-        JsonSerializer.Deserialize<DisguiseForm[]>(json, Options) ?? Array.Empty<DisguiseForm>();
+        JsonSerializer.Deserialize(json, DomainJson.Default.DisguiseFormArray) ?? Array.Empty<DisguiseForm>();
 
     public static IReadOnlyList<DisguiseForm> FormsFor(IEnumerable<DisguiseForm> all, int listItem, int premiumType) =>
         all.Where(f => f.Item == listItem && Allows(f.Access, premiumType)).ToList();

@@ -15,6 +15,7 @@ public enum MagicDirectType : byte
     DurabilityAttack = 13,
     HealthBooster = 14,
     ManaDrain = 16,
+    FixedHealth = 17,
     AngerExplosion = 18,
     HealthPurchase = 20,
     ManaPurchase = 21,

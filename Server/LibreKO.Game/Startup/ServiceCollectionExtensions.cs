@@ -161,6 +161,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IKrowazTrapService, KrowazTrapService>();
         services.AddSingleton<ITouchTrapService, TouchTrapService>();
         services.AddSingleton<IForgottenTempleService, ForgottenTempleService>();
+        services.AddSingleton<IDrakiStageProvider, DrakiStageProvider>();
+        services.AddSingleton<IDrakiTowerService, DrakiTowerService>();
         services.AddSingleton<ISessionTerminationService, SessionTerminationService>();
         services.AddSingleton<IAccountLockService, AccountLockService>();
         services.AddSingleton<IUserNotificationService, UserNotificationService>();

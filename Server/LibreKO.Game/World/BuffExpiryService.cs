@@ -12,7 +12,8 @@ public class BuffExpiryService(
     IControlStateService controlStateService,
     IRespawnBlinkService respawnBlinkService,
     ILogger<BuffExpiryService> logger,
-    IPartyWarBoardService? partyWarBoard = null) : BackgroundService
+    IPartyWarBoardService? partyWarBoard = null,
+    INpcAiDeathService? npcAiDeathService = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -84,20 +85,24 @@ public class BuffExpiryService(
                 if (effect.TickAmount < 0)
                 {
                     var killer = sessionManager.GetByCharacterId(effect.CasterId);
+                    var npcSource = effect.CasterId < 0 ? sessionManager.Regions.GetNpc(-effect.CasterId) : null;
                     var damage = killer != null
                         ? GmMode.Dealt(killer, session.Hp, -effect.TickAmount)
                         : -effect.TickAmount;
                     session.Hp = (short)Math.Max(0, session.Hp - GmMode.Taken(session, damage));
                     await combatLifecycleService.SendHpChangeAsync(
                         session,
-                        killer?.CharacterId ?? -1);
+                        killer?.CharacterId ?? npcSource?.UniqueId ?? -1);
                     if (killer != null && killer != session)
                         partyWarBoard?.CountDamage(killer, damage);
 
                     if (session.Hp <= 0)
                     {
                         expiredSkillIds.Add(skillId);
-                        await combatLifecycleService.HandlePlayerDeathAsync(session, killer);
+                        if (npcSource != null && npcAiDeathService != null)
+                            await npcAiDeathService.HandlePlayerKilledByNpcAsync(session, npcSource);
+                        else
+                            await combatLifecycleService.HandlePlayerDeathAsync(session, killer);
                         break;
                     }
                 }

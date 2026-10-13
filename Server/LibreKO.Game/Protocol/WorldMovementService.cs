@@ -45,6 +45,7 @@ public class WorldMovementService(
     IStealthService stealthService,
     ICollectionRaceService collectionRaceService,
     IBorderDefenseWarService borderDefenseWarService,
+    IDrakiTowerService drakiTowerService,
     IRespawnBlinkService respawnBlinkService,
     ISoccerService soccerService,
     IKrowazTrapService krowazTrapService,
@@ -214,6 +215,12 @@ public class WorldMovementService(
             await session.Client.SendPacket(ChatPacketWriter.SystemNotice(
                 (byte)session.Nation,
                 "You cannot use Town recall while carrying the Fragment of Manes."));
+            return;
+        }
+
+        if (session.ZoneId == DrakiTowerRules.ZoneIdValue)
+        {
+            await drakiTowerService.HandleTownAsync(session);
             return;
         }
 

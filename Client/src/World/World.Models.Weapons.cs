@@ -14,7 +14,7 @@ public partial class World
     private void AttachWeapons(Node3D body, int[]? gear, HandWearer wearer, int npcType = 0)
     {
         if (gear == null) return;
-        if (npcType == NpcTypes.FixedPose || NoWeaponNpcIds.Contains(wearer.NpcId)) return;
+        if (npcType == NpcTypes.FixedPose) return;
         var skel = FindFirst<Skeleton3D>(body);
         if (skel == null) return;
         var weapons = WeaponCatalog.Index;
@@ -23,6 +23,9 @@ public partial class World
             if (old is BoneAttachment3D ba
                 && ba.Name.ToString().StartsWith(WeaponNodePrefix, System.StringComparison.Ordinal))
             { skel.RemoveChild(ba); ba.QueueFree(); }
+            else if (old is BoneAttachment3D builtIn
+                     && builtIn.Name.ToString().StartsWith(BuiltInPlugPrefix, System.StringComparison.Ordinal))
+                builtIn.Visible = true;
         foreach (var old in body.GetChildren())
             if (old is WeaponTrail wt) { body.RemoveChild(wt); wt.QueueFree(); }
 
@@ -30,12 +33,13 @@ public partial class World
         foreach (int slot in new[] { 6, 7 })
         {
             if (slot >= gear.Length || gear[slot] <= 0) continue;
+            bool right = slot == 6;
+            if (!NpcPlugSlots.Holds(wearer.PlugSlots, right)) continue;
             int baseItemId = WeaponCatalog.ResolveBaseId(gear[slot]);
             if (!weapons.TryGetValue(baseItemId, out var w)) continue;
             string resPath = $"res://assets/items/weapon/{w.Stem}.glb";
             if (!ResourceLoader.Exists(resPath) || ResourceLoader.Load(resPath) is not PackedScene scene)
                 continue;
-            bool right = slot == 6;
             int bone = WeaponMount.Bone(skel, right, gear[slot]);
             if (bone < 0) continue;
             var attach = new BoneAttachment3D { Name = $"{WeaponNodePrefix}{slot}" };
@@ -46,6 +50,8 @@ public partial class World
             ForceDoubleSided(mesh);
             attach.AddChild(mesh);
             WeaponIdle.Start(mesh, w.Anim);
+            if (skel.GetNodeOrNull<Node3D>($"{BuiltInPlugPrefix}{NpcPlugSlots.PlugIndex(right)}") is { } replaced)
+                replaced.Visible = false;
             uint? glowTrace = WeaponGlow.Attach(mesh, gear[slot]);
             ItemShine.Apply(mesh, gear[slot], slot);
             if (slot == 6 && w.TraceSteps > 0)
@@ -56,9 +62,9 @@ public partial class World
 
     private static float SizeScale(int size) => size > 0 ? size / SizePercent : 1f;
 
-    private static HandWearer WeaponWearer(bool npc, bool statue, int race, int npcId, int size) =>
+    private static HandWearer WeaponWearer(bool npc, bool statue, int race, int npcId, int size, int modelId) =>
         npc && !statue
-            ? new HandWearer(race, Npc: true, NpcId: npcId, NpcScale: SizeScale(size))
+            ? new HandWearer(race, Npc: true, NpcId: npcId, NpcScale: SizeScale(size), PlugSlots: NpcPlugSlots.For(modelId))
             : new HandWearer(race, NpcId: npcId);
 
     internal static int TrailElement(int itemId)

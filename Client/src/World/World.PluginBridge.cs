@@ -398,7 +398,7 @@ public partial class World
                 if (_w.MainWindowOpen(key)) _w.ToggleMainWindow(key);
                 return;
             }
-            if (HudWindow.Find(id) is { } win) win.Visible = false;
+            if (HudWindow.Find(id) is { Visible: true } win) win.Close();
         }
 
         public void Toggle(string id)
@@ -407,7 +407,9 @@ public partial class World
             if (string.Equals(id, PresetWindowId, StringComparison.OrdinalIgnoreCase)) { _w.TogglePreset(); return; }
             if (string.Equals(id, TitlesWindowId, StringComparison.OrdinalIgnoreCase)) { _w.ToggleTitlePicker(); return; }
             if (MainWindowKeys.TryGetValue(id, out var key)) { _w.ToggleMainWindow(key); return; }
-            if (HudWindow.Find(id) is { } win) win.Visible = !win.Visible;
+            if (HudWindow.Find(id) is not { } win) return;
+            if (win.Visible) win.Close();
+            else win.Visible = true;
         }
 
         IReadOnlyList<string> IGameChat.History => _w.Chat?.History ?? Array.Empty<string>();

@@ -21,6 +21,12 @@ public class MagicDamageFormulaTests
     private const int Lobo = 180_110_278;
     private const int Erenion = 189_111_278;
     private const int Samples = 2_000;
+    private const short KarusWarrior = 101;
+    private const short KarusPriest = 104;
+    private const int IceCometDamage = 882;
+    private const byte Cold = (byte)MagicAttribute.Cold;
+    private const int ApostleAttack = 3152;
+    private const short ApostleEvasion = 85;
 
     private static readonly IGameDataService GameData = BuildGameData();
 
@@ -53,6 +59,38 @@ public class MagicDamageFormulaTests
             .ToList();
 
         hits.Should().OnlyContain(hit => hit >= 884 && hit <= 925);
+    }
+
+    [Theory]
+    [InlineData(KarusWarrior, 0, 217, 230)]
+    [InlineData(KarusWarrior, 150, 168, 178)]
+    [InlineData(KarusMage, 0, 220, 233)]
+    [InlineData(KarusPriest, 0, 195, 207)]
+    public void AMonsterIceCometIgnoresTheMonstersAttackAndUsesTheTargetsResistance(
+        short targetClass, short coldResistance, int lowest, int highest)
+    {
+        var apostle = new NpcInstance { Attack1 = ApostleAttack, EvadeRate = ApostleEvasion };
+        var target = new UserSession(Substitute.For<IClient>(), 3, 3) { Class = targetClass };
+        target.Stats.ColdR = coldResistance;
+
+        var hits = Enumerable.Range(0, Samples)
+            .Select(_ => MagicCombatHelper.GetMagicDamage(apostle, target, IceCometDamage, Cold))
+            .ToList();
+
+        hits.Should().OnlyContain(hit => hit == 0 || (hit >= lowest && hit <= highest));
+        hits.Should().Contain(hit => hit >= lowest, "most casts land");
+        hits.Should().Contain(0, "a monster spell can miss");
+    }
+
+    [Fact]
+    public void AMonsterSpellOnATargetThatBlocksMagicDoesNothing()
+    {
+        var apostle = new NpcInstance { Attack1 = ApostleAttack, EvadeRate = ApostleEvasion };
+        var target = new UserSession(Substitute.For<IClient>(), 4, 4) { Class = KarusWarrior, BlockMagic = true };
+
+        Enumerable.Range(0, Samples)
+            .Select(_ => MagicCombatHelper.GetMagicDamage(apostle, target, IceCometDamage, Cold))
+            .Should().OnlyContain(hit => hit == 0);
     }
 
     private static UserSession Mage(int staff)

@@ -187,8 +187,11 @@ public partial class World
     {
         _warBoardMode = mode;
         Config.SetPartyBoardMode(mode);
-        _warBoardDeal.ButtonPressed = mode == PartyWarBoard.ModeDamage;
-        _warBoardHeal.ButtonPressed = mode == PartyWarBoard.ModeHealing;
+        if (_warBoard != null)
+        {
+            _warBoardDeal.ButtonPressed = mode == PartyWarBoard.ModeDamage;
+            _warBoardHeal.ButtonPressed = mode == PartyWarBoard.ModeHealing;
+        }
         PluginNotifyParty();
         if (PartyWarBoard.SecondsLeft(_warBoardSentAt, Now(), PartyWarBoard.BoardTabSeconds) > 0)
         {

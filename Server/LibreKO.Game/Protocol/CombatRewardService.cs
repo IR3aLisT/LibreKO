@@ -35,6 +35,7 @@ public class CombatRewardService(
     IExpSealService expSeal,
     IUnderTheCastleService underTheCastleService,
     IForgottenTempleService forgottenTempleService,
+    IDrakiTowerService drakiTowerService,
     IBifrostEventService bifrostEventService,
     ILogger<CombatRewardService> logger) : ICombatRewardService
 {
@@ -91,6 +92,9 @@ public class CombatRewardService(
 
         if (npc.ZoneId == (byte)ZoneId.ForgottenTemple)
             await forgottenTempleService.OnNpcKilledAsync(npc, killer);
+
+        if (npc.ZoneId == DrakiTowerRules.ZoneIdValue)
+            await drakiTowerService.OnNpcKilledAsync(npc);
 
         if (npc.ZoneId == (byte)ZoneId.Delos)
             await castleSiegeService.OnNpcKilledAsync(npc, killer);

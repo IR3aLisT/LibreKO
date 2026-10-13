@@ -119,12 +119,16 @@ public class MagicMeleeService(
 
     private async Task<int> StrikePlayerAsync(UserSession caster, MagicType1Data type1Data, UserSession target)
     {
-        var finalDamage = target.BlockPhysical ? 0 : CalculateMeleeDamage(
+        var items = target.BlockPhysical
+            ? default
+            : ItemCombatBonus.Of(caster, ElementResistances.Of(target.Stats), gameDataService);
+        var skillDamage = target.BlockPhysical ? 0 : CalculateMeleeDamage(
             caster,
             type1Data,
             target.Stats.TotalAc,
             target.Stats.TotalEvasionrate,
             isPlayerTarget: true);
+        var finalDamage = skillDamage + items.Element / ItemCombatBonus.PlayerSkillElementDivisor;
         if (finalDamage > 0)
             finalDamage = CombatUtils.ApplyWeaponTypeResistance(finalDamage, caster, target, gameDataService);
         if (!target.BlockPhysical)
@@ -144,19 +148,22 @@ public class MagicMeleeService(
                 await combatLifecycleService.HandlePlayerDeathAsync(target, caster);
         }
 
+        if (caster.ZoneId != ChaosRules.Zone)
+            await ItemHitEffects.ApplyAsync(caster, target, items, skillDamage + items.Element, combatLifecycleService, gameDataService);
         return finalDamage;
     }
 
     private async Task<int> StrikeNpcAsync(UserSession caster, MagicType1Data type1Data, NpcInstance npcTarget)
     {
         combatLifecycleService.SetNpcAggro(npcTarget, caster);
-        var finalDamage = CalculateMeleeDamage(
+        var items = ItemCombatBonus.Of(caster, ElementResistances.Of(npcTarget), gameDataService);
+        var skillDamage = CalculateMeleeDamage(
             caster,
             type1Data,
             npcTarget.TotalAc,
             Math.Max(1f, npcTarget.EvadeRate),
             isPlayerTarget: false);
-        finalDamage += type1Data.AddDamage;
+        var finalDamage = skillDamage + items.Element + type1Data.AddDamage;
         finalDamage = GmMode.Dealt(caster, npcTarget.Hp, Math.Min(finalDamage, CombatUtils.MaxDamage));
         if (finalDamage > 0)
         {
@@ -167,6 +174,7 @@ public class MagicMeleeService(
                 await combatLifecycleService.HandleNpcDeathAsync(npcTarget, caster);
         }
 
+        await ItemHitEffects.ApplyAsync(caster, null, items, skillDamage + items.Element, combatLifecycleService, gameDataService);
         return finalDamage;
     }
 

@@ -206,6 +206,8 @@ public class UserSession
 
     public byte DrakiStage { get; set; }
     public byte DrakiSubStage { get; set; }
+    public byte DrakiEntranceLimit { get; set; } = DrakiTowerRules.MaxDailyEntrances;
+    public DateTime DrakiEntranceLimitResetDate { get; set; } = DateTime.UtcNow.Date;
 
     // Party BBS
     public bool SeekingParty { get; set; }

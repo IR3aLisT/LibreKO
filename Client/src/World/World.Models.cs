@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Godot;
+using LibreKO.Domain;
 
 namespace LibreKO;
 
@@ -10,6 +11,29 @@ public partial class World
     {
         if (string.IsNullOrEmpty(modelStem)) return;
         AttachFxPlugs(body, $"res://assets/npcs/{modelStem}.fxplug.json");
+    }
+
+    private const string BuiltInPlugPrefix = "plug_";
+
+    internal static void AttachBuiltInPlugs(Node3D body, string modelStem)
+    {
+        if (string.IsNullOrEmpty(modelStem)) return;
+        string path = $"res://assets/npcs/{modelStem}.plugs.json";
+        if (!Godot.FileAccess.FileExists(path) || FindFirst<Skeleton3D>(body) is not { } skel) return;
+        foreach (var plug in NpcBuiltInPlugs.Parse(Godot.FileAccess.GetFileAsString(path)))
+        {
+            if (plug.Joint < 0 || plug.Joint >= skel.GetBoneCount()) continue;
+            string model = $"res://assets/npcs/plugs/{plug.Model}.glb";
+            if (!ResourceLoader.Exists(model) || ResourceLoader.Load(model) is not PackedScene scene) continue;
+            var attach = new BoneAttachment3D { Name = $"{BuiltInPlugPrefix}{plug.Slot}" };
+            skel.AddChild(attach);
+            attach.BoneIdx = plug.Joint;
+            var mesh = scene.Instantiate<Node3D>();
+            mesh.Transform = WeaponMount.PlugLocal(plug.Position, plug.Rotation, plug.Scale);
+            ForceDoubleSided(mesh);
+            attach.AddChild(mesh);
+            WeaponIdle.Start(mesh, plug.Anim);
+        }
     }
 
     internal static void AttachFxPlugs(Node3D body, string path, bool turnWithBone = false)
@@ -182,12 +206,6 @@ public partial class World
         { (0, 0), (1, 1), (3, 2), (4, 3), (2, 5) };
 
     private readonly System.Collections.Generic.Dictionary<string, (Mesh? Mesh, Skin? Skin)> _partCache = new();
-
-    private static readonly System.Collections.Generic.HashSet<int> NoWeaponNpcIds = new()
-    {
-        8002, 8003,
-        13013,
-    };
 
     private static readonly string[] IdleClips = { "basic", "breath", "base", "stand", "wait" };
     private static readonly string[] WalkClips = { "walk", "move", "run" };

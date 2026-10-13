@@ -31,6 +31,7 @@ public class EventSystemsPacketCoordinator(
     EventSchedulerService eventSchedulerService,
     ILoyaltyService loyaltyService,
     IMonsterStoneService monsterStoneService,
+    IDrakiTowerService drakiTowerService,
     INereidMonumentService nereidMonuments,
     IPartyUserVoteService userVote,
     ILogger<EventSystemsPacketCoordinator> logger) : IEventSystemsPacketCoordinator
@@ -82,6 +83,18 @@ public class EventSystemsPacketCoordinator(
 
             case TempleEventDisband:
                 await HandleTempleEventDisbandAsync(session);
+                break;
+
+            case (byte)TempleSubOpcode.DrakiEnter:
+                await drakiTowerService.HandleEnterAsync(session, packet);
+                break;
+
+            case (byte)TempleSubOpcode.DrakiList:
+                await drakiTowerService.HandleListAsync(session);
+                break;
+
+            case (byte)TempleSubOpcode.DrakiTown:
+                await drakiTowerService.HandleTownAsync(session);
                 break;
 
             case FullMoonRules.EntrySub:

@@ -273,15 +273,14 @@ public partial class World
             }
             using (Perf.Measure(Perf.Section.BuildGear))
             {
+                string lookStem = info.IsNpc && !statue && _mobIndex != null
+                    && _mobIndex.TryGetValue(info.ModelId, out var fs) ? fs : "";
+                AttachBuiltInPlugs(body, lookStem);
                 AttachWeapons(body, info.Gear,
-                    WeaponWearer(info.IsNpc, statue, info.Race, info.NpcId, info.Size), info.NpcType);
+                    WeaponWearer(info.IsNpc, statue, info.Race, info.NpcId, info.Size, info.ModelId), info.NpcType);
                 if (!info.IsNpc) AttachClanGauntlet(body, info.Race, info.ClanGrade, info.ClanRanking);
                 if (info.IsNpc && !statue)
-                {
-                    string fxStem = _mobIndex != null && _mobIndex.TryGetValue(info.ModelId, out var fs)
-                        ? fs : "";
-                    AttachCharacterFxPlugs(body, fxStem);
-                }
+                    AttachCharacterFxPlugs(body, lookStem);
                 else if (!info.IsNpc)
                 {
                     wingAnims = AttachWings(body, ShownCospre(info.Gear), info.Race, _zone);
@@ -700,7 +699,7 @@ public partial class World
         CharacterMerge.Remove(e.Body);
         RestorePartDefaults(e.Body, e.DefaultParts);
         GraftEquipment(e.Body, e.LookRace, e.Face, e.Gear, e.Hair, e.HelmetHidden, e.CostumeHidden);
-        AttachWeapons(e.Body, e.Gear, WeaponWearer(e.IsNpc, e.Statue, e.Race, e.NpcId, e.Size));
+        AttachWeapons(e.Body, e.Gear, WeaponWearer(e.IsNpc, e.Statue, e.Race, e.NpcId, e.Size, e.ModelId));
         e.WingAnims = DressAccessories(e.Body, ShownCospre(e.Gear), e.Race);
         System.Array.Clear(e.WingClips);
         if (e.Sitting)

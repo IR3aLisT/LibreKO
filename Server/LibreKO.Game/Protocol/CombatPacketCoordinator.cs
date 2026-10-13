@@ -87,9 +87,11 @@ public class CombatPacketCoordinator(
         if (target != null)
         {
             var mayAttack = target.Hp > 0 && PvpRules.CanAttackPlayer(session, target);
+            var hit = mayAttack
+                ? PhysicalDamageCalculator.CalculateHit(session, PhysicalDefender.Of(target), gameDataService)
+                : default;
             var damage = mayAttack
-                ? GmMode.Taken(target, GmMode.Dealt(session, target.Hp,
-                    PhysicalDamageCalculator.Calculate(session, PhysicalDefender.Of(target), gameDataService)))
+                ? GmMode.Taken(target, GmMode.Dealt(session, target.Hp, hit.Damage))
                 : 0;
             if (damage <= 0)
             {
@@ -115,6 +117,8 @@ public class CombatPacketCoordinator(
                     attackResult = AttackResult.Succeeded;
                 }
             }
+
+            await ItemHitEffects.ApplyAsync(session, target, hit.Items, hit.DrainBase, combatLifecycleService, gameDataService);
         }
         else
         {
@@ -124,8 +128,8 @@ public class CombatPacketCoordinator(
             {
                 combatLifecycleService.SetNpcAggro(npcTarget, session);
 
-                var damage = GmMode.Dealt(session, npcTarget.Hp, PhysicalDamageCalculator.Calculate(
-                    session, PhysicalDefender.Of(npcTarget), gameDataService));
+                var hit = PhysicalDamageCalculator.CalculateHit(session, PhysicalDefender.Of(npcTarget), gameDataService);
+                var damage = GmMode.Dealt(session, npcTarget.Hp, hit.Damage);
                 if (damage > 0)
                 {
                     npcTarget.Hp = Math.Max(0, npcTarget.Hp - damage);
@@ -142,6 +146,8 @@ public class CombatPacketCoordinator(
                         attackResult = AttackResult.Succeeded;
                     }
                 }
+
+                await ItemHitEffects.ApplyAsync(session, null, hit.Items, hit.DrainBase, combatLifecycleService, gameDataService);
             }
         }
 
