@@ -48,20 +48,61 @@ public class BifrostQuestTests
                 && buttons.Any(b => b.Label.Text!.Contains("Cancel"))));
     }
 
+    private static readonly int[] FragmentIds =
+    [
+        389160000, 389161000, 389162000, 389163000, 389164000, 389165000, 389166000
+    ];
+
     [Fact]
-    public void RothenQuest_CraftCrystal_Executes_Exchange_478()
+    public void RothenQuest_CraftCrystal_WithAll7Fragments_TakesAll7AndGivesCrystal()
     {
         var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
         var compilation = QuestCompilation.Create(text, "16095_31.quest");
         var host = Substitute.For<IQuestHost>();
-        host.ActionFailed.Returns(false);
+        foreach (var fragId in FragmentIds)
+        {
+            host.ItemCount(fragId).Returns(1);
+        }
 
         var interpreter = new QuestInterpreter(compilation.Program, host);
         compilation.Program.EventNames.TryGetValue("craft_crystal", out var craftEventId).Should().BeTrue();
 
         interpreter.Run(craftEventId).Failure.Should().BeNull();
 
-        host.Received(1).RunExchange(478);
+        foreach (var fragId in FragmentIds)
+        {
+            host.Received(1).TakeItem(fragId, 1);
+        }
+        host.Received(1).GiveItem(CrystalOfTrial, 1, 0);
+    }
+
+    [Fact]
+    public void RothenQuest_CraftCrystal_MissingAnyFragment_DoesNotCraft()
+    {
+        var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
+        var compilation = QuestCompilation.Create(text, "16095_31.quest");
+        var host = Substitute.For<IQuestHost>();
+        // Only 4 of the 7 fragments
+        host.ItemCount(389160000).Returns(1);
+        host.ItemCount(389161000).Returns(1);
+        host.ItemCount(389162000).Returns(1);
+        host.ItemCount(389163000).Returns(1);
+        host.ItemCount(389164000).Returns(0);
+        host.ItemCount(389165000).Returns(0);
+        host.ItemCount(389166000).Returns(0);
+
+        var interpreter = new QuestInterpreter(compilation.Program, host);
+        compilation.Program.EventNames.TryGetValue("craft_crystal", out var craftEventId).Should().BeTrue();
+
+        interpreter.Run(craftEventId).Failure.Should().BeNull();
+
+        host.DidNotReceive().TakeItem(Arg.Any<int>(), Arg.Any<int>());
+        host.DidNotReceive().GiveItem(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<int>());
+        host.Received(1).ShowDialog(
+            DialogStyle.Talk,
+            Arg.Any<int>(),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("7 Fragments of Sin")),
+            Arg.Any<IReadOnlyList<DialogButton>>());
     }
 
     [Fact]

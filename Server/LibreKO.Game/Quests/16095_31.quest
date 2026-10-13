@@ -20,11 +20,19 @@ On enter_chamber
     Goto close
 
 On craft_crystal
-    Exchange 478
-    If the last step worked
-        Say "The fragments merge into a Crystal of Trial! You may now use it to enter the Lost Chamber."
+    If player has 389160000 and player has 389161000 and player has 389162000 and player has 389163000 and player has 389164000 and player has 389165000 and player has 389166000
+        Take 1 of 389160000
+        Take 1 of 389161000
+        Take 1 of 389162000
+        Take 1 of 389163000
+        Take 1 of 389164000
+        Take 1 of 389165000
+        Take 1 of 389166000
+        Give 1 of 389190000
+        Say "The fragments of sin merge into a Crystal of Trial! You may now use it to enter the Lost Chamber."
         Topic "Confirm" goto close
     Else
-        Say "To craft a Crystal of Trial, you need 1x Fragment of Arrogance, 1x Fragment of Gluttony, 1x Fragment of Rage, and 1x Fragment of Sloth."
+        Say "To craft a Crystal of Trial, you need 1x of each of the 7 Fragments of Sin (Arrogance, Gluttony, Rage, Sloth, Lechery, Jealousy, and Avarice)."
         Topic "Confirm" goto close
     Goto close
+

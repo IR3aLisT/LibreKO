@@ -16,7 +16,7 @@ public static class CharacterReconnectZoneRepair
         if (!RequiresRepair(character.MapId, gameData))
             return false;
 
-        var (zoneId, posX, posZ, posY) = ResolveSafeSpawn(nation, gameData);
+        var (zoneId, posX, posZ, posY) = ResolveSafeSpawn(character.MapId, nation, gameData);
         character.MapId = (byte)zoneId;
         character.X = posX / 10f;
         character.Z = posZ / 10f;
@@ -36,7 +36,8 @@ public static class CharacterReconnectZoneRepair
             or (short)ZoneId.MonsterStone1
             or (short)ZoneId.MonsterStone2
             or (short)ZoneId.MonsterStone3
-            or (short)ZoneId.DrakiTower;
+            or (short)ZoneId.DrakiTower
+            or (short)ZoneId.Bifrost;
 
     public static bool IsEventZone(byte zoneId) => IsEventZone((short)zoneId);
 
@@ -47,10 +48,20 @@ public static class CharacterReconnectZoneRepair
 
     public static (short ZoneId, short PosX, short PosZ, short PosY) ResolveSafeSpawn(
         AccountNation nation,
+        IGameDataService gameData) => ResolveSafeSpawn(0, nation, gameData);
+
+    public static (short ZoneId, short PosX, short PosZ, short PosY) ResolveSafeSpawn(
+        short currentZoneId,
+        AccountNation nation,
         IGameDataService gameData)
     {
-        _ = nation;
         _ = gameData;
+        if (currentZoneId == (short)ZoneId.Bifrost)
+        {
+            var posX = nation == AccountNation.Karus ? BifrostRules.RonarkLandKarusX : BifrostRules.RonarkLandElMoradX;
+            var posZ = nation == AccountNation.Karus ? BifrostRules.RonarkLandKarusZ : BifrostRules.RonarkLandElMoradZ;
+            return ((short)ZoneId.RonarkLand, (short)(posX * 10), (short)(posZ * 10), 0);
+        }
 
         // Moradon's default start point is the central plaza, inside opposite-nation guard aggro range
         // with the current NPC spawn set, so reconnects land at a fixed inn-side point instead.

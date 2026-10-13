@@ -142,6 +142,7 @@ public class BifrostTests
         bifrostService.SetWinner(AccountNation.Karus);
 
         var playerInBifrost = CreateSession(10, "BifrostFarmer");
+        playerInBifrost.Nation = AccountNation.Karus;
         playerInBifrost.ZoneId = BifrostRules.ZoneBifrost;
         _sessions.RegisterSession(playerInBifrost);
 
@@ -154,9 +155,96 @@ public class BifrostTests
         bifrostService.IsActive.Should().BeFalse();
         await transitionMock.Received().ChangeZoneAsync(
             playerInBifrost,
-            (byte)ZoneId.Moradon,
-            BifrostRules.MoradonReturnX,
-            BifrostRules.MoradonReturnZ);
+            BifrostRules.ZoneRonarkLand,
+            BifrostRules.RonarkLandKarusX,
+            BifrostRules.RonarkLandKarusZ);
+    }
+
+    [Fact]
+    public async Task UltimaKilled_EndsEventAndSweepsOnlineAndOfflineCharactersToRonarkLand()
+    {
+        var transitionMock = Substitute.For<IZoneTransitionService>();
+        var charRepoMock = Substitute.For<ICharacterRepository>();
+        var scopeFactoryMock = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
+        var scopeMock = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScope>();
+        var serviceProviderMock = Substitute.For<IServiceProvider>();
+
+        scopeFactoryMock.CreateScope().Returns(scopeMock);
+        scopeMock.ServiceProvider.Returns(serviceProviderMock);
+        serviceProviderMock.GetService(typeof(ICharacterRepository)).Returns(charRepoMock);
+
+        var bifrostService = new BifrostEventService(
+            _sessions,
+            transitionMock,
+            Substitute.For<ILogger<BifrostEventService>>(),
+            scopeFactoryMock);
+
+        bifrostService.SetWinner(AccountNation.Karus);
+
+        var karusPlayer = CreateSession(11, "KarusFarmer");
+        karusPlayer.Nation = AccountNation.Karus;
+        karusPlayer.ZoneId = BifrostRules.ZoneBifrost;
+        _sessions.RegisterSession(karusPlayer);
+
+        var elmoPlayer = CreateSession(12, "ElmoFarmer");
+        elmoPlayer.Nation = AccountNation.ElMorad;
+        elmoPlayer.ZoneId = BifrostRules.ZoneBifrost;
+        _sessions.RegisterSession(elmoPlayer);
+
+        var ultima = new NpcInstance
+        {
+            NpcId = BifrostRules.UltimaNpcId,
+            ZoneId = BifrostRules.ZoneBifrost,
+            Hp = 0
+        };
+
+        await bifrostService.OnUltimaKilledAsync(ultima, karusPlayer);
+
+        bifrostService.IsActive.Should().BeFalse();
+        bifrostService.Phase.Should().Be(BifrostPhase.Inactive);
+
+        // Assert Karus online teleported to Ronark Land Karus base
+        await transitionMock.Received(1).ChangeZoneAsync(
+            karusPlayer,
+            BifrostRules.ZoneRonarkLand,
+            BifrostRules.RonarkLandKarusX,
+            BifrostRules.RonarkLandKarusZ);
+
+        // Assert El Morad online teleported to Ronark Land El Morad base
+        await transitionMock.Received(1).ChangeZoneAsync(
+            elmoPlayer,
+            BifrostRules.ZoneRonarkLand,
+            BifrostRules.RonarkLandElMoradX,
+            BifrostRules.RonarkLandElMoradZ);
+
+        // Assert offline character DB relocation called
+        await charRepoMock.Received(1).RelocateCharactersFromZoneAsync(
+            BifrostRules.ZoneBifrost,
+            BifrostRules.ZoneRonarkLand,
+            BifrostRules.RonarkLandKarusX,
+            BifrostRules.RonarkLandKarusZ,
+            BifrostRules.RonarkLandElMoradX,
+            BifrostRules.RonarkLandElMoradZ);
+    }
+
+    [Fact]
+    public void CharacterReconnectZoneRepair_RepairsZone31_ToRonarkLand()
+    {
+        var karusChar = new LibreKO.Common.Domain.Entities.Character
+        {
+            MapId = BifrostRules.ZoneBifrost,
+            Race = (byte)CharacterRace.KarusTuarek
+        };
+
+        var repaired = CharacterReconnectZoneRepair.TryRepair(
+            karusChar,
+            AccountNation.Karus,
+            Substitute.For<IGameDataService>());
+
+        repaired.Should().BeTrue();
+        karusChar.MapId.Should().Be(BifrostRules.ZoneRonarkLand);
+        karusChar.X.Should().Be(BifrostRules.RonarkLandKarusX);
+        karusChar.Z.Should().Be(BifrostRules.RonarkLandKarusZ);
     }
 
     [Fact]

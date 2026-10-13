@@ -3,6 +3,8 @@ using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
+using LibreKO.Common.Domain.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -21,6 +23,7 @@ public interface IBifrostEventService
     void Close();
     void SetWinner(AccountNation nation, string killerName = "GM");
     Task OnMonumentKilledAsync(NpcInstance npc, UserSession killer);
+    Task OnUltimaKilledAsync(NpcInstance npc, UserSession killer);
     BifrostEntryResult CanEnter(UserSession session);
     Task<bool> TryEnterAsync(UserSession session);
     Task TickAsync();
@@ -31,6 +34,7 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
     private readonly SessionManager sessionManager;
     private readonly IZoneTransitionService zoneTransitionService;
     private readonly ILogger<BifrostEventService> logger;
+    private readonly IServiceScopeFactory? scopeFactory;
 
     private readonly object stateLock = new();
     private long remainingSecs;
@@ -46,11 +50,13 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
     public BifrostEventService(
         SessionManager sessionManager,
         IZoneTransitionService zoneTransitionService,
-        ILogger<BifrostEventService> logger)
+        ILogger<BifrostEventService> logger,
+        IServiceScopeFactory? scopeFactory = null)
     {
         this.sessionManager = sessionManager;
         this.zoneTransitionService = zoneTransitionService;
         this.logger = logger;
+        this.scopeFactory = scopeFactory;
 
         NpcHostility.IsBifrostMonumentAttackable = () => IsActive && Phase == BifrostPhase.MonumentFight;
         this.zoneTransitionService.ZoneAbilitySent += OnZoneAbilitySentAsync;
@@ -188,6 +194,16 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
             await BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation, killerName));
             await BroadcastRemainingAsync();
         }
+    }
+
+    public async Task OnUltimaKilledAsync(NpcInstance npc, UserSession killer)
+    {
+        if (npc.ZoneId != BifrostRules.ZoneBifrost || npc.NpcId != BifrostRules.UltimaNpcId)
+            return;
+
+        logger.LogInformation("Ultima defeated by {Killer}. Bifrost event ending.", killer.Name);
+        await BroadcastNoticeAsync(BifrostRules.NoticeUltimaDefeated(killer.Name));
+        await CloseAsync();
     }
 
     public BifrostEntryResult CanEnter(UserSession session)
@@ -338,16 +354,43 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
             {
                 try
                 {
+                    float targetX = session.Nation == AccountNation.Karus
+                        ? BifrostRules.RonarkLandKarusX
+                        : BifrostRules.RonarkLandElMoradX;
+                    float targetZ = session.Nation == AccountNation.Karus
+                        ? BifrostRules.RonarkLandKarusZ
+                        : BifrostRules.RonarkLandElMoradZ;
+
                     await zoneTransitionService.ChangeZoneAsync(
                         session,
-                        (byte)ZoneId.Moradon,
-                        BifrostRules.MoradonReturnX,
-                        BifrostRules.MoradonReturnZ);
+                        BifrostRules.ZoneRonarkLand,
+                        targetX,
+                        targetZ);
                 }
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "Failed to sweep player {Player} from Bifrost zone", session.Name);
                 }
+            }
+        }
+
+        if (scopeFactory != null)
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var characterRepository = scope.ServiceProvider.GetRequiredService<ICharacterRepository>();
+                await characterRepository.RelocateCharactersFromZoneAsync(
+                    BifrostRules.ZoneBifrost,
+                    BifrostRules.ZoneRonarkLand,
+                    BifrostRules.RonarkLandKarusX,
+                    BifrostRules.RonarkLandKarusZ,
+                    BifrostRules.RonarkLandElMoradX,
+                    BifrostRules.RonarkLandElMoradZ);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to relocate offline characters from Bifrost zone");
             }
         }
     }

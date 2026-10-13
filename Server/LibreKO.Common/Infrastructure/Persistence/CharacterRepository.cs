@@ -90,4 +90,31 @@ public class CharacterRepository(AppDbContext context) : ICharacterRepository
             .Where(c => c.LoyaltyDaily != 0)
             .ExecuteUpdateAsync(setters => setters.SetProperty(c => c.LoyaltyDaily, 0));
     }
+
+    public async Task<int> RelocateCharactersFromZoneAsync(
+        byte fromZoneId,
+        byte toZoneId,
+        float karusX,
+        float karusZ,
+        float elMoradX,
+        float elMoradZ)
+    {
+        var karusUpdated = await context.Characters
+            .Where(c => c.MapId == fromZoneId && !c.IsOnline && c.Race < 10)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.MapId, toZoneId)
+                .SetProperty(c => c.X, karusX)
+                .SetProperty(c => c.Z, karusZ)
+                .SetProperty(c => c.Y, 0f));
+
+        var elmoUpdated = await context.Characters
+            .Where(c => c.MapId == fromZoneId && !c.IsOnline && c.Race >= 10)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.MapId, toZoneId)
+                .SetProperty(c => c.X, elMoradX)
+                .SetProperty(c => c.Z, elMoradZ)
+                .SetProperty(c => c.Y, 0f));
+
+        return karusUpdated + elmoUpdated;
+    }
 }

@@ -26,6 +26,7 @@ public static class BifrostRules
 
     public const int MonumentNpcId = 601;
     public const int GateNpcId = 602;
+    public const int UltimaNpcId = 9888;
 
     public const int DefaultMonumentMinutes = 30;
     public const int DefaultLoserDelayMinutes = 30;
@@ -36,6 +37,12 @@ public static class BifrostRules
 
     public const float ElMoradEntryX = 245f;
     public const float ElMoradEntryZ = 950f;
+
+    public const float RonarkLandKarusX = 1014f;
+    public const float RonarkLandKarusZ = 1020f;
+
+    public const float RonarkLandElMoradX = 1026f;
+    public const float RonarkLandElMoradZ = 984f;
 
     public const float MoradonReturnX = 816f;
     public const float MoradonReturnZ = 532f;
@@ -52,4 +59,7 @@ public static class BifrostRules
         nation == AccountNation.ElMorad
             ? $"### [Bifrost] El Morad's {killerName} shattered the Monument! El Morad has early access to Bifrost! ###"
             : $"### [Bifrost] Karus's {killerName} shattered the Monument! Karus has early access to Bifrost! ###";
+
+    public static string NoticeUltimaDefeated(string killerName) =>
+        $"### [Bifrost] {killerName} has defeated Ultima! Bi-Frost has concluded! ###";
 }
