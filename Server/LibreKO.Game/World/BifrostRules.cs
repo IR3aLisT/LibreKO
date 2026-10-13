@@ -1,4 +1,4 @@
-using LibreKO.Common.Enums;
+﻿using LibreKO.Common.Enums;
 
 namespace LibreKO.Game.World;
 
@@ -42,7 +42,7 @@ public static class BifrostRules
     public const string NoticeEventNotActive = "The Bifrost event is not currently active.";
     public const string NoticeMonumentNotFallen = "The Bifrost Monument has not fallen yet.";
 
-    public static string NoticeVictory(AccountNation nation, string killerName = "") =>
+    public static string NoticeVictory(AccountNation nation) =>
         nation == AccountNation.ElMorad
             ? "The El Morad warriors have destroyed the monument and can now enter Bifrost!"
             : "The Karus warriors have destroyed the monument and can now enter Bifrost!";

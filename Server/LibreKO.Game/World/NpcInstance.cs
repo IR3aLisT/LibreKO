@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using LibreKO.Common.Domain.Entities.GameData;
 
 using LibreKO.Common.Enums;

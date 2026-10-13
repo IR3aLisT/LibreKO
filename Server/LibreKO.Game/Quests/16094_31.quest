@@ -1,9 +1,9 @@
-﻿Bind Npc 16094 Zone 31
+Bind Npc 16094 Zone 31
 
 On greeting
-    Say "Do you wish to leave Bi-Frost and return to your lands?"
-    Topic "Return to Ronark Land." goto leave_bifrost
-    Topic "Cancel" goto close
+    Say "Do you want to exit from here?"
+    Topic "Yes. I want to leave." goto leave_bifrost
+    Topic "No. I don't want to leave." goto close
     Goto close
 
 On leave_bifrost

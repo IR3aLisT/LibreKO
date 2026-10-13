@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Entities.GameData;
+﻿using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Gameplay;
@@ -505,13 +505,13 @@ public class AdminPacketCoordinator(
             case "bifrostclose":
             {
                 var input = (cmd == "bifrostclose" ? "close" : (cmd == "bifroststart" ? $"start {arg}" : arg)).Trim();
-                var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                var subcmd = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
+                var bifrostArgs = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var subcmd = bifrostArgs.Length > 0 ? bifrostArgs[0].ToLowerInvariant() : "";
 
                 if (subcmd is "open" or "start")
                 {
                     int? minutes = null;
-                    if (parts.Length > 1 && int.TryParse(parts[1], out var parsed) && parsed is > 0 and <= 720)
+                    if (bifrostArgs.Length > 1 && int.TryParse(bifrostArgs[1], out var parsed) && parsed is > 0 and <= 720)
                     {
                         minutes = parsed;
                     }
@@ -529,12 +529,12 @@ public class AdminPacketCoordinator(
                 }
                 else if (subcmd == "winner")
                 {
-                    if (parts.Length < 2 || (parts[1].ToLowerInvariant() != "karus" && parts[1].ToLowerInvariant() != "elmorad"))
+                    if (bifrostArgs.Length < 2 || (bifrostArgs[1].ToLowerInvariant() != "karus" && bifrostArgs[1].ToLowerInvariant() != "elmorad"))
                     {
                         await SendNoticeAsync(session, "Usage: +bifrost winner <karus|elmorad>");
                         break;
                     }
-                    var nation = parts[1].ToLowerInvariant() == "karus" ? AccountNation.Karus : AccountNation.ElMorad;
+                    var nation = bifrostArgs[1].ToLowerInvariant() == "karus" ? AccountNation.Karus : AccountNation.ElMorad;
                     bifrostEventService.SetWinner(nation, session.Name);
                     await SendNoticeAsync(session, $"[Bifrost] Forced winner {nation}! Farming phase started.");
                 }

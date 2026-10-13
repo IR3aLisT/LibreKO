@@ -1,13 +1,15 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Game.Configuration;
 using LibreKO.Game.Protocol;
 using LibreKO.Game.Scripting;
 using LibreKO.Game.World;
 using LibreKO.Quests;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 
@@ -22,7 +24,7 @@ public class BifrostTests
 
     public BifrostTests()
     {
-        _bifrostService = new BifrostEventService(_sessions, _zoneTransition, _logger);
+        _bifrostService = new BifrostEventService(_sessions, Options.Create(new GameServerSettings()), new ScheduleClock(), _zoneTransition, _logger);
     }
 
     private static UserSession CreateSession(int id, string name)
@@ -95,6 +97,8 @@ public class BifrostTests
         var transitionMock = Substitute.For<IZoneTransitionService>();
         var bifrostService = new BifrostEventService(
             _sessions,
+            Options.Create(new GameServerSettings()),
+            new ScheduleClock(),
             transitionMock,
             Substitute.For<ILogger<BifrostEventService>>());
 
@@ -136,6 +140,8 @@ public class BifrostTests
         var transitionMock = Substitute.For<IZoneTransitionService>();
         var bifrostService = new BifrostEventService(
             _sessions,
+            Options.Create(new GameServerSettings()),
+            new ScheduleClock(),
             transitionMock,
             Substitute.For<ILogger<BifrostEventService>>());
 
@@ -175,7 +181,7 @@ public class BifrostTests
             Substitute.For<IGameDataService>());
 
         repaired.Should().BeTrue();
-        karusChar.MapId.Should().Be(CharacterReconnectZoneRepair.SafeReconnectZoneId);
+        karusChar.MapId.Should().Be((byte)CharacterReconnectZoneRepair.SafeReconnectZoneId);
     }
 
     [Fact]
@@ -224,6 +230,8 @@ public class BifrostTests
         var transitionMock = Substitute.For<IZoneTransitionService>();
         var bifrostService = new BifrostEventService(
             _sessions,
+            Options.Create(new GameServerSettings()),
+            new ScheduleClock(),
             transitionMock,
             Substitute.For<ILogger<BifrostEventService>>());
 
@@ -244,6 +252,8 @@ public class BifrostTests
         var transitionMock = Substitute.For<IZoneTransitionService>();
         var bifrostService = new BifrostEventService(
             _sessions,
+            Options.Create(new GameServerSettings()),
+            new ScheduleClock(),
             transitionMock,
             Substitute.For<ILogger<BifrostEventService>>());
 

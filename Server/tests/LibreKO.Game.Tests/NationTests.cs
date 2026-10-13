@@ -30,6 +30,37 @@ public class NationTests : GameTestBase
         kingEventState.GetNoahBonus(AccountNation.ElMorad).Should().Be(2);
     }
 
+    [Theory]
+    [InlineData((byte)ZoneId.RonarkLand, BifrostRules.DefaultMonumentMinutes * 60)]
+    [InlineData((byte)ZoneId.Bifrost, BifrostRules.DefaultMonumentMinutes * 60)]
+    [InlineData((byte)ZoneId.Moradon, 0)]
+    public async Task NationSystemsPacketCoordinator_HandleBifrostAsync_ShowsTheBifrostTimeOnlyWhereItIsFought(
+        byte zoneId, int expectedSeconds)
+    {
+        using var provider = CreateProvider(_ => { });
+        provider.GetRequiredService<IBifrostEventService>().Start();
+
+        var client = Substitute.For<IClient>();
+        client.Id.Returns(Guid.NewGuid());
+        Packet? sentPacket = null;
+        client.SendPacket(Arg.Do<Packet>(packet => sentPacket = packet), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var session = provider.GetRequiredService<SessionManager>().CreateSession(client, characterId: 91, accountId: 101);
+        session.ZoneId = zoneId;
+        session.Hp = 1;
+
+        var request = new Packet(GameOpcodes.GS_BIFROST);
+        request.WriteByte((byte)TempleSubOpcode.BifrostRemaining);
+        await provider.GetRequiredService<INationSystemsPacketCoordinator>().HandleBifrostAsync(client, request);
+
+        sentPacket.Should().NotBeNull();
+        sentPacket!.GetOpcode().Should().Be((byte)GameOpcodes.GS_BIFROST);
+        sentPacket.ResetOffset();
+        sentPacket.ReadByte().Should().Be((byte)TempleSubOpcode.BifrostRemaining);
+        sentPacket.ReadInt().Should().Be(expectedSeconds);
+    }
+
     [Fact]
     public async Task NationSystemsPacketCoordinator_HandleRankAsync_ReturnsRequestedRankTypeWithEmptyList()
     {

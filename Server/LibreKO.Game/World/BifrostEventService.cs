@@ -121,6 +121,7 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
             {
                 monument.Respawn();
                 sessionManager.Regions.UpdateNpcRegion(monument);
+                _ = sessionManager.Regions.BroadcastFromNpc(monument, NpcPacketMapper.BuildInOutPacket(monument, InOutType.In));
             }
         }
 
@@ -175,7 +176,7 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
         if (monument != null)
             monument.IsMonumentAttackable = false;
 
-        _ = BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation, killerName));
+        _ = BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation));
         _ = BroadcastRemainingAsync();
     }
 
@@ -205,7 +206,7 @@ public class BifrostEventService : BackgroundService, IBifrostEventService
         if (shouldTransition)
         {
             logger.LogInformation("Bifrost Monument destroyed by {Killer} ({Nation}). Farming phase started.", killerName, nation);
-            await BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation, killerName));
+            await BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation));
             await BroadcastRemainingAsync();
         }
     }

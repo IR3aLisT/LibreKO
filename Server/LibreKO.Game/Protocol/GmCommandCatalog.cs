@@ -1,4 +1,4 @@
-namespace LibreKO.Game.Protocol;
+﻿namespace LibreKO.Game.Protocol;
 
 public readonly record struct GmCommand(string Group, string Syntax, string Description);
 

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using FluentAssertions;
 using LibreKO.Quests;
 using LibreKO.Quests.Binding;
@@ -27,7 +27,7 @@ public class BifrostQuestTests
     }
 
     [Fact]
-    public void RothenQuest_Greeting_Presents_Options_To_Enter_Lost_Chamber_And_Craft()
+    public void RothenQuest_Greeting_Asks_Which_Mission()
     {
         var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
         var compilation = QuestCompilation.Create(text, "16095_31.quest");
@@ -40,12 +40,52 @@ public class BifrostQuestTests
         host.Received(1).ShowDialog(
             DialogStyle.Talk,
             Arg.Any<int>(),
-            Arg.Is<DialogLine>(l => l.Text!.Contains("Lost Chamber") || l.Text.Contains("Ultima")),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("Knight of the Sky")),
             Arg.Is<IReadOnlyList<DialogButton>>(buttons =>
-                buttons.Count == 3
-                && buttons.Any(b => b.Label.Text!.Contains("Enter the Lost Chamber"))
-                && buttons.Any(b => b.Label.Text!.Contains("Craft Crystal of Trial"))
-                && buttons.Any(b => b.Label.Text!.Contains("Cancel"))));
+                buttons.Count == 1 && buttons[0].Label.Text == "Confirm"));
+    }
+
+    [Fact]
+    public void RothenQuest_Without_Crystal_Offers_Production()
+    {
+        var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
+        var compilation = QuestCompilation.Create(text, "16095_31.quest");
+        var host = Substitute.For<IQuestHost>();
+        var interpreter = new QuestInterpreter(compilation.Program, host);
+        compilation.Program.EventNames.TryGetValue("choose_mission", out var chooseEventId).Should().BeTrue();
+
+        interpreter.Run(chooseEventId).Failure.Should().BeNull();
+
+        host.Received(1).ShowDialog(
+            DialogStyle.Talk,
+            Arg.Any<int>(),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("produce the Crystal of Trial")),
+            Arg.Is<IReadOnlyList<DialogButton>>(buttons =>
+                buttons.Count == 2
+                && buttons.Any(b => b.Label.Text == "Production")
+                && buttons.Any(b => b.Label.Text == "Cancel")));
+    }
+
+    [Fact]
+    public void RothenQuest_With_Crystal_Offers_Entry()
+    {
+        var text = File.ReadAllText(BakedQuestPath("16095_31.quest"));
+        var compilation = QuestCompilation.Create(text, "16095_31.quest");
+        var host = Substitute.For<IQuestHost>();
+        host.ItemCount(CrystalOfTrial).Returns(1);
+        var interpreter = new QuestInterpreter(compilation.Program, host);
+        compilation.Program.EventNames.TryGetValue("choose_mission", out var chooseEventId).Should().BeTrue();
+
+        interpreter.Run(chooseEventId).Failure.Should().BeNull();
+
+        host.Received(1).ShowDialog(
+            DialogStyle.Talk,
+            Arg.Any<int>(),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("enter the Lost Chamber")),
+            Arg.Is<IReadOnlyList<DialogButton>>(buttons =>
+                buttons.Count == 2
+                && buttons.Any(b => b.Label.Text == "Enter")
+                && buttons.Any(b => b.Label.Text == "Cancel")));
     }
 
     private static readonly int[] CraftFragmentIds =
@@ -102,7 +142,7 @@ public class BifrostQuestTests
         host.Received(1).ShowDialog(
             DialogStyle.Talk,
             Arg.Any<int>(),
-            Arg.Is<DialogLine>(l => l.Text!.Contains("Arrogance, Gluttony, Rage, and Sloth")),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("Fragment of Sloth")),
             Arg.Any<IReadOnlyList<DialogButton>>());
     }
 
@@ -138,7 +178,7 @@ public class BifrostQuestTests
         var host = Substitute.For<IQuestHost>();
         host.ItemCount(CrystalOfTrial).Returns(1);
         host.ItemCount(389164000).Returns(1);
-        host.ItemCount(389165000).Returns(0); // missing Jealousy
+        host.ItemCount(389165000).Returns(0);
         host.ItemCount(389166000).Returns(1);
 
         var interpreter = new QuestInterpreter(compilation.Program, host);
@@ -153,7 +193,7 @@ public class BifrostQuestTests
         host.Received(1).ShowDialog(
             DialogStyle.Talk,
             Arg.Any<int>(),
-            Arg.Is<DialogLine>(l => l.Text!.Contains("Crystal of Trial")),
+            Arg.Is<DialogLine>(l => l.Text!.Contains("Fragment of Jealousy")),
             Arg.Any<IReadOnlyList<DialogButton>>());
     }
 

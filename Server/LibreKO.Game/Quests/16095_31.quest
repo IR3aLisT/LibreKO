@@ -1,11 +1,39 @@
-﻿Bind Npc 16095 Zone 31
+Bind Npc 16095 Zone 31
 
 On greeting
-    Say "Do you wish to enter the Lost Chamber to face Ultima? You will need a Crystal of Trial and the Fragments of Lechery, Jealousy, and Avarice to unlock the portal."
-    Topic "Enter the Lost Chamber." goto enter_chamber
-    Topic "Craft Crystal of Trial." goto craft_crystal
-    Topic "Cancel" goto close
+    Say "I knew you'd come someday. You're the only one fitting the title Knight of the Sky. Which mission do you want to take on?"
+    Topic "Confirm" goto choose_mission
     Goto close
+
+On choose_mission
+    If player has 389190000
+        Goto enter_prompt
+    Else
+        Say "To produce the Crystal of Trial you need the following materials. Are you going to make it?"
+        Topic "Production" goto craft_crystal
+        Topic "Cancel" goto close
+
+On craft_crystal
+    If player has 389160000 and player has 389161000 and player has 389162000 and player has 389163000
+        Take 1 of 389160000
+        Take 1 of 389161000
+        Take 1 of 389162000
+        Take 1 of 389163000
+        Give 1 of 389190000
+    Else
+        If player lacks 389160000
+            Say "You don't have the Fragment of Arrogance| It can be obtained from the Monster of Arrogance."
+        Else if player lacks 389161000
+            Say "You don't have the Fragment of Gluttony| It can be obtained from the Monster of Gluttony."
+        Else if player lacks 389162000
+            Say "You don't have the Fragment of Rage| It can be obtained from the Monster of Rage."
+        Else if player lacks 389163000
+            Say "You don't have the Fragment of Sloth| It can be obtained from the Monster of Sloth."
+
+On enter_prompt
+    Say "To enter the Lost Chamber you need the following materials. Are you going to enter?|You will be switched to party status upon entry."
+    Topic "Enter" goto enter_chamber
+    Topic "Cancel" goto close
 
 On enter_chamber
     If player has 389190000 and player has 389164000 and player has 389165000 and player has 389166000
@@ -15,20 +43,11 @@ On enter_chamber
         Take 1 of 389166000
         Teleport party to 31 at 940 186
     Else
-        Say "You need a Crystal of Trial and the Fragments of Lechery, Jealousy, and Avarice to enter the Lost Chamber."
-        Topic "Confirm" goto close
-    Goto close
-
-On craft_crystal
-    If player has 389160000 and player has 389161000 and player has 389162000 and player has 389163000
-        Take 1 of 389160000
-        Take 1 of 389161000
-        Take 1 of 389162000
-        Take 1 of 389163000
-        Give 1 of 389190000
-        Say "The fragments of sin merge into a Crystal of Trial! You may now use it to enter the Lost Chamber."
-        Topic "Confirm" goto close
-    Else
-        Say "To craft a Crystal of Trial, you need 1x of each of the 4 Fragments: Arrogance, Gluttony, Rage, and Sloth."
-        Topic "Confirm" goto close
-    Goto close
+        If player lacks 389190000
+            Say "You don't have the Crystal of Trial| Make the Crystal of Trial first"
+        Else if player lacks 389164000
+            Say "You don't have the Fragment of Lechery| It can be obtained from the Monster of Lechery."
+        Else if player lacks 389165000
+            Say "You don't have the Fragment of Jealousy| It can be obtained from the Monster of Jealousy."
+        Else if player lacks 389166000
+            Say "You don't have the Fragment of Avarice| It can be obtained from the Monster of Avarice."

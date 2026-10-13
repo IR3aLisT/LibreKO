@@ -106,7 +106,7 @@ public class EventScheduleTests
     public void BifrostStartsOnceAtEachListedHour()
     {
         var settings = new GameServerSettings();
-        var bifrost = new BifrostEventService(new SessionManager(), Options.Create(settings), new ScheduleClock(),
+        var bifrost = new BifrostEventService(new SessionManager(), Options.Create(settings), new ScheduleClock(), Substitute.For<IZoneTransitionService>(),
             NullLogger<BifrostEventService>.Instance);
         var opening = new DateTime(2026, 10, 12, settings.Events.BifrostStartHours[0], 0, 0);
 

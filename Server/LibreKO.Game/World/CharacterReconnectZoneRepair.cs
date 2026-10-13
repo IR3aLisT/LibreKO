@@ -1,4 +1,4 @@
-using LibreKO.Common.Domain.Entities;
+﻿using LibreKO.Common.Domain.Entities;
 using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 
@@ -52,6 +52,7 @@ public static class CharacterReconnectZoneRepair
     {
         _ = nation;
         _ = gameData;
+
         // Moradon's default start point is the central plaza, inside opposite-nation guard aggro range
         // with the current NPC spawn set, so reconnects land at a fixed inn-side point instead.
         return (SafeReconnectZoneId, (short)(SafeReconnectX * 10), (short)(SafeReconnectZ * 10), 0);

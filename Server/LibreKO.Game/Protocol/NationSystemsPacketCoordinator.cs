@@ -51,9 +51,12 @@ public class NationSystemsPacketCoordinator(
             signUpSent = true;
         }
 
-        if (bifrostEventService.IsActive || !signUpSent)
+        var bifrostSecs = session.ZoneId is BifrostRules.ZoneRonarkLand or BifrostRules.ZoneBifrost
+            ? (int)Math.Min(bifrostEventService.RemainingSecs, int.MaxValue)
+            : 0;
+        if (bifrostSecs > 0 || !signUpSent)
             await session.Client.SendPacket(BifrostPacketWriter.Remaining(
-                TempleSubOpcode.BifrostRemaining, (int)Math.Min(bifrostEventService.RemainingSecs, int.MaxValue)));
+                TempleSubOpcode.BifrostRemaining, bifrostSecs));
     }
 
     private const byte RankTypePkZone = 1;
