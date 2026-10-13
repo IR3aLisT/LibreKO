@@ -128,9 +128,8 @@ public class NpcInstance
     public bool IsAggressive { get; set; }
     public const float MaxReachRadius = 6f;
     public float BulkRadius => Bulk / 100f * (Size > 0 ? Size / 100f : 1f);
-    public float AttackDistance => DirectAttack == DirectAttackMelee
-        ? MeleeAttackRange + Math.Min(BulkRadius, MaxReachRadius)
-        : AttackRange;
+    public float MeleeReach => MeleeAttackRange + Math.Min(BulkRadius, MaxReachRadius);
+    public float AttackDistance => DirectAttack == DirectAttackMelee ? MeleeReach : AttackRange;
     public float ChaseRange(bool targetDamagedMe) => targetDamagedMe ? TracingRange : SearchRange + ChaseRangeSlack;
 
     // AI runtime state

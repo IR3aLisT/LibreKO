@@ -115,9 +115,7 @@ public class DrakiTowerTests : GameTestBase
         DrakiTowerRules.MinimumLevel.Should().Be(1);
         DrakiTowerRules.MaxDailyEntrances.Should().Be(3);
         DrakiTowerRules.CertificateOfDrakiItem.Should().Be(810595000);
-        DrakiTowerRules.OldDrakiSupplyBoxItem.Should().Be(810678000);
-        DrakiTowerRules.SuperiorDrakiSupplyBoxItem.Should().Be(810596000);
-        DrakiTowerRules.DrakiSupplyBoxItem.Should().Be(810678000);
+        DrakiTowerRules.SupplyBoxItem.Should().Be(810596000);
         DrakiTowerRules.RoomDurationMinutes.Should().Be(120);
         DrakiTowerRules.WaveSeconds.Should().Be(ScriptCharacterService.DrakiRiftSeconds);
         DrakiTowerRules.BreakSeconds.Should().Be(180);
@@ -214,9 +212,9 @@ public class DrakiTowerTests : GameTestBase
     [Fact]
     public void EventPacketWriter_DrakiEnterResult_WritesCode()
     {
-        var packet = EventPacketWriter.DrakiEnterResult(DrakiEnterResult.Dead);
+        var packet = EventPacketWriter.DrakiEnterResult(DrakiEnterResult.InvalidItem);
         packet.ReadByte().Should().Be((byte)TempleSubOpcode.DrakiEnter);
-        packet.ReadByte().Should().Be((byte)DrakiEnterResult.Dead);
+        packet.ReadByte().Should().Be((byte)DrakiEnterResult.InvalidItem);
     }
 
     [Fact]
@@ -233,8 +231,8 @@ public class DrakiTowerTests : GameTestBase
         var clearPacket = EventPacketWriter.DrakiLeaveSecond(5, 8, 300, completed: true);
         var giveUpPacket = EventPacketWriter.DrakiLeaveSecond(1, 2, 50, completed: false);
 
-        clearPacket.GetData().Last().Should().Be(0); // 0 = Clear
-        giveUpPacket.GetData().Last().Should().Be(1); // 1 = Give Up
+        clearPacket.GetData().Last().Should().Be(0);
+        giveUpPacket.GetData().Last().Should().Be(1);
     }
 
     [Fact]
@@ -248,22 +246,6 @@ public class DrakiTowerTests : GameTestBase
         _sent[session].Should().ContainSingle(p =>
             p.GetOpcode() == (byte)GameOpcodes.GS_EVENT
             && p.GetData()[0] == (byte)TempleSubOpcode.DrakiList);
-    }
-
-    [Fact]
-    public async Task HandleEnterAsync_WhenDead_FailsWithCode9()
-    {
-        var session = CreatePlayer(hp: 0);
-
-        var packet = new Packet((byte)GameOpcodes.GS_EVENT);
-        packet.WriteInt(0);
-        packet.WriteByte(1);
-
-        await _service.HandleEnterAsync(session, packet);
-
-        var sent = _sent[session].Single();
-        sent.ReadByte().Should().Be((byte)TempleSubOpcode.DrakiEnter);
-        sent.ReadByte().Should().Be((byte)DrakiEnterResult.Dead);
     }
 
     [Fact]
@@ -288,7 +270,6 @@ public class DrakiTowerTests : GameTestBase
         var session = CreatePlayer(zone: (byte)ZoneId.ElMoradCamp1);
         session.DrakiStage = 1;
 
-        // Player requests floor 5 without reaching it
         var packet = new Packet((byte)GameOpcodes.GS_EVENT);
         packet.WriteInt(0);
         packet.WriteByte(5);
@@ -353,8 +334,28 @@ public class DrakiTowerTests : GameTestBase
         enterPacket.WriteByte(1);
         await _service.HandleEnterAsync(session, enterPacket);
 
-        // Furthest stage must remain 3
         session.DrakiStage.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task AReplayOfAnEarlierFloorKeepsTheBestFloorAndWave()
+    {
+        var session = CreatePlayer(zone: (byte)ZoneId.ElMoradCamp1);
+        session.DrakiStage = 3;
+        session.DrakiSubStage = 5;
+
+        var enterPacket = new Packet((byte)GameOpcodes.GS_EVENT);
+        enterPacket.WriteInt(0);
+        enterPacket.WriteByte(1);
+        await _service.HandleEnterAsync(session, enterPacket);
+
+        var room = _rooms.Get((ushort)session.Room)!;
+        foreach (var monster in room.Npcs.Where(n => n.IsMonster).ToList())
+            await _service.OnNpcKilledAsync(monster);
+
+        _service.GetRoomState(room.Id)!.CurrentSubStage.Should().Be(2);
+        session.DrakiStage.Should().Be(3);
+        session.DrakiSubStage.Should().Be(5);
     }
 
     [Fact]
@@ -376,7 +377,6 @@ public class DrakiTowerTests : GameTestBase
         await _zoneTransition.Received(1).ChangeZoneAsync(
             session, (byte)ZoneId.DrakiTower, 40f, 451f);
 
-        // No enter result packet on success (zone change + timer answer the request)
         _sent[session].Should().NotContain(p =>
             p.GetOpcode() == (byte)GameOpcodes.GS_EVENT
             && p.GetData().Length > 0
@@ -408,7 +408,6 @@ public class DrakiTowerTests : GameTestBase
         var gateNpc = new NpcInstance { NpcId = 25257, Room = (ushort)session.Room };
         await _service.AdvanceFromGateNpcAsync(session, gateNpc);
 
-        // Stage must not advance during active wave
         state.StageIndex.Should().Be(0);
         state.IsBreak.Should().BeFalse();
     }
@@ -459,7 +458,6 @@ public class DrakiTowerTests : GameTestBase
         var room = _rooms.Get((ushort)session.Room)!;
         var stages = _stageProvider.Stages;
 
-        // Loop through all stages in order
         var iterations = 0;
         while (iterations++ < 100)
         {
@@ -487,11 +485,8 @@ public class DrakiTowerTests : GameTestBase
         var finalState = _service.GetRoomState(room.Id)!;
         finalState.Completed.Should().BeTrue();
 
-        // Verify supply box is granted (Superior 810596000 or Old 810678000)
-        await _itemGrant.Received(1).GrantAsync(session, Arg.Is<ItemData>(i =>
-            i.Num == DrakiTowerRules.SuperiorDrakiSupplyBoxItem || i.Num == DrakiTowerRules.OldDrakiSupplyBoxItem), 1);
+        await _itemGrant.Received(1).GrantAsync(session, Arg.Is<ItemData>(i => i.Num == DrakiTowerRules.SupplyBoxItem), 1);
 
-        // Verify exit rift is present
         room.Npcs.Should().ContainSingle(n => n.NpcId == DrakiTowerRules.FinalExitNpcId);
     }
 
@@ -501,9 +496,9 @@ public class DrakiTowerTests : GameTestBase
         var session = CreatePlayer(zone: (byte)ZoneId.ElMoradCamp1);
         session.DrakiEntranceLimit = 3;
 
-        var boxItem = new ItemData { Num = DrakiTowerRules.SuperiorDrakiSupplyBoxItem, Name = "Superior Draki Supply Box" };
-        _gameData.GetItem(DrakiTowerRules.SuperiorDrakiSupplyBoxItem).Returns(boxItem);
-        _itemGrant.GrantAsync(session, boxItem, 1).Returns(0); // Bag is full!
+        var boxItem = new ItemData { Num = DrakiTowerRules.SupplyBoxItem, Name = "Superior Draki Supply Box" };
+        _gameData.GetItem(DrakiTowerRules.SupplyBoxItem).Returns(boxItem);
+        _itemGrant.GrantAsync(session, boxItem, 1).Returns(0);
 
         var enterPacket = new Packet((byte)GameOpcodes.GS_EVENT);
         enterPacket.WriteInt(0);
@@ -541,7 +536,7 @@ public class DrakiTowerTests : GameTestBase
             session.CharacterId,
             Arg.Any<string>(),
             Arg.Any<string>(),
-            Arg.Is<IReadOnlyList<MailAttachmentDraft>>(att => att.Any(a => a.ItemId == DrakiTowerRules.SuperiorDrakiSupplyBoxItem)),
+            Arg.Is<IReadOnlyList<MailAttachmentDraft>>(att => att.Any(a => a.ItemId == DrakiTowerRules.SupplyBoxItem)),
             Arg.Any<MailKind>());
     }
 
@@ -607,7 +602,6 @@ public class DrakiTowerTests : GameTestBase
         var room = _rooms.Get((ushort)session.Room)!;
         var stages = _stageProvider.Stages;
 
-        // Clear until first break (after stage 1-3)
         while (true)
         {
             var state = _service.GetRoomState(room.Id)!;
@@ -623,11 +617,9 @@ public class DrakiTowerTests : GameTestBase
         breakState.IsBreak.Should().BeTrue();
         var breakStageIndex = breakState.StageIndex;
 
-        // Set deadline to past
         breakState.Deadline = DateTime.UtcNow.AddSeconds(-1);
         await _service.CheckTimeoutsAsync();
 
-        // Break ended and advanced to next wave!
         var afterState = _service.GetRoomState(room.Id)!;
         afterState.StageIndex.Should().Be(breakStageIndex + 1);
         afterState.IsBreak.Should().BeFalse();
@@ -667,7 +659,6 @@ public class DrakiTowerTests : GameTestBase
         var room = _rooms.Get((ushort)session.Room)!;
         var initialMonsters = room.Npcs.ToList();
 
-        // Simulate concurrent kills
         var tasks = initialMonsters.Select(npc => Task.Run(() => _service.OnNpcKilledAsync(npc)));
         await Task.WhenAll(tasks);
 
@@ -697,7 +688,6 @@ public class DrakiTowerTests : GameTestBase
         session.DrakiEntranceLimit.Should().Be(1);
         session.DrakiEntranceLimitResetDate.Date.Should().Be(DateTime.UtcNow.Date);
 
-        // Player uses an entry
         session.DrakiEntranceLimit--;
 
         var updatedCharacter = new Character();

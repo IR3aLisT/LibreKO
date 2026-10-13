@@ -55,10 +55,8 @@ public static class ItemCombine
     public const int NoBagSlotText = 11409;
     public const int QuantityText = 6034;
 
-    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true, TypeInfoResolver = DomainJson.Default };
-
     public static CombineBook Parse(string json) =>
-        JsonSerializer.Deserialize<CombineBook>(json, Options) ?? CombineBook.Empty;
+        JsonSerializer.Deserialize(json, DomainJson.Default.CombineBook) ?? CombineBook.Empty;
 
     public static IReadOnlyList<CombineEntry> WireOrder(IEnumerable<CombineEntry> entries) =>
         entries.Select((e, i) => (e, i)).OrderBy(x => x.e.ItemId).ThenBy(x => x.i).Select(x => x.e).ToList();

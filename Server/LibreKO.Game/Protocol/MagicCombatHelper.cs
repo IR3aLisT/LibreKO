@@ -87,7 +87,6 @@ internal readonly record struct MagicDefender(
 internal static class MagicCombatHelper
 {
     internal const int PercentScale = 100;
-    private const int MinimumLandedDamage = 1;
     private const int CharismaFloor = 86;
     private const float CharismaDivisor = 186f;
     private const int MagicAmountWeight = 3;
@@ -105,6 +104,7 @@ internal static class MagicCombatHelper
     private const int ArmourPenetration = 2;
     private const int ArmourSoftening = 240;
     private const int KurianScaleDivisor = 80;
+    private const float NpcSpellHitBonus = 2f;
 
     public static int GetSkillAttackPower(UserSession caster, bool isPlayerTarget)
     {
@@ -131,6 +131,19 @@ internal static class MagicCombatHelper
         return Calculate(caster, MagicDefender.Of(target, element), rawDamage, element, gameData);
     }
 
+    public static int GetMagicDamage(NpcInstance caster, UserSession target, int rawDamage, byte attribute)
+    {
+        var defender = MagicDefender.Of(target, (MagicAttribute)attribute);
+        if (rawDamage <= 0 || defender.BlocksMagic)
+            return 0;
+
+        var hitRate = target.Stats.TotalHitrate / Math.Max(1f, caster.EvadeRate) + NpcSpellHitBonus;
+        if (CombatUtils.GetHitRate(hitRate) == AttackHitResult.Fail)
+            return 0;
+
+        return Finish(defender, Spread(BaseDamage(defender, rawDamage)));
+    }
+
     private static int Calculate(
         UserSession caster, MagicDefender defender, int rawDamage, MagicAttribute attribute,
         IGameDataService gameData)
@@ -147,21 +160,33 @@ internal static class MagicCombatHelper
             totalHit = (int)(rawDamage * charisma / CharismaDivisor);
         }
 
-        var damage = defender.DamageScale * totalHit / (defender.Resistance + defender.ResistanceSoftening);
+        var damage = BaseDamage(defender, totalHit);
         if (ClassIdHelper.IsPortuKurian(caster.Class))
             damage = KurianScale(caster, defender, damage);
 
-        var random = Random.Shared.Next(0, Math.Max(0, damage / RandomRangeDivisor) + 1);
-        damage = (int)(random * RandomDamageShare + damage * BaseDamageShare) + magicAmount * MagicAmountWeight;
+        damage = Spread(damage) + magicAmount * MagicAmountWeight;
         damage += WeaponBonus(caster, defender, attribute, gameData);
+        return Finish(defender, damage);
+    }
 
+    private static int BaseDamage(MagicDefender defender, int totalHit) =>
+        defender.DamageScale * totalHit / (defender.Resistance + defender.ResistanceSoftening);
+
+    private static int Spread(int damage)
+    {
+        var random = Random.Shared.Next(0, Math.Max(0, damage / RandomRangeDivisor) + 1);
+        return (int)(random * RandomDamageShare + damage * BaseDamageShare);
+    }
+
+    private static int Finish(MagicDefender defender, int damage)
+    {
         if (defender.DamageReduction < PercentScale)
             damage = damage * defender.DamageReduction / PercentScale;
 
         if (defender.IsPlayer)
             damage /= PlayerDivisor;
 
-        return Math.Clamp(damage, MinimumLandedDamage, CombatUtils.MaxDamage);
+        return Math.Clamp(damage, 0, CombatUtils.MaxDamage);
     }
 
     private static int KurianScale(UserSession caster, MagicDefender defender, int damage)

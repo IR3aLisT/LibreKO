@@ -144,8 +144,9 @@ public class NpcAiCombatService(
 
         if (npc.HasMagicAttack)
         {
-            var magicChance = Random.Shared.Next(1, 10001);
-            if (magicChance <= 3000 && await npcAiMagicService.TryStartAttackCastAsync(npc, target, nowTicks))
+            var inMelee = npcAiTargetingService.DistanceSq(npc, target) <= npc.MeleeReach * npc.MeleeReach;
+            var casts = !inMelee || NpcSpellChoice.CastsInMelee(Random.Shared.Next(1, NpcSpellChoice.MeleeRollRange + 1));
+            if (casts && await npcAiMagicService.TryStartAttackCastAsync(npc, target, nowTicks, instant: inMelee))
                 return;
         }
 

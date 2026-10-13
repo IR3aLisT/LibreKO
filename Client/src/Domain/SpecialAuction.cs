@@ -57,8 +57,6 @@ public static class SpecialAuction
     public const int ClaimLaterText = 43712;
     public const int SystemErrorText = 16506;
 
-    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true, TypeInfoResolver = DomainJson.Default };
-
     private static readonly string[] LogColours =
     [
         "f0f8ff", "7fffd4", "ff7f50", "f0e68c", "dc143c", "00ffff", "ff1493", "f15f5f", "ffd700", "adff2f",
@@ -66,7 +64,7 @@ public static class SpecialAuction
     ];
 
     public static AuctionScheduleLot[] Parse(string json) =>
-        JsonSerializer.Deserialize<AuctionScheduleLot[]>(json, Options) ?? Array.Empty<AuctionScheduleLot>();
+        JsonSerializer.Deserialize(json, DomainJson.Default.AuctionScheduleLotArray) ?? Array.Empty<AuctionScheduleLot>();
 
     public static int Row(int group, int day) => RowsPerGroup * (group - 1) + day;
 

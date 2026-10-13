@@ -29,12 +29,16 @@ public class MagicRangedService(
                 return;
             }
 
-            finalDamage = target.BlockPhysical ? 0 : CalculateRangedDamage(
+            var items = target.BlockPhysical
+                ? default
+                : ItemCombatBonus.Of(caster, ElementResistances.Of(target.Stats), gameDataService);
+            var skillDamage = target.BlockPhysical ? 0 : CalculateRangedDamage(
                 caster,
                 type2Data,
                 target.Stats.TotalAc,
                 target.Stats.TotalEvasionrate,
                 isPlayerTarget: true);
+            finalDamage = skillDamage + items.Element / ItemCombatBonus.PlayerSkillElementDivisor;
             if (finalDamage > 0)
                 finalDamage = CombatUtils.ApplyWeaponTypeResistance(finalDamage, caster, target, gameDataService);
 
@@ -49,6 +53,8 @@ public class MagicRangedService(
                 if (target.Hp <= 0)
                     await combatLifecycleService.HandlePlayerDeathAsync(target, caster);
             }
+
+            await ItemHitEffects.ApplyAsync(caster, target, items, skillDamage + items.Element, combatLifecycleService, gameDataService);
         }
         else
         {
@@ -66,12 +72,14 @@ public class MagicRangedService(
             }
 
             combatLifecycleService.SetNpcAggro(npcTarget, caster);
-            finalDamage = CalculateRangedDamage(
+            var items = ItemCombatBonus.Of(caster, ElementResistances.Of(npcTarget), gameDataService);
+            var skillDamage = CalculateRangedDamage(
                 caster,
                 type2Data,
                 npcTarget.TotalAc,
                 Math.Max(1f, npcTarget.EvadeRate),
                 isPlayerTarget: false);
+            finalDamage = skillDamage + items.Element;
             finalDamage = GmMode.Dealt(caster, npcTarget.Hp, Math.Min(finalDamage, CombatUtils.MaxDamage));
             if (finalDamage > 0)
             {
@@ -81,6 +89,8 @@ public class MagicRangedService(
                 if (npcTarget.Hp <= 0)
                     await combatLifecycleService.HandleNpcDeathAsync(npcTarget, caster);
             }
+
+            await ItemHitEffects.ApplyAsync(caster, null, items, skillDamage + items.Element, combatLifecycleService, gameDataService);
         }
 
         await EchoAsync(caster, skillId, targetId, data, finalDamage);

@@ -18,14 +18,16 @@ public sealed class DrakiStageInfo
 
 public static class DrakiTowerRules
 {
-    public const byte ZoneIdValue = (byte)ZoneId.DrakiTower; // 95
+    public const byte ZoneIdValue = (byte)ZoneId.DrakiTower;
     public const int MinimumLevel = 1;
     public const int MaxDailyEntrances = 3;
     public const int CertificateOfDrakiItem = 810595000;
-    public const int OldDrakiSupplyBoxItem = 810678000;
-    public const int SuperiorDrakiSupplyBoxItem = 810596000;
-    public const int DrakiSupplyBoxItem = OldDrakiSupplyBoxItem;
-    public const int SuperiorBoxThresholdSeconds = 1200;
+    public const int SupplyBoxItem = 810596000;
+    public const byte UnrankedUser = byte.MaxValue;
+    public const byte MonsterActType = 1;
+    public const byte NpcActType = 100;
+    public static readonly (byte ZoneId, float X, float Z) ElMoradReturn = ((byte)ZoneId.ElMoradCamp1, 1600f, 446f);
+    public static readonly (byte ZoneId, float X, float Z) KarusReturn = ((byte)ZoneId.KarusCamp1, 459f, 1607f);
     public const int RoomDurationMinutes = 120;
     public static readonly TimeSpan RoomDuration = TimeSpan.FromMinutes(RoomDurationMinutes);
     public const int WaveSeconds = ScriptCharacterService.DrakiRiftSeconds;

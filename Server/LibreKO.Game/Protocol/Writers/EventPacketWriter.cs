@@ -175,8 +175,6 @@ public sealed class EventPacketWriter
 
     public const byte DrakiLeaveSubCodeFirst = 0x0C;
     public const byte DrakiLeaveSubCodeSecond = 0x04;
-    public const byte DrakiLeaveSubCodeThird = 0x00;
-    public const byte DrakiLeaveSubCodeFourth = 0x14;
     public const uint DrakiDefaultFinishTime = 3600;
     public const uint DrakiDefaultStage = 1;
 

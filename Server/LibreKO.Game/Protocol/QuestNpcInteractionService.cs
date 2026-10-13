@@ -118,13 +118,6 @@ public class QuestNpcInteractionService(
                 enterPacket.WriteByte(floor);
                 await drakiTowerService.HandleEnterAsync(session, enterPacket);
             }
-            else if (eventId == DrakiActionEnter)
-            {
-                var enterPacket = new Packet((byte)GameOpcodes.GS_EVENT);
-                enterPacket.WriteInt(0);
-                enterPacket.WriteByte(1);
-                await drakiTowerService.HandleEnterAsync(session, enterPacket);
-            }
             else if (eventId == DrakiActionAdvance && npc is not null)
             {
                 await drakiTowerService.AdvanceFromGateNpcAsync(session, npc);
@@ -238,8 +231,6 @@ public class QuestNpcInteractionService(
     private const string DrakiGateScript = "draki_gate";
     private const string DrakiExitScript = "draki_exit";
 
-    public const int DrakiActionEnter = 1;
-    public const int DrakiActionRanking = 2;
     public const int DrakiActionAdvance = 3;
     public const int DrakiActionExit = 4;
     public const int DrakiActionEnterBase = 10;

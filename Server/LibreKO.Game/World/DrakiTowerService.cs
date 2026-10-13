@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 
 namespace LibreKO.Game.World;
 
-public sealed class DrakiRoomState : IDisposable
+public sealed class DrakiRoomState
 {
     public ushort RoomId { get; init; }
     public int CharacterId { get; init; }
@@ -22,14 +22,11 @@ public sealed class DrakiRoomState : IDisposable
     public byte CurrentSubStage { get; set; }
     public int StageIndex { get; set; }
     public DateTime StartTime { get; init; }
-    public DateTime SubStageStartTime { get; set; }
     public DateTime Deadline { get; set; }
     public bool IsBreak { get; set; }
     public int RemainingMonsters;
     public bool Completed { get; set; }
     public SemaphoreSlim GateLock { get; } = new(1, 1);
-
-    public void Dispose() => GateLock.Dispose();
 }
 
 public interface IDrakiTowerService
@@ -124,7 +121,6 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
 
         if (_activeRooms.TryRemove(room.Id, out var state))
         {
-            state.Dispose();
             if (_sessionManager.GetByCharacterId(state.CharacterId) is { } session)
             {
                 try
@@ -141,13 +137,7 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         }
     }
 
-    public void DropRoomState(ushort roomId)
-    {
-        if (_activeRooms.TryRemove(roomId, out var state))
-        {
-            state.Dispose();
-        }
-    }
+    public void DropRoomState(ushort roomId) => _activeRooms.TryRemove(roomId, out _);
 
     public DrakiRoomState? GetRoomState(ushort roomId) => _activeRooms.GetValueOrDefault(roomId);
 
@@ -159,7 +149,7 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
 
         var packet = EventPacketWriter.DrakiList(
             topRanks: [],
-            userRank: 255,
+            userRank: DrakiTowerRules.UnrankedUser,
             userName: session.Name,
             userFinishTime: EventPacketWriter.DrakiDefaultFinishTime,
             userStage: userStage,
@@ -172,12 +162,6 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
     public async Task HandleEnterAsync(UserSession session, Packet packet)
     {
         EnsureDailyLimit(session);
-
-        if (session.Hp <= 0)
-        {
-            await session.Client.SendPacket(EventPacketWriter.DrakiEnterResult(DrakiEnterResult.Dead));
-            return;
-        }
 
         if (session.Room != 0 || session.ZoneId == DrakiTowerRules.ZoneIdValue || session.IsWarping)
         {
@@ -245,8 +229,6 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         _rooms.Join(room, session);
         session.InstanceReturn = (session.ZoneId, session.X, session.Z);
 
-        session.DrakiSubStage = 1;
-
         var now = DateTime.UtcNow;
         var state = new DrakiRoomState
         {
@@ -256,13 +238,14 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
             CurrentSubStage = 1,
             StageIndex = stageIndex,
             StartTime = now,
-            SubStageStartTime = now,
             Deadline = now.AddSeconds(DrakiTowerRules.WaveSeconds),
             IsBreak = false,
         };
         _activeRooms[room.Id] = state;
 
-        var coord = DrakiTowerRules.StageCoordinates.TryGetValue(requestedStage, out var c) ? c : (X: 40f, Z: 451f);
+        var coord = DrakiTowerRules.StageCoordinates.TryGetValue(requestedStage, out var c)
+            ? c
+            : DrakiTowerRules.StageCoordinates[UserSession.DrakiStageMin];
         await _zoneTransition.ChangeZoneAsync(session, DrakiTowerRules.ZoneIdValue, coord.X, coord.Z);
         await session.Client.SendPacket(EventPacketWriter.DrakiTimer(requestedStage, 1, DrakiTowerRules.WaveSeconds, 0));
 
@@ -274,8 +257,29 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         if (session.ZoneId != DrakiTowerRules.ZoneIdValue)
             return;
 
+        if (!_activeRooms.TryGetValue(session.Room, out var held))
+        {
+            await LeaveTowerAsync(session);
+            return;
+        }
+
+        await held.GateLock.WaitAsync();
+        try
+        {
+            await LeaveTowerAsync(session);
+        }
+        finally
+        {
+            held.GateLock.Release();
+        }
+    }
+
+    private async Task LeaveTowerAsync(UserSession session)
+    {
+        if (session.ZoneId != DrakiTowerRules.ZoneIdValue)
+            return;
+
         _activeRooms.TryRemove(session.Room, out var state);
-        state?.Dispose();
 
         var elapsed = state != null ? (uint)(DateTime.UtcNow - state.StartTime).TotalSeconds : 0u;
         var stage = state?.CurrentStage ?? session.DrakiStage;
@@ -286,8 +290,8 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         await session.Client.SendPacket(EventPacketWriter.DrakiLeaveSecond(stage, subStage, elapsed, completed));
 
         var returnPoint = session.InstanceReturn ?? (session.Nation == AccountNation.ElMorad
-            ? ((byte)ZoneId.ElMoradCamp1, 1600f, 446f)
-            : ((byte)ZoneId.KarusCamp1, 459f, 1607f));
+            ? DrakiTowerRules.ElMoradReturn
+            : DrakiTowerRules.KarusReturn);
 
         _rooms.Leave(session);
         await _zoneTransition.ChangeZoneAsync(session, returnPoint.ZoneId, returnPoint.X, returnPoint.Z);
@@ -401,7 +405,7 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
 
     private async Task AdvanceFromBreakAsync(UserSession session, DrakiRoomState state)
     {
-        if (_rooms.Get(state.RoomId) is not { } room)
+        if (!IsActive(state) || _rooms.Get(state.RoomId) is not { } room)
             return;
 
         ClearRoomNpcs(room);
@@ -419,15 +423,9 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         state.StageIndex = nextIndex;
         state.CurrentStage = nextStage.Stage;
         state.CurrentSubStage = nextStage.SubStage;
-        state.SubStageStartTime = DateTime.UtcNow;
         state.IsBreak = nextStage.IsNpcBreak;
         state.Deadline = DateTime.UtcNow.AddSeconds(nextStage.IsNpcBreak ? DrakiTowerRules.BreakSeconds : DrakiTowerRules.WaveSeconds);
-
-        if (nextStage.Stage > session.DrakiStage)
-        {
-            session.DrakiStage = nextStage.Stage;
-        }
-        session.DrakiSubStage = nextStage.SubStage;
+        RaiseBest(session, nextStage.Stage, nextStage.SubStage);
 
         if (DrakiTowerRules.StageCoordinates.TryGetValue(nextStage.Stage, out var coord))
         {
@@ -442,12 +440,14 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
 
     private async Task AdvanceToNextStageAsync(UserSession session, DrakiRoomState state)
     {
+        if (!IsActive(state))
+            return;
+
         var stages = _stageProvider.Stages;
         var nextIndex = state.StageIndex + 1;
 
         if (nextIndex >= stages.Count
-            || stages[nextIndex].Spawns.Any(s => s.MonsterId == DrakiTowerRules.FinalExitNpcId)
-            || (stages[nextIndex].Stage == 5 && stages[nextIndex].SubStage == 8 && stages[nextIndex].IsNpcBreak))
+            || stages[nextIndex].Spawns.Any(s => s.MonsterId == DrakiTowerRules.FinalExitNpcId))
         {
             if (nextIndex < stages.Count)
                 state.StageIndex = nextIndex;
@@ -459,15 +459,9 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         state.StageIndex = nextIndex;
         state.CurrentStage = nextStage.Stage;
         state.CurrentSubStage = nextStage.SubStage;
-        state.SubStageStartTime = DateTime.UtcNow;
         state.IsBreak = nextStage.IsNpcBreak;
         state.Deadline = DateTime.UtcNow.AddSeconds(nextStage.IsNpcBreak ? DrakiTowerRules.BreakSeconds : DrakiTowerRules.WaveSeconds);
-
-        if (nextStage.Stage > session.DrakiStage)
-        {
-            session.DrakiStage = nextStage.Stage;
-        }
-        session.DrakiSubStage = nextStage.SubStage;
+        RaiseBest(session, nextStage.Stage, nextStage.SubStage);
 
         if (_rooms.Get(state.RoomId) is not { } room)
             return;
@@ -485,12 +479,7 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         state.Completed = true;
         state.IsBreak = true;
         state.Deadline = DateTime.UtcNow.AddSeconds(DrakiTowerRules.BreakSeconds);
-        var elapsed = (int)(DateTime.UtcNow - state.StartTime).TotalSeconds;
-
-        if (session.DrakiStage < UserSession.DrakiStageMax)
-        {
-            session.DrakiStage = UserSession.DrakiStageMax;
-        }
+        RaiseBest(session, UserSession.DrakiStageMax, state.CurrentSubStage);
 
         if (_rooms.Get(state.RoomId) is { } room)
         {
@@ -498,9 +487,7 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
             SpawnNpcAt(room, DrakiTowerRules.FinalExitNpcId, DrakiTowerRules.FinalExitCoordinates.X, DrakiTowerRules.FinalExitCoordinates.Z, isMonster: false);
         }
 
-        var boxItemId = elapsed <= DrakiTowerRules.SuperiorBoxThresholdSeconds
-            ? DrakiTowerRules.SuperiorDrakiSupplyBoxItem
-            : DrakiTowerRules.OldDrakiSupplyBoxItem;
+        var boxItemId = DrakiTowerRules.SupplyBoxItem;
 
         if (_gameData.GetItem(boxItemId) is { } boxItem)
         {
@@ -551,7 +538,7 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
             LeftX = (int)x,
             TopZ = (int)z,
             Direction = direction,
-            ActType = isMonster ? (byte)1 : (byte)100,
+            ActType = isMonster ? DrakiTowerRules.MonsterActType : DrakiTowerRules.NpcActType,
             NumNPC = 1,
             RegTime = 0,
             Room = (short)room.Id,
@@ -581,16 +568,24 @@ public sealed class DrakiTowerService : IDrakiTowerService, IDisposable
         room.Npcs.Clear();
     }
 
+    private bool IsActive(DrakiRoomState state) =>
+        _activeRooms.TryGetValue(state.RoomId, out var current) && ReferenceEquals(current, state);
+
+    private static void RaiseBest(UserSession session, byte stage, byte subStage)
+    {
+        if (stage < session.DrakiStage || (stage == session.DrakiStage && subStage <= session.DrakiSubStage))
+            return;
+
+        session.DrakiStage = stage;
+        session.DrakiSubStage = subStage;
+    }
+
     private static void EnsureDailyLimit(UserSession session) =>
         DrakiTowerRules.EnsureDailyLimit(session);
 
     public void Dispose()
     {
         _timeoutTimer?.Dispose();
-        foreach (var state in _activeRooms.Values)
-        {
-            state.Dispose();
-        }
         _activeRooms.Clear();
     }
 }

@@ -19,7 +19,6 @@ public class MagicOverTimeService(
     IPartyWarBoardService? partyWarBoard = null)
 {
     private const byte PotionItemGroup = 9;
-    private const byte OverTimeTickSeconds = 2;
 
     private const int ItemGrantedSkillIdBase = 400000;
     private const int PercentScale = 100;
@@ -36,12 +35,6 @@ public class MagicOverTimeService(
     public static bool HasHealOverTime(UserSession session) =>
         session.ActiveOverTimeEffects.Values.Any(effect => effect.TickAmount > 0);
 
-    private static byte AttributeToPartyStatus(byte attribute) => (byte)((MagicAttribute)attribute switch
-    {
-        MagicAttribute.Disease => PartyStatusIcon.Disease,
-        MagicAttribute.Poison => PartyStatusIcon.Poison,
-        _ => PartyStatusIcon.OverTimeDamage,
-    });
     public async Task ExecuteAsync(UserSession caster, MagicData magic, int skillId, int targetId, int[] data)
     {
         if (!MagicTypeLookup.TryResolve(gameDataService.MagicType3Table, magic, skillId, out var type3Data))
@@ -232,11 +225,11 @@ public class MagicOverTimeService(
             }
         }
 
-        ScheduleOverTimeEffect(target.ActiveOverTimeEffects, skillId, caster.CharacterId,
+        OverTimeEffects.Schedule(target.ActiveOverTimeEffects, skillId, caster.CharacterId,
             -HealStrike.Damage(type3Data.TimeDamage), type3Data.Duration);
         if (target.ActiveOverTimeEffects.TryGetValue(skillId, out var applied) && applied.TickAmount < 0)
         {
-            applied.PartyStatusCode = AttributeToPartyStatus(type3Data.Attribute);
+            applied.PartyStatusCode = OverTimeEffects.PartyStatusOf(type3Data.Attribute);
             await combatNotificationService.SendPartyStatusUpdateAsync(target, applied.PartyStatusCode, applied: true);
         }
     }
@@ -258,7 +251,7 @@ public class MagicOverTimeService(
             }
         }
 
-        ScheduleOverTimeEffect(npc.ActiveOverTimeEffects, skillId, caster.CharacterId,
+        OverTimeEffects.Schedule(npc.ActiveOverTimeEffects, skillId, caster.CharacterId,
             -HealStrike.Damage(type3Data.TimeDamage), type3Data.Duration);
     }
 
@@ -406,12 +399,12 @@ public class MagicOverTimeService(
         }
 
         var durationTotal = CalculateTickAmountForPlayer(caster, target, type3Data);
-        ScheduleOverTimeEffect(target.ActiveOverTimeEffects, skillId, caster.CharacterId, durationTotal, type3Data.Duration);
+        OverTimeEffects.Schedule(target.ActiveOverTimeEffects, skillId, caster.CharacterId, durationTotal, type3Data.Duration);
 
         if (!isHeal && durationTotal < 0
             && target.ActiveOverTimeEffects.TryGetValue(skillId, out var applied))
         {
-            applied.PartyStatusCode = AttributeToPartyStatus(type3Data.Attribute);
+            applied.PartyStatusCode = OverTimeEffects.PartyStatusOf(type3Data.Attribute);
             await combatNotificationService.SendPartyStatusUpdateAsync(target, applied.PartyStatusCode, applied: true);
         }
     }
@@ -435,7 +428,7 @@ public class MagicOverTimeService(
             combatLifecycleService.SetNpcAggro(npc, caster);
 
         var delta = directType is MagicDirectType.HealthPercent or MagicDirectType.PercentDrain
-            ? PercentOfHealth(npc.Hp, npc.MaxHp, type3Data.FirstDamage)
+            ? OverTimeEffects.PercentOfHealth(npc.Hp, npc.MaxHp, type3Data.FirstDamage)
             : type3Data.FirstDamage;
 
         if (delta != 0)
@@ -464,7 +457,7 @@ public class MagicOverTimeService(
         }
 
         var durationTotal = CalculateTickAmountForNpc(caster, npc, type3Data);
-        ScheduleOverTimeEffect(npc.ActiveOverTimeEffects, skillId, caster.CharacterId, durationTotal, type3Data.Duration);
+        OverTimeEffects.Schedule(npc.ActiveOverTimeEffects, skillId, caster.CharacterId, durationTotal, type3Data.Duration);
     }
 
     private async Task RestorePlayerAsync(
@@ -485,7 +478,7 @@ public class MagicOverTimeService(
         }
 
         var restored = directType == MagicDirectType.HealthPercent
-            ? PercentOfHealth(target.Hp, target.MaxHp, type3Data.FirstDamage)
+            ? OverTimeEffects.PercentOfHealth(target.Hp, target.MaxHp, type3Data.FirstDamage)
             : type3Data.FirstDamage;
 
         if (restored > 0)
@@ -554,11 +547,6 @@ public class MagicOverTimeService(
         await combatLifecycleService.SendMspChangeAsync(target);
     }
 
-    private static int PercentOfHealth(int currentHp, int maxHp, int firstDamage) =>
-        firstDamage < PercentScale
-            ? firstDamage * currentHp / -PercentScale
-            : maxHp * (firstDamage - PercentScale) / PercentScale;
-
     private static bool ScalesWithMagicAttack(MagicDirectType directType, int skillId) =>
         directType is MagicDirectType.Health or MagicDirectType.DamageAbsorb
         && skillId < ItemGrantedSkillIdBase;
@@ -574,7 +562,7 @@ public class MagicOverTimeService(
             return 0;
 
         if (directType is MagicDirectType.HealthPercent or MagicDirectType.PercentDrain)
-            return Math.Max(0, -PercentOfHealth(target.Hp, target.MaxHp, type3Data.FirstDamage));
+            return Math.Max(0, -OverTimeEffects.PercentOfHealth(target.Hp, target.MaxHp, type3Data.FirstDamage));
 
         if (type3Data.FirstDamage >= 0)
             return 0;
@@ -590,7 +578,7 @@ public class MagicOverTimeService(
             return 0;
 
         if ((MagicDirectType)type3Data.DirectType == MagicDirectType.HealthBooster)
-            return type3Data.Duration / OverTimeTickSeconds * ((int)(caster.Level * (1 + caster.Level / 30.0)) + 3);
+            return type3Data.Duration / OverTimeEffects.TickSeconds * ((int)(caster.Level * (1 + caster.Level / 30.0)) + 3);
 
         if (type3Data.TimeDamage < 0)
         {
@@ -611,7 +599,7 @@ public class MagicOverTimeService(
             return 0;
 
         if ((MagicDirectType)type3Data.DirectType == MagicDirectType.HealthBooster)
-            return type3Data.Duration / OverTimeTickSeconds * ((int)(caster.Level * (1 + caster.Level / 30.0)) + 3);
+            return type3Data.Duration / OverTimeEffects.TickSeconds * ((int)(caster.Level * (1 + caster.Level / 30.0)) + 3);
 
         if (type3Data.TimeDamage < 0)
         {
@@ -619,40 +607,6 @@ public class MagicOverTimeService(
         }
 
         return type3Data.TimeDamage;
-    }
-
-    private static void ScheduleOverTimeEffect(
-        IDictionary<int, ActiveOverTimeEffect> activeEffects,
-        int skillId,
-        int casterId,
-        int totalAmount,
-        byte duration)
-    {
-        if (duration == 0 || totalAmount == 0)
-        {
-            activeEffects.Remove(skillId);
-            return;
-        }
-
-        var tickCountFloat = duration / (float)OverTimeTickSeconds;
-        var tickLimit = Math.Max(1, (int)tickCountFloat);
-        var tickAmount = (short)(totalAmount / tickCountFloat);
-        if (tickAmount == 0)
-        {
-            activeEffects.Remove(skillId);
-            return;
-        }
-
-        activeEffects[skillId] = new ActiveOverTimeEffect
-        {
-            MagicId = skillId,
-            CasterId = casterId,
-            TickAmount = tickAmount,
-            TickIntervalSeconds = OverTimeTickSeconds,
-            TickCount = 0,
-            TickLimit = (byte)Math.Min(byte.MaxValue, tickLimit),
-            NextTickTicks = DateTime.UtcNow.AddSeconds(OverTimeTickSeconds).Ticks
-        };
     }
 
     private static bool ShouldAffectAreaPlayer(UserSession caster, UserSession target, byte moral)

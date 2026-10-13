@@ -23,10 +23,8 @@ public static class Fortune
     public const string SpinFrames = "spin";
     public const string FinalFrames = "final";
 
-    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true, TypeInfoResolver = DomainJson.Default };
-
     public static FortuneDeck Parse(string json) =>
-        JsonSerializer.Deserialize<FortuneDeck>(json, Options) ?? FortuneDeck.Empty;
+        JsonSerializer.Deserialize(json, DomainJson.Default.FortuneDeck) ?? FortuneDeck.Empty;
 
     public static FortuneReading? Draw(IReadOnlyList<FortuneReading> readings, Func<int, int> roll)
     {

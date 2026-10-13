@@ -61,7 +61,7 @@ public partial class HudWindow : PanelContainer
         }
     }
 
-    private void CloseFromPlugin()
+    public void Close()
     {
         Visible = false;
         Closed?.Invoke();
@@ -352,7 +352,7 @@ public partial class HudWindow : PanelContainer
             close.AddThemeStyleboxOverride("normal", closeNormal);
             close.AddThemeStyleboxOverride("hover", closeHover);
             close.AddThemeStyleboxOverride("pressed", closeHover);
-            close.Pressed += () => { Visible = false; Closed?.Invoke(); Audio.PlayUi(Sfx.InventoryClose); };
+            close.Pressed += Close;
             bar.AddChild(close);
             _closeButton = close;
         }
@@ -379,7 +379,7 @@ public partial class HudWindow : PanelContainer
                 PluginReplaced = true;
                 margin.Visible = false;
                 AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
-                _host = new WindowHost(id, title, this, CloseFromPlugin);
+                _host = new WindowHost(id, title, this, Close);
                 var replacement = rule.Replacement(_host);
                 AddChild(replacement);
                 dragHandle = _host.DragHandle ?? replacement;
@@ -392,7 +392,7 @@ public partial class HudWindow : PanelContainer
             root.RemoveChild(content);
             margin.Visible = false;
             AddThemeStyleboxOverride("panel", new StyleBoxEmpty());
-            _frame = new LibreKO.Plugins.WindowFrame(id, title, content, closable, CloseFromPlugin);
+            _frame = new LibreKO.Plugins.WindowFrame(id, title, content, closable, Close);
             var chrome = frameBuild(_frame);
             AddChild(chrome);
             dragHandle = _frame.DragHandle ?? chrome;
