@@ -271,6 +271,8 @@ public class BifrostTests
             Substitute.For<IGameDataService>(),
             Substitute.For<IQuestDialogRunner>(),
             Substitute.For<IKingSystemRuntimeService>(),
+            Substitute.For<IDrakiTowerService>(),
+            Substitute.For<IDrakiStageProvider>(),
             Substitute.For<ITouchTrapService>(),
             Substitute.For<IChaosDungeonService>(),
             bifrostMock,
