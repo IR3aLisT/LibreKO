@@ -220,16 +220,13 @@ public sealed class InstanceRoomExpiryService(
     InstanceRoomRegistry rooms,
     SessionManager sessionManager,
     IZoneTransitionService zoneTransition,
-    IDrakiTowerService drakiTowerService,
     ILogger<InstanceRoomExpiryService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            await drakiTowerService.CheckTimeoutsAsync();
-
             var now = DateTime.UtcNow;
             foreach (var room in rooms.Rooms.Where(r => r.ExpiresAt <= now).ToList())
             {
@@ -240,16 +237,6 @@ public sealed class InstanceRoomExpiryService(
                     {
                         room.Members.TryRemove(characterId, out _);
                         continue;
-                    }
-
-                    if (room.ZoneId == DrakiTowerRules.ZoneIdValue)
-                    {
-                        var state = drakiTowerService.GetRoomState(room.Id);
-                        var elapsed = state != null ? (uint)(DateTime.UtcNow - state.StartTime).TotalSeconds : 0u;
-                        var stage = state?.CurrentStage ?? session.DrakiStage;
-                        var subStage = state?.CurrentSubStage ?? session.DrakiSubStage;
-                        await session.Client.SendPacket(EventPacketWriter.DrakiLeaveFirst());
-                        await session.Client.SendPacket(EventPacketWriter.DrakiLeaveSecond(stage, subStage, elapsed));
                     }
 
                     var (zone, x, z) = session.InstanceReturn ?? ((byte)ZoneId.Moradon, 0f, 0f);

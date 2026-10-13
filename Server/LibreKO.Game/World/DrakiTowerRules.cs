@@ -21,9 +21,10 @@ public static class DrakiTowerRules
     public const byte ZoneIdValue = (byte)ZoneId.DrakiTower; // 95
     public const int MinimumLevel = 1;
     public const int MaxDailyEntrances = 3;
-    public const int CertificateOfDrakiItem = 810377000;
-    public const int DrakiSupplyBoxItem = 810596000;
-    public const int SuperiorDrakiSupplyBoxItem = 810597000;
+    public const int CertificateOfDrakiItem = 810595000;
+    public const int OldDrakiSupplyBoxItem = 810678000;
+    public const int SuperiorDrakiSupplyBoxItem = 810596000;
+    public const int DrakiSupplyBoxItem = OldDrakiSupplyBoxItem;
     public const int SuperiorBoxThresholdSeconds = 1200;
     public const int RoomDurationMinutes = 120;
     public static readonly TimeSpan RoomDuration = TimeSpan.FromMinutes(RoomDurationMinutes);

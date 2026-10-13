@@ -1,12 +1,13 @@
 ﻿namespace LibreKO.Game.Protocol;
 
-public enum DrakiEnterResult : uint
+public enum DrakiEnterResult : byte
 {
-    Success = 0,
-    CannotEnter = 1,
-    AlreadyInEvent = 2,
-    InvalidItem = 5,
-    Failed = 6,
-    NoLimit = 7,
+    LevelTooLow = 0,
+    WrongZone = 1,
+    AlreadyInInstance = 2,
+    FloorNotReached = 4,
+    NoLimit = 5,
+    RoomCreationFailed = 6,
+    InvalidItem = 7,
     Dead = 9,
 }
