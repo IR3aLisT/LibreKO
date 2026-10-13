@@ -48,6 +48,7 @@ public partial class World
     private Label _warBoardCool = null!;
     private byte _warBoardMode = Config.PartyBoardMode;
     private bool _warBoardPending;
+    private int _warBoardCooldown;
     private bool _warBoardInParty;
     private double _meterToggleSentAt = double.NegativeInfinity;
     private double _warBoardSentAt = double.NegativeInfinity;
@@ -148,7 +149,11 @@ public partial class World
         _warBoardRowShares.Clear();
         _warBoardPending = false;
         _warBoardLines.Clear();
-        if (_warBoard != null) _warBoard.Visible = false;
+        if (_warBoard != null)
+        {
+            _warBoard.Visible = false;
+            ShowWarBoardCooldown(0);
+        }
         PluginNotifyParty();
     }
 
@@ -172,7 +177,7 @@ public partial class World
         if (_warBoard == null) return;
         _warBoard.Visible = false;
         _warBoardPending = false;
-        _warBoardCool.Visible = false;
+        ShowWarBoardCooldown(0);
         if (InParty) Net.I.SendPartyWarBoard(PartyWarBoard.TargetBoard, PartyWarBoard.ModeOff);
         RefreshPartyConfig();
         PluginNotifyParty();
@@ -205,9 +210,17 @@ public partial class World
         if (_warBoard == null || !_warBoard.Visible) return;
         double left = PartyWarBoard.SecondsLeft(_warBoardSentAt, now, PartyWarBoard.BoardTabSeconds);
         if (_warBoardPending && left <= 0) SendWarBoardMode();
-        bool cooling = _warBoardPending && left > 0;
-        if (_warBoardCool.Visible != cooling) _warBoardCool.Visible = cooling;
-        if (cooling) _warBoardCool.Text = Math.Ceiling(left).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        int cooldown = PartyWarBoard.CooldownShown(_warBoardPending, left);
+        if (cooldown == _warBoardCooldown) return;
+        ShowWarBoardCooldown(cooldown);
+        PluginNotifyParty();
+    }
+
+    private void ShowWarBoardCooldown(int seconds)
+    {
+        _warBoardCooldown = seconds;
+        _warBoardCool.Visible = seconds > 0;
+        _warBoardCool.Text = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private PanelContainer BuildWarBoard()
