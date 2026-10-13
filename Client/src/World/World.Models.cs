@@ -73,8 +73,9 @@ public partial class World
             float scale = part.TryGetValue("scale", out var sv) ? (float)sv.AsDouble() : 1f;
             if (!(scale > 0.0001f)) scale = 1f;
             var spawned = Fx.Spawn(fx, parent, pos, oneShot: false, sizeScale: scale);
+            Node3D facing = turnWithBone || skeleton == null ? parent : skeleton;
             if (spawned is FxInstance pinned)
-                pinned.Pin(parent, parent, pos, Fx.ReadVec3(part, "dir"), inheritScale: false, followRotation: turnWithBone);
+                pinned.Pin(parent, facing, pos, Fx.ReadVec3(part, "dir"), inheritScale: false, followRotation: turnWithBone);
             if (spawned != null) CullAttachedFx(spawned);
         }
     }

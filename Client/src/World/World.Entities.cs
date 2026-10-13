@@ -105,6 +105,7 @@ public partial class World
         public readonly HeadJoint Head = new();
         public readonly WingPick WingPick = new();
         public double IdleLoopAt;
+        public double NpcStepAt = NpcStride.NoStep;
         public bool NpcGesturing;
         public string? DressKey;
         public bool PlateNear = true;
@@ -535,6 +536,7 @@ public partial class World
             e.Target = dest;
             e.HasTarget = true;
             e.Speed = 0f;
+            e.NpcStepAt = NpcStride.NoStep;
             return;
         }
 
@@ -556,7 +558,10 @@ public partial class World
         }
         float playback = dist / MovePlaybackSeconds * MovePlaybackDamp;
         if (e.IsNpc && velHint > 0.01f)
+        {
             playback = Mathf.Max(velHint, dist / NpcMovePlaybackSeconds);
+            e.NpcStepAt = Now();
+        }
         e.Speed = Mathf.Abs(velHint) > 0.01f ? playback : 0f;
     }
 

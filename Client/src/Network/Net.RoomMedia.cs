@@ -41,6 +41,51 @@ public static class RoomMediaReplies
         return new RoomPost(id, kind, sender, name, time, "", duration, size) { Waveform = waveform };
     }
 
+    public readonly record struct ReactionChange(long MessageId, int CharacterId, string Name, string Emoji);
+
+    public static ReactionChange? ReadReaction(Packet p)
+    {
+        if (p.RemainingBytes < 16) return null;
+        long id = p.ReadLong();
+        int who = p.ReadInt();
+        string name = p.ReadString();
+        if (p.RemainingBytes < 2) return null;
+        return new ReactionChange(id, who, name, p.ReadString());
+    }
+
+    public static List<ReactionChange> ReadReactions(Packet p)
+    {
+        var list = new List<ReactionChange>();
+        if (p.RemainingBytes < 2) return list;
+        int count = p.ReadUShort();
+        for (int i = 0; i < count; i++)
+        {
+            if (ReadReaction(p) is not { } reaction) break;
+            list.Add(reaction);
+        }
+        return list;
+    }
+
+    public static (string Partner, RoomPost Row)? ReadDirectRow(Packet p)
+    {
+        if (p.RemainingBytes < 2) return null;
+        string partner = p.ReadString();
+        return partner.Length > 0 && ReadRow(p) is { } row ? (partner, row) : null;
+    }
+
+    public static (string Partner, List<RoomPost> Rows, bool More) ReadDirectHistory(Packet p)
+    {
+        string partner = p.RemainingBytes >= 2 ? p.ReadString() : "";
+        var (rows, more) = ReadHistory(p);
+        return (partner, rows, more);
+    }
+
+    public static (byte Result, bool Kept)? ReadKept(Packet p)
+    {
+        if (p.RemainingBytes < 2) return null;
+        return (p.ReadByte(), p.ReadByte() != 0);
+    }
+
     public static (List<RoomPost> Rows, bool More) ReadHistory(Packet p)
     {
         var rows = new List<RoomPost>();
@@ -160,9 +205,44 @@ public partial class Net
     public event Action<int, ushort, byte[]>? VoiceTcpFrameEvent;
     public event Action? VoiceRosterEvent;
     public event Action<RoomMediaReplies.SilenceNotice>? VoiceSilenceEvent;
+    public event Action<RoomPost>? ChatPostChangedEvent;
+    public event Action<string>? DirectTimelineEvent;
+    public event Action<string, RoomPost>? DirectPostedEvent;
+
+    public string NoteTarget { get; private set; } = "";
 
     private byte[]? _pendingNote;
     private readonly VoiceNoteDownloads _noteDownloads = new();
+    private readonly Dictionary<string, RoomTimeline> _directs = new(StringComparer.OrdinalIgnoreCase);
+
+    public RoomTimeline DirectTimeline(string partner)
+    {
+        if (!_directs.TryGetValue(partner, out var timeline)) _directs[partner] = timeline = new RoomTimeline();
+        return timeline;
+    }
+
+    public bool HasDirect(string partner) => _directs.ContainsKey(partner);
+
+    public RoomPost? FindChatPost(long id)
+    {
+        if (RoomTimeline.Find(id) is { } inRoom) return inRoom;
+        foreach (var timeline in _directs.Values)
+            if (timeline.Find(id) is { } direct) return direct;
+        return null;
+    }
+
+    public string DirectPartnerOf(long id)
+    {
+        foreach (var (partner, timeline) in _directs)
+            if (timeline.Find(id) != null) return partner;
+        return "";
+    }
+
+    private void ApplyReaction(RoomMediaReplies.ReactionChange change)
+    {
+        if (FindChatPost(change.MessageId) is { } post && post.Reactions.Set(change.CharacterId, change.Name, change.Emoji))
+            ChatPostChangedEvent?.Invoke(post);
+    }
 
     private void HandleRoomMedia(Packet p)
     {
@@ -182,6 +262,42 @@ public partial class Net
                 {
                     RoomTimeline.Add(posted);
                     RoomPostedEvent?.Invoke(posted);
+                }
+                return;
+            case RoomMediaSubs.Stored:
+                if (RoomMediaReplies.ReadRow(p) is { } stored && NationChat.InRoom)
+                {
+                    var (post, added) = RoomTimeline.Stored(stored);
+                    if (added) RoomPostedEvent?.Invoke(post);
+                    else ChatPostChangedEvent?.Invoke(post);
+                }
+                return;
+            case RoomMediaSubs.React:
+                if (RoomMediaReplies.ReadReaction(p) is { } reaction) ApplyReaction(reaction);
+                return;
+            case RoomMediaSubs.Reactions:
+                foreach (var each in RoomMediaReplies.ReadReactions(p)) ApplyReaction(each);
+                return;
+            case RoomMediaSubs.Kept:
+                if (RoomMediaReplies.ReadKept(p) is not { } kept) return;
+                if (kept.Result == RoomMediaResults.Ok) NationChat.KeptChanged(kept.Kept);
+                else RoomMediaResultEvent?.Invoke(sub, kept.Result);
+                NationChatStateEvent?.Invoke();
+                return;
+            case RoomMediaSubs.DirectHistory:
+            {
+                var (partner, rows, more) = RoomMediaReplies.ReadDirectHistory(p);
+                if (partner.Length == 0) return;
+                DirectTimeline(partner).MergeHistory(rows, more);
+                DirectTimelineEvent?.Invoke(partner);
+                return;
+            }
+            case RoomMediaSubs.DirectStored:
+                if (RoomMediaReplies.ReadDirectRow(p) is { } direct)
+                {
+                    var (post, added) = DirectTimeline(direct.Partner).Stored(direct.Row);
+                    if (added) DirectPostedEvent?.Invoke(direct.Partner, post);
+                    else ChatPostChangedEvent?.Invoke(post);
                 }
                 return;
             case RoomMediaSubs.NoteBegin:
@@ -270,18 +386,46 @@ public partial class Net
 
     public float NoteDownloadProgress(long noteId) => _noteDownloads.Progress(noteId);
 
-    public bool SendVoiceNote(byte[] file, double seconds, byte[] waveform)
+    public bool SendVoiceNote(byte[] file, double seconds, byte[] waveform, string partner = "")
     {
-        if (!NationChat.InRoom || _pendingNote != null || file.Length == 0 || file.Length > VoiceNoteRules.MaxBytes) return false;
+        if ((partner.Length == 0 && !NationChat.InRoom) || _pendingNote != null || file.Length == 0 || file.Length > VoiceNoteRules.MaxBytes) return false;
         _pendingNote = file;
+        NoteTarget = partner;
         var p = MediaPacket(RoomMediaSubs.NoteBegin);
         p.WriteUShort((ushort)Math.Clamp((int)Math.Round(seconds * VoiceNoteRules.DecisecondsPerSecond), 0, ushort.MaxValue));
         p.WriteUInt((uint)file.Length);
         int samples = Math.Min(waveform.Length, VoiceWaveform.Samples);
         p.WriteByte((byte)samples);
         p.WriteBytes(waveform[..samples]);
+        if (partner.Length > 0) p.WriteString(partner);
         _conn.Send(p);
         return true;
+    }
+
+    public void SendReaction(long messageId, string emoji)
+    {
+        if (messageId <= 0 || (emoji.Length > 0 && !ReactionRules.Valid(emoji))) return;
+        var p = MediaPacket(RoomMediaSubs.React);
+        p.WriteLong(messageId);
+        p.WriteString(emoji);
+        _conn.Send(p);
+    }
+
+    public void SendDirectHistory(string partner, long beforeId)
+    {
+        if (partner.Length == 0) return;
+        var p = MediaPacket(RoomMediaSubs.DirectHistory);
+        p.WriteString(partner);
+        p.WriteLong(beforeId);
+        _conn.Send(p);
+    }
+
+    public void SendRoomKept(bool keep)
+    {
+        if (!NationChat.InPrivate) return;
+        var p = MediaPacket(RoomMediaSubs.Kept);
+        p.WriteByte((byte)(keep ? 1 : 0));
+        _conn.Send(p);
     }
 
     private void SendNoteChunks(uint uploadId, byte[] file)

@@ -3,16 +3,6 @@ using LibreKO.Domain;
 
 namespace LibreKO.Network;
 
-public enum TempleEventType : byte
-{
-    None = 0,
-    Chaos = 1,
-    BorderDefenseWar = 2,
-    JuraidMountain = 3,
-    UnderTheCastle = 4,
-    ForgottenTemple = 5,
-}
-
 public partial class Net
 {
     private const byte BifrostEventSub = 2;
@@ -51,6 +41,8 @@ public partial class Net
     public event Action? BifrostDisbandEvent;
 
     public BorderWarState BorderWar { get; } = new();
+
+    public TempleSignUpBoard SignUps { get; } = new();
 
     public event Action<int, int>? TempleScreenScoreEvent;
     public event Action<int>? AltarTimerEvent;
@@ -179,10 +171,11 @@ public partial class Net
         _conn.Send(p);
     }
 
-    public void SendBifrostJoin()
+    public void SendBifrostJoin(TempleEventType type)
     {
         var p = new Packet(GameOpcodes.GS_EVENT);
         p.WriteByte(BifrostJoinSub);
+        p.WriteByte((byte)type);
         _conn.Send(p);
     }
 

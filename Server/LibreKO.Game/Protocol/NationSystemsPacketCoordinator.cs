@@ -41,21 +41,19 @@ public class NationSystemsPacketCoordinator(
         if (sub != (byte)TempleSubOpcode.BifrostRemaining)
             return;
 
-        int remaining = 0;
-        byte eventType = 0;
-        if (eventSchedulerService.IsTempleEventJoinOpen)
+        bool signUpSent = false;
+        foreach (var run in eventSchedulerService.TempleEvents)
         {
-            remaining = eventSchedulerService.TempleRemainingJoinSeconds;
-            eventType = (byte)eventSchedulerService.CurrentTempleEvent;
-        }
-        else
-        {
-            remaining = (int)Math.Min(bifrostEventService.RemainingSecs, int.MaxValue);
+            if (!run.JoinOpen || !run.Fits(session.Level))
+                continue;
+            await session.Client.SendPacket(BifrostPacketWriter.Remaining(
+                TempleSubOpcode.BifrostRemaining, run.SecondsLeft, (byte)run.Contest));
+            signUpSent = true;
         }
 
-        var response = BifrostPacketWriter.Remaining(
-            TempleSubOpcode.BifrostRemaining, remaining, eventType);
-        await session.Client.SendPacket(response);
+        if (bifrostEventService.IsActive || !signUpSent)
+            await session.Client.SendPacket(BifrostPacketWriter.Remaining(
+                TempleSubOpcode.BifrostRemaining, (int)Math.Min(bifrostEventService.RemainingSecs, int.MaxValue)));
     }
 
     private const byte RankTypePkZone = 1;

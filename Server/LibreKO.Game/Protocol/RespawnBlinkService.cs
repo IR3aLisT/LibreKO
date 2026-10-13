@@ -23,7 +23,8 @@ public sealed class RespawnBlinkService(SessionManager sessionManager) : IRespaw
         && !BattleZoneManager.AllowsNationCombat(session.ZoneId);
 
     public static bool AllowsSkill(MagicData magic) =>
-        magic.PrimaryType == MagicSkillType.Buff || magic.Id >= SkillItemFirstId;
+        magic.Skill != ChaosRules.ChaosSkillTree
+        && (magic.PrimaryType == MagicSkillType.Buff || magic.Id >= SkillItemFirstId);
 
     public async Task StartAsync(UserSession session)
     {

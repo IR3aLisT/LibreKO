@@ -53,6 +53,8 @@ public partial class VoiceChat : Node
     private bool _micOn;
     private LinearResampler? _micResampler;
     private float[] _micMono = new float[4096];
+    private float[] _micLeft = new float[4096];
+    private float[] _micRight = new float[4096];
     private float[] _micResampled = new float[8192];
     private readonly float[] _frame = new float[FrameSamples];
     private readonly byte[] _opus = new byte[MaxOpusPacket];
@@ -132,6 +134,9 @@ public partial class VoiceChat : Node
             AudioServer.SetBusName(idx, BusVoiceChat);
             AudioServer.SetBusSend(idx, Audio.BusMaster);
         }
+        int voice = AudioServer.GetBusIndex(BusVoiceChat);
+        if (AudioServer.GetBusEffectCount(voice) == 0)
+            AudioServer.AddBusEffect(voice, new AudioEffectHardLimiter { CeilingDb = VoiceLevels.LimiterCeilingDb });
         int mic = AudioServer.GetBusIndex(BusMic);
         if (mic < 0)
         {
@@ -150,8 +155,11 @@ public partial class VoiceChat : Node
         int idx = AudioServer.GetBusIndex(BusVoiceChat);
         if (idx < 0) return;
         float linear = Config.VoiceChatVolume;
-        AudioServer.SetBusVolumeDb(idx, linear <= 0f ? SilentDb : Mathf.LinearToDb(linear));
+        AudioServer.SetBusVolumeDb(idx, 0f);
         AudioServer.SetBusMute(idx, linear <= 0f);
+        if (AudioServer.GetBusEffectCount(idx) > 0 && AudioServer.GetBusEffect(idx, 0) is AudioEffectHardLimiter limiter)
+            limiter.PreGainDb = linear <= 0f ? 0f : Mathf.LinearToDb(linear);
+        else AudioServer.SetBusVolumeDb(idx, linear <= 0f ? SilentDb : Mathf.LinearToDb(linear));
     }
 
     private static void ApplyInputDevice()
@@ -192,12 +200,13 @@ public partial class VoiceChat : Node
         var then = _afterPermission;
         _afterPermission = null;
         if (granted) then?.Invoke();
-        else NoteNotice?.Invoke("Voice chat needs access to the microphone.");
+        else NoteNotice?.Invoke(_noticeTarget, "Voice chat needs access to the microphone.");
     }
 
     public void Join()
     {
         if (InVoice || !Net.I.NationChat.InRoom) return;
+        _noticeTarget = "";
         if (!AskForMicrophone(Join)) return;
         Net.I.SendVoiceJoin();
     }
@@ -229,7 +238,7 @@ public partial class VoiceChat : Node
 
     public void SetMix(int characterId, PeerMix mix)
     {
-        _mix[characterId] = new PeerMix(Math.Clamp(mix.Volume, 0f, 1f), mix.Muted);
+        _mix[characterId] = new PeerMix(Math.Clamp(mix.Volume, 0f, VoiceLevels.MaxVolume), mix.Muted);
         if (_speakers.TryGetValue(characterId, out var speaker)) ApplyMix(speaker);
         StateChanged?.Invoke();
     }
@@ -360,8 +369,18 @@ public partial class VoiceChat : Node
         int available = _capture.GetFramesAvailable();
         if (available <= 0 || _micResampler == null) return;
         Vector2[] stereo = _capture.GetBuffer(available);
-        if (_micMono.Length < stereo.Length) _micMono = new float[stereo.Length * 2];
-        for (int i = 0; i < stereo.Length; i++) _micMono[i] = (stereo[i].X + stereo[i].Y) * 0.5f;
+        if (_micMono.Length < stereo.Length)
+        {
+            _micMono = new float[stereo.Length * 2];
+            _micLeft = new float[stereo.Length * 2];
+            _micRight = new float[stereo.Length * 2];
+        }
+        for (int i = 0; i < stereo.Length; i++)
+        {
+            _micLeft[i] = stereo[i].X;
+            _micRight[i] = stereo[i].Y;
+        }
+        VoiceLevels.ToMono(_micLeft.AsSpan(0, stereo.Length), _micRight.AsSpan(0, stereo.Length), _micMono);
         int room = _micResampler.MaxOutput(stereo.Length);
         if (_micResampled.Length < room) _micResampled = new float[room * 2];
         int written = _micResampler.Process(_micMono.AsSpan(0, stereo.Length), _micResampled);

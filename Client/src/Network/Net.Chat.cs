@@ -4,8 +4,6 @@ namespace LibreKO.Network;
 
 public partial class Net
 {
-    public const int WhisperLogMax = 120;
-
     public const byte SubChatTargetWhisper = 1, SubChatTargetBlock = 2, SubChatTargetClanAdmission = 4;
     private const byte ConsultClan = 0, ConsultPlayer = 1;
 
@@ -34,25 +32,10 @@ public partial class Net
     public const int ChatTargetNotFound = 0, ChatTargetConnected = 1, ChatTargetBlocked = -1,
                      ChatTargetCrossNation = -2, ChatTargetSenderBlocked = -3;
 
-    public readonly struct WhisperLine
-    {
-        public readonly bool Mine;
-        public readonly bool Notice;
-        public readonly string Text;
-
-        public WhisperLine(bool mine, bool notice, string text)
-        {
-            Mine = mine; Notice = notice; Text = text;
-        }
-    }
-
-    private readonly System.Collections.Generic.Dictionary<string, System.Collections.Generic.List<WhisperLine>> _whisperLog =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    public System.Collections.Generic.IReadOnlyList<WhisperLine> WhisperHistory(string name) =>
-        _whisperLog.TryGetValue(name, out var log)
-            ? log
-            : System.Array.Empty<WhisperLine>();
+    public System.Collections.Generic.IReadOnlyList<LibreKO.Domain.RoomPost> WhisperHistory(string name) =>
+        _directs.TryGetValue(name, out var timeline)
+            ? timeline.Posts
+            : System.Array.Empty<LibreKO.Domain.RoomPost>();
 
     public readonly record struct OpenWhisper(string Name, Godot.Vector2 Position, bool Minimized, bool Unread);
 
@@ -72,20 +55,11 @@ public partial class Net
     {
         if (string.Equals(_whispersOf, SelectedChar, StringComparison.OrdinalIgnoreCase)) return;
         _whispersOf = SelectedChar;
-        _whisperLog.Clear();
+        _directs.Clear();
         _openWhispers.Clear();
     }
 
-    public void RecordWhisper(string name, bool mine, bool notice, string text)
-    {
-        if (!_whisperLog.TryGetValue(name, out var log))
-        {
-            log = new System.Collections.Generic.List<WhisperLine>();
-            _whisperLog[name] = log;
-        }
-        log.Add(new WhisperLine(mine, notice, text));
-        if (log.Count > WhisperLogMax) log.RemoveRange(0, log.Count - WhisperLogMax);
-    }
+    public void RecordWhisper(string name, LibreKO.Domain.RoomPost post) => DirectTimeline(name).Add(post);
 
     public event Action<ChatLine>? ChatEvent;
 

@@ -362,14 +362,6 @@ public class RoomMediaTests
         Assert.Equal(expected, ServerHosts.Migrate(host, retired, "new.example"));
 
     [Theory]
-    [InlineData(true, false, 212, 500, "Public channel · 212/500 members")]
-    [InlineData(false, true, 6, 30, "Private room · locked · 6/30 members")]
-    [InlineData(false, false, 1, 10, "Private room · 1/10 members")]
-    [InlineData(false, false, 0, 10, "Private room")]
-    public void TheMembersWindowSummarisesTheRoom(bool isPublic, bool locked, int members, int capacity, string expected) =>
-        Assert.Equal(expected, NationChatRules.Summary(isPublic, locked, members, capacity));
-
-    [Theory]
     [InlineData("Siege at nine", 2, 100, "Siege at nine (2/100)")]
     [InlineData("General", 0, 500, "General")]
     public void ThePanelTitleCarriesTheMemberCount(string name, int members, int capacity, string expected) =>

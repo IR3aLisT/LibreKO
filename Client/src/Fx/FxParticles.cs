@@ -8,7 +8,6 @@ public partial class FxParticles : Node3D, IFxPooledPart, IFxPart
     private const uint OrbitEmitFlags = EmitFlags
         | (uint)(GpuParticles3D.EmitFlags.Color | GpuParticles3D.EmitFlags.Custom);
     private const float NoTravel = 1e-10f;
-    private const uint OrientedFlag = (uint)GpuParticles3D.EmitFlags.RotationScale;
 
     private float _age, _start, _life, _hideTime, _showTime;
     private Vector3 _origin, _velocity, _acceleration;
@@ -233,12 +232,6 @@ public partial class FxParticles : Node3D, IFxPooledPart, IFxPart
         }
 
         var xform = Transform3D.Identity;
-        uint oriented = 0;
-        if (template.FixedOrientation)
-        {
-            xform.Basis = world.Basis.Orthonormalized();
-            oriented = OrientedFlag;
-        }
         for (int i = 0; i < want; i++)
         {
             Vector3 local = arc * (template.BoxOffset + new Vector3(
@@ -257,10 +250,10 @@ public partial class FxParticles : Node3D, IFxPooledPart, IFxPart
             if (orbit)
             {
                 if (!template.SingleBurst) spin.A = (float)(Rng.NextDouble() * Mathf.Tau);
-                _shared.EmitParticle(xform, velocity, centre, spin, OrbitEmitFlags | oriented);
+                _shared.EmitParticle(xform, velocity, centre, spin, OrbitEmitFlags);
             }
             else
-                _shared.EmitParticle(xform, velocity, Colors.White, Colors.White, EmitFlags | oriented);
+                _shared.EmitParticle(xform, velocity, Colors.White, Colors.White, EmitFlags);
             _expiry[_expiryHead] = _age + template.LifeMax;
             _expiryHead = (_expiryHead + 1) % capacity;
             _alive++;

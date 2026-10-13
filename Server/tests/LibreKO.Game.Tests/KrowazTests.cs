@@ -86,7 +86,7 @@ public class KrowazTests : GameTestBase
         var sessions = provider.GetRequiredService<SessionManager>();
         var krowaz = (KrowazService)provider.GetRequiredService<IKrowazService>();
         var inside = Join(sessions, 900, Krowaz);
-        var start = new DateTime(2026, 10, 9, 14, 0, 0);
+        var start = new DateTime(2026, 10, 9, new EventSettings().KrowazStartHours[0], 0, 0);
 
         await krowaz.TickAtAsync(start);
         krowaz.IsOpen.Should().BeTrue();
@@ -95,6 +95,21 @@ public class KrowazTests : GameTestBase
         await krowaz.TickAtAsync(start.AddMinutes(KrowazService.OpenMinutes));
         krowaz.IsOpen.Should().BeFalse();
         inside.ZoneId.Should().Be((byte)ZoneId.Moradon);
+    }
+
+    [Fact]
+    public async Task ASingleOpeningHourOpensAgainTheNextDay()
+    {
+        using var provider = CreateProvider(_ => { }, configureSettings: settings => settings.Events.KrowazStartHours = [22]);
+        var krowaz = (KrowazService)provider.GetRequiredService<IKrowazService>();
+        var first = new DateTime(2026, 10, 9, 22, 0, 0);
+
+        await krowaz.TickAtAsync(first);
+        await krowaz.TickAtAsync(first.AddMinutes(KrowazService.OpenMinutes));
+        krowaz.IsOpen.Should().BeFalse();
+
+        await krowaz.TickAtAsync(first.AddDays(1));
+        krowaz.IsOpen.Should().BeTrue();
     }
 
     [Fact]

@@ -307,6 +307,39 @@ public class BorderDefenseWarTests
         highLevelCaller.ZoneId.Should().Be(BorderDefenseWarService.BdwZoneId);
     }
 
+    [Theory]
+    [InlineData(20, 0)]
+    [InlineData(58, 0)]
+    [InlineData(59, 1)]
+    [InlineData(68, 1)]
+    [InlineData(69, 2)]
+    [InlineData(83, 2)]
+    public void LevelsFallIntoTheThreeBrackets(byte level, int bracket)
+    {
+        BorderDefenseWarService.LevelBracket(level).Should().Be(bracket);
+    }
+
+    [Fact]
+    public async Task RoomsAreFormedInsideEachLevelBracket()
+    {
+        var service = CreateService();
+        var lowKarus = CreateTestSession(1, AccountNation.Karus);
+        var lowElmo = CreateTestSession(2, AccountNation.ElMorad);
+        var highKarus = CreateTestSession(3, AccountNation.Karus);
+        var midElmo = CreateTestSession(4, AccountNation.ElMorad);
+        lowKarus.Level = 40;
+        lowElmo.Level = 50;
+        highKarus.Level = 80;
+        midElmo.Level = 60;
+
+        await service.StartMatchesAsync([1, 2, 3, 4], 1800);
+
+        service.GetMatch(1)!.Participants.Should().BeEquivalentTo([1, 2]);
+        service.GetMatch(2).Should().BeNull();
+        highKarus.ZoneId.Should().NotBe(BorderDefenseWarService.BdwZoneId);
+        midElmo.ZoneId.Should().NotBe(BorderDefenseWarService.BdwZoneId);
+    }
+
     [Fact]
     public async Task BorderDefenseWarService_StartMatchesAsync_FormsAutoPartyForNation()
     {

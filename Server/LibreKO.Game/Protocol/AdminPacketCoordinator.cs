@@ -40,6 +40,8 @@ public class AdminPacketCoordinator(
     IBifrostEventService bifrostEventService,
     IMonsterAggressionPolicy monsterAggressionPolicy,
     EventSchedulerService eventSchedulerService,
+    ScheduleClock scheduleClock,
+    IEventSchedulePacketCoordinator eventSchedule,
     ICollectionRaceService collectionRaceService,
     INpcSummonService npcSummonService,
     ILotteryService lotteryService,
@@ -349,9 +351,9 @@ public class AdminPacketCoordinator(
                 }
                 else if (arg is "close")
                 {
-                    if (eventSchedulerService.CurrentTempleEvent == TempleEvent.UnderTheCastle)
+                    if (eventSchedulerService.IsTempleEventRunning(TempleEvent.UnderTheCastle))
                     {
-                        await eventSchedulerService.CancelTempleEventAsync();
+                        await eventSchedulerService.CancelTempleEventAsync(TempleEvent.UnderTheCastle);
                         await underTheCastleService.CloseAsync();
                         await SendNoticeAsync(session, "[Under The Castle] Event closed!");
                     }
@@ -385,10 +387,10 @@ public class AdminPacketCoordinator(
 
                 if (ftFirstToken is "close" or "cancel" or "stop")
                 {
-                    bool hadSchedulerEvent = eventSchedulerService.TempleEventInProgress == TempleEvent.ForgottenTemple;
+                    bool hadSchedulerEvent = eventSchedulerService.IsTempleEventRunning(TempleEvent.ForgottenTemple);
                     if (hadSchedulerEvent)
                     {
-                        await eventSchedulerService.CancelTempleEventAsync();
+                        await eventSchedulerService.CancelTempleEventAsync(TempleEvent.ForgottenTemple);
                     }
                     await forgottenTempleService.CloseAsync();
                     if (!hadSchedulerEvent)
@@ -1017,26 +1019,47 @@ public class AdminPacketCoordinator(
     private const ushort WeatherAmountDefault = 60;
     private const int SealCodeLength = 8;
 
+    private const string TimeUsage = "Usage: +time <hh> | +time <hh:mm> | +time reset";
+
     private async Task HandleTimeAsync(UserSession session, string arg)
     {
+        var events = settings.Value.Events;
         if (string.IsNullOrWhiteSpace(arg))
         {
+            var eventClock = ScheduleTime.Now(events, scheduleClock.UtcNow);
             await SendNoticeAsync(session,
-                $"Game time is {timeWeather.MinuteOfDay / 60:00}:{timeWeather.MinuteOfDay % 60:00}. "
-                + "Usage: +time <hh> | +time <hh:mm>");
+                $"Game time is {timeWeather.MinuteOfDay / 60:00}:{timeWeather.MinuteOfDay % 60:00}, "
+                + $"event clock {eventClock:HH:mm} ({events.ScheduleTimeZone}). {TimeUsage}");
+            return;
+        }
+
+        if (arg.Trim().Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            timeWeather.ResetTimeOfDay();
+            scheduleClock.Reset();
+            await BroadcastTimeAsync();
+            await SendNoticeAsync(session, "Game time and event clock are back to the real time.");
+            logger.LogInformation("GM {Gm} reset the game time and the event clock", session.Name);
             return;
         }
 
         if (!TimeWeatherBroadcastService.TryParseTimeOfDay(arg, out var hour, out var minute))
         {
-            await SendNoticeAsync(session, "Usage: +time <hh> | +time <hh:mm>");
+            await SendNoticeAsync(session, TimeUsage);
             return;
         }
 
         timeWeather.SetTimeOfDay(hour, minute);
+        scheduleClock.MoveTo(events, hour, minute);
+        await BroadcastTimeAsync();
+        await SendNoticeAsync(session, $"Game time and event clock set to {hour:00}:{minute:00} for everyone.");
+        logger.LogInformation("GM {Gm} set the game time and the event clock to {Hour:00}:{Minute:00}", session.Name, hour, minute);
+    }
+
+    private async Task BroadcastTimeAsync()
+    {
         await sessionManager.BroadcastToAll(timeWeather.BuildCurrentTimePacket());
-        await SendNoticeAsync(session, $"Game time set to {hour:00}:{minute:00} for everyone.");
-        logger.LogInformation("GM {Gm} set the game time to {Hour:00}:{Minute:00}", session.Name, hour, minute);
+        await sessionManager.BroadcastToAll(eventSchedule.Current());
     }
 
     private async Task HandleWeatherAsync(UserSession session, string arg)
@@ -1775,13 +1798,13 @@ public class AdminPacketCoordinator(
 
         if (arg is "cancel")
         {
-            if (await eventSchedulerService.CancelTempleEventAsync())
+            if (await eventSchedulerService.CancelTempleEventAsync(contest))
             {
                 await SendNoticeAsync(session, $"[{eventName}] Event cancelled and closed.");
             }
             else
             {
-                await SendNoticeAsync(session, $"[{eventName}] No temple event is currently active.");
+                await SendNoticeAsync(session, $"[{eventName}] This event is not currently active.");
             }
             return;
         }

@@ -27,10 +27,15 @@ public partial class World
         if (_pluginSocial != null) Callable.From(PluginHost.Game.RaiseWhispers).CallDeferred();
     }
 
-    private void PluginNotifyWhisperLine(string name, bool mine, bool notice, string text)
+    private void PluginNotifyWhisperLine(string name, RoomPost post)
     {
-        if (_pluginSocial != null) PluginHost.Game.RaiseWhisperLine(name, new GameWhisperLine(mine, notice, text));
+        if (_pluginSocial != null) PluginHost.Game.RaiseWhisperLine(name, PluginWhisperLine(post));
     }
+
+    private static GameWhisperLine PluginWhisperLine(RoomPost post) => new(
+        post.SenderId != 0 && post.SenderId == Net.I.MyCharId,
+        post.Kind == RoomPostKind.Notice,
+        post.Kind == RoomPostKind.VoiceNote ? $"Voice note ({VoiceNoteRules.Clock(post.Seconds)})" : post.Text);
 
     private void PluginNotifyParty()
     {
@@ -86,7 +91,7 @@ public partial class World
         IReadOnlyList<string> IGameWhispers.Open => w._whispers.Keys.ToList();
 
         IReadOnlyList<GameWhisperLine> IGameWhispers.History(string name) =>
-            Net.I.WhisperHistory(name).Select(l => new GameWhisperLine(l.Mine, l.Notice, l.Text)).ToList();
+            Net.I.WhisperHistory(name).Select(PluginWhisperLine).ToList();
 
         bool IGameWhispers.StartsCollapsed(string name) =>
             w._whispers.TryGetValue(name, out var chat) && chat.StartCollapsed;

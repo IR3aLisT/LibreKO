@@ -11,6 +11,7 @@ namespace LibreKO.Game.Protocol;
 public interface IEventSchedulePacketCoordinator
 {
     Task HandleAsync(IClient client, Packet packet);
+    Packet Current();
 }
 
 public sealed class EventSchedulePacketCoordinator(
@@ -19,6 +20,10 @@ public sealed class EventSchedulePacketCoordinator(
     EventSchedulerService scheduler,
     ICollectionRaceService collectionRaces,
     ILotteryService lottery,
+    IKrowazService krowaz,
+    IBifrostEventService bifrost,
+    ICastleSiegeService castleSiege,
+    ScheduleClock scheduleClock,
     IOptions<GameServerSettings> settings) : IEventSchedulePacketCoordinator
 {
     private const int MinutesPerHour = 60;
@@ -26,6 +31,15 @@ public sealed class EventSchedulePacketCoordinator(
     private const int DaysPerWeek = 7;
     private const int MinutesPerWeek = DaysPerWeek * MinutesPerDay;
     private const byte AnyLevel = 0;
+    private const byte NoCode = 0;
+    private const byte StartMinuteOfHour = 0;
+    private const byte FirstSiegeWeekday = 1;
+
+    public const string KrowazName = "Krowaz's Dominion";
+    public const string BifrostName = "Bifrost";
+    public const string CastleSiegeName = "Castle Siege War";
+    private const string BifrostDescription = "Bifrost in Ronark Land";
+    private const string CastleSiegeDescription = "Clan war for Delos Castle";
 
     public async Task HandleAsync(IClient client, Packet packet)
     {
@@ -33,83 +47,111 @@ public sealed class EventSchedulePacketCoordinator(
         if (session == null || packet.RemainingBytes < 1 || packet.ReadByte() != EventSchedulePacketWriter.SubSchedule)
             return;
 
-        await session.Client.SendPacket(EventSchedulePacketWriter.Schedule(Now(), Slots()));
+        await session.Client.SendPacket(Current());
     }
+
+    public Packet Current() => EventSchedulePacketWriter.Schedule(
+        (int)Math.Clamp(scheduleClock.Offset.TotalSeconds, int.MinValue, int.MaxValue), Now(), Events(DateTime.UtcNow));
 
     internal List<EventNow> Now()
     {
         var now = new List<EventNow>();
-        if (scheduler.CurrentTempleEvent != TempleEvent.None)
-        {
-            bool signUp = scheduler.IsTempleEventJoinOpen;
-            now.Add(new EventNow(EventScheduleKind.Temple, TempleEventRules.NameFor(scheduler.CurrentTempleEvent),
-                signUp ? EventSchedulePhase.SignUp : EventSchedulePhase.Running,
-                signUp ? scheduler.TempleRemainingJoinSeconds : scheduler.TempleRemainingSeconds,
-                scheduler.TempleMinLevel, scheduler.TempleMaxLevel));
-        }
+        foreach (var run in scheduler.TempleEvents)
+            now.Add(new EventNow(EventScheduleKind.Temple, (byte)run.Contest, TempleEventRules.NameFor(run.Contest),
+                run.JoinOpen ? EventSchedulePhase.SignUp : EventSchedulePhase.Running,
+                run.SecondsLeft, run.MinLevel, run.MaxLevel));
 
         foreach (var race in collectionRaces.ActiveRaces)
-            now.Add(new EventNow(EventScheduleKind.CollectionRace, race.Race.Name, EventSchedulePhase.Running,
+            now.Add(new EventNow(EventScheduleKind.CollectionRace, NoCode, race.Race.Name, EventSchedulePhase.Running,
                 race.RemainingSeconds, race.Race.MinLevel, race.Race.MaxLevel));
 
         if (lottery.ActiveEvent is { Closed: false } draw)
-            now.Add(new EventNow(EventScheduleKind.Lottery, draw.EventData.Name, EventSchedulePhase.Running,
+            now.Add(new EventNow(EventScheduleKind.Lottery, NoCode, draw.EventData.Name, EventSchedulePhase.Running,
                 draw.RemainingSeconds, AnyLevel, AnyLevel));
+
+        if (krowaz.IsOpen)
+            now.Add(new EventNow(EventScheduleKind.Krowaz, NoCode, KrowazName, EventSchedulePhase.Running,
+                krowaz.RemainingSeconds, KrowazService.EntryMinLevel, AnyLevel));
+
+        if (bifrost.IsActive)
+            now.Add(new EventNow(EventScheduleKind.Bifrost, NoCode, BifrostName, EventSchedulePhase.Running,
+                (int)Math.Min(bifrost.RemainingSecs, int.MaxValue), AnyLevel, AnyLevel));
+
+        if (castleSiege.Phase == CastleSiegePhase.War)
+            now.Add(new EventNow(EventScheduleKind.CastleSiege, NoCode, CastleSiegeName, EventSchedulePhase.Running,
+                castleSiege.WarSecondsLeft, AnyLevel, AnyLevel));
 
         return now;
     }
 
-    internal List<EventSlot> Slots()
+    internal List<ScheduledEvent> Events(DateTime utcNow)
     {
         var events = settings.Value.Events;
-        int offset = events.UseLocalTimeForSchedules
-            ? (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.Now).TotalMinutes
-            : 0;
-        var slots = new List<EventSlot>();
+        int offset = ScheduleTime.OffsetMinutes(events, utcNow);
+        var list = new List<ScheduledEvent>();
 
-        foreach (var s in gameDataService.TempleEventSchedules ?? [])
-            slots.Add(Slot(EventScheduleKind.Temple, TempleEventRules.NameFor(s.Event), s.Day, s.Hour, s.Minute,
-                offset, s.MinLevel, s.MaxLevel));
+        var templeGroups = (gameDataService.TempleEventSchedules ?? [])
+            .OrderBy(s => s.Id)
+            .GroupBy(s => (s.Event,
+                Min: s.MinLevel > 0 ? s.MinLevel : TempleEventRules.DefaultMinLevel(s.Event),
+                Max: s.MaxLevel > 0 ? s.MaxLevel : TempleEventRules.DefaultMaxLevel(s.Event)));
+        foreach (var group in templeGroups)
+            list.Add(new ScheduledEvent(EventScheduleKind.Temple, TempleEventRules.NameFor(group.Key.Event),
+                TempleEventRules.DescriptionFor(group.Key.Event), group.Key.Min, group.Key.Max,
+                group.Select(s => Slot(s.Day, s.Hour, s.Minute, offset)).ToList()));
 
-        foreach (var hour in events.ChaosStartHours)
-            slots.Add(Slot(EventScheduleKind.Temple, TempleEventRules.NameFor(TempleEvent.Chaos), null, (byte)hour,
-                TempleEventRules.StartMinuteOfHour, offset, AnyLevel, AnyLevel));
+        if (events.KrowazStartHours.Length > 0)
+            list.Add(new ScheduledEvent(EventScheduleKind.Krowaz, KrowazName,
+                $"Opens for {KrowazService.OpenMinutes} minutes", KrowazService.EntryMinLevel, AnyLevel,
+                Hourly(events.KrowazStartHours, offset)));
+
+        if (events.BifrostStartHours.Length > 0)
+            list.Add(new ScheduledEvent(EventScheduleKind.Bifrost, BifrostName, BifrostDescription, AnyLevel, AnyLevel,
+                Hourly(events.BifrostStartHours, offset)));
+
+        if (gameDataService.SiegeWarfare is { } siege && SiegeRules.IsWeekday(siege.WarDay))
+            list.Add(new ScheduledEvent(EventScheduleKind.CastleSiege, CastleSiegeName, CastleSiegeDescription,
+                AnyLevel, AnyLevel,
+                [Slot((DayOfWeek)(siege.WarDay - FirstSiegeWeekday), siege.WarTime, siege.WarMinute, offset)]));
 
         foreach (var group in gameDataService.CollectionRaceSchedulesByRace)
         {
             if (!gameDataService.CollectionRaceTable.TryGetValue(group.Key, out var race))
                 continue;
-            foreach (var s in group)
-                slots.Add(Slot(EventScheduleKind.CollectionRace, race.Name, s.Day, s.Hour, s.Minute, 0,
-                    race.MinLevel, race.MaxLevel));
+            list.Add(new ScheduledEvent(EventScheduleKind.CollectionRace, race.Name,
+                $"Collection Race, {race.DurationMinutes} minutes, first {race.MaxWinners} win", race.MinLevel, race.MaxLevel,
+                group.Select(s => Slot(s.Day, s.Hour, s.Minute, 0)).ToList()));
         }
 
         foreach (var group in gameDataService.LotterySchedulesByEvent)
         {
             if (!gameDataService.LotteryEventTable.TryGetValue(group.Key, out var draw))
                 continue;
-            foreach (var s in group)
-                slots.Add(Slot(EventScheduleKind.Lottery, draw.Name, s.Day, s.Hour, s.Minute, 0, AnyLevel, AnyLevel));
+            list.Add(new ScheduledEvent(EventScheduleKind.Lottery, draw.Name,
+                $"Lottery draw, {draw.DurationMinutes} minutes", AnyLevel, AnyLevel,
+                group.Select(s => Slot(s.Day, s.Hour, s.Minute, 0)).ToList()));
         }
 
-        return slots;
+        return list;
     }
 
-    internal static EventSlot Slot(EventScheduleKind kind, string name, DayOfWeek? day, byte hour, byte minute,
-        int offsetMinutes, byte minLevel, byte maxLevel)
+    private static List<EventSlot> Hourly(IEnumerable<int> hours, int offsetMinutes) =>
+        hours.Order().Select(h => Slot(null, (byte)h, StartMinuteOfHour, offsetMinutes)).ToList();
+
+    internal static EventSlot Slot(DayOfWeek? day, byte hour, byte minute, int offsetMinutes)
     {
         if (day == null)
         {
             int minuteOfDay = Wrap(hour * MinutesPerHour + minute - offsetMinutes, MinutesPerDay);
-            return new EventSlot(kind, name, EventSchedulePacketWriter.EveryDay,
-                (byte)(minuteOfDay / MinutesPerHour), (byte)(minuteOfDay % MinutesPerHour), minLevel, maxLevel);
+            return new EventSlot(EventSchedulePacketWriter.EveryDay,
+                (byte)(minuteOfDay / MinutesPerHour), (byte)(minuteOfDay % MinutesPerHour));
         }
 
         int minuteOfWeek = Wrap((int)day.Value * MinutesPerDay + hour * MinutesPerHour + minute - offsetMinutes,
             MinutesPerWeek);
         int dayMinutes = minuteOfWeek % MinutesPerDay;
-        return new EventSlot(kind, name, (byte)(minuteOfWeek / MinutesPerDay),
-            (byte)(dayMinutes / MinutesPerHour), (byte)(dayMinutes % MinutesPerHour), minLevel, maxLevel);
+        return new EventSlot((byte)(minuteOfWeek / MinutesPerDay),
+            (byte)(dayMinutes / MinutesPerHour), (byte)(dayMinutes % MinutesPerHour));
     }
 
     private static int Wrap(int value, int span) => ((value % span) + span) % span;

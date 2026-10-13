@@ -165,6 +165,7 @@ public partial class World : Node3D
         Facet(UserInfoInit, UserInfoDispose);
         Facet(EquipViewInit, EquipViewDispose);
         Facet(WhisperInit, WhisperDispose);
+        Facet(ChatReactionsInit, ChatReactionsDispose);
         Facet(CursorInit, CursorDispose);
         Facet(AdminPanelInit, AdminPanelDispose);
         Facet(GmFxInit, GmFxDispose);

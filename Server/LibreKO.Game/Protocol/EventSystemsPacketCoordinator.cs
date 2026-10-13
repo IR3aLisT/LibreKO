@@ -78,7 +78,7 @@ public class EventSystemsPacketCoordinator(
                 break;
 
             case TempleEventJoin:
-                await HandleTempleEventJoinAsync(session);
+                await HandleTempleEventJoinAsync(session, RequestedContest(packet));
                 break;
 
             case TempleEventDisband:
@@ -258,38 +258,45 @@ public class EventSystemsPacketCoordinator(
         await RemoveRivalAsync(player);
     }
 
-    public Task JoinTempleEventAsync(UserSession session) => HandleTempleEventJoinAsync(session);
+    public Task JoinTempleEventAsync(UserSession session) => HandleTempleEventJoinAsync(session, TempleEvent.None);
 
-    private async Task HandleTempleEventJoinAsync(UserSession session)
+    private static TempleEvent RequestedContest(Packet packet)
     {
-        if (eventSchedulerService.CurrentTempleEvent == TempleEvent.JuraidMountain
+        if (packet.RemainingBytes < 1)
+            return TempleEvent.None;
+        var contest = (TempleEvent)packet.ReadByte();
+        return Enum.IsDefined(contest) ? contest : TempleEvent.None;
+    }
+
+    private async Task HandleTempleEventJoinAsync(UserSession session, TempleEvent requested)
+    {
+        var contest = requested != TempleEvent.None ? requested : eventSchedulerService.SignUpFor(session);
+        if (contest == TempleEvent.JuraidMountain
             && await userVote.JuraidBarAsync(session.CharacterId) is { } bar)
         {
             await session.Client.SendPacket(InstanceDashboardPacketWriter.JuraidWarning(bar.Warnings, bar.Limit));
             return;
         }
-        var result = eventSchedulerService.TryJoinTempleEvent(session);
+        var result = eventSchedulerService.TryJoinTempleEvent(session, contest);
         await session.Client.SendPacket(EventPacketWriter.TempleEvent(
             TempleEventJoin, (byte)result,
-            TempleEventRules.JoinReplyId(eventSchedulerService.CurrentTempleEvent, eventSchedulerService.TempleEventZone)));
+            TempleEventRules.JoinReplyId(contest, TempleEventRules.ZoneFor(contest))));
         if (result != TempleJoinResult.Joined)
             return;
 
-        logger.LogDebug("Player {Name} joined temple event zone {Zone}", session.Name, eventSchedulerService.TempleEventZone);
-        await BroadcastTempleSignUpsAsync();
+        logger.LogDebug("Player {Name} joined {Contest}", session.Name, contest);
+        await BroadcastTempleSignUpsAsync(contest);
     }
 
-    private async Task BroadcastTempleSignUpsAsync()
+    private async Task BroadcastTempleSignUpsAsync(TempleEvent contest)
     {
-        var (karus, elMorad) = eventSchedulerService.TempleSignUps();
-        await sessionManager.BroadcastToAll(EventPacketWriter.TempleSignUps(
-            eventSchedulerService.CurrentTempleEvent, karus, elMorad));
+        var (karus, elMorad) = eventSchedulerService.TempleSignUps(contest);
+        await sessionManager.BroadcastToAll(EventPacketWriter.TempleSignUps(contest, karus, elMorad));
     }
 
     private async Task HandleTempleEventDisbandAsync(UserSession session)
     {
-        bool wasSignedUp = eventSchedulerService.TempleEventAcceptingEntries;
-        eventSchedulerService.LeaveTempleEvent(session.CharacterId);
+        var leftSignUp = eventSchedulerService.LeaveTempleEvent(session.CharacterId);
 
         if (session.InstanceReturn is { } returnPoint)
         {
@@ -307,8 +314,8 @@ public class EventSystemsPacketCoordinator(
 
         var packet = EventPacketWriter.TempleEvent(TempleEventDisband, 1, 0);
         await session.Client.SendPacket(packet);
-        if (wasSignedUp)
-            await BroadcastTempleSignUpsAsync();
+        if (leftSignUp != TempleEvent.None)
+            await BroadcastTempleSignUpsAsync(leftSignUp);
     }
 
     private async Task HandleBattleEventOpenAsync(UserSession session)

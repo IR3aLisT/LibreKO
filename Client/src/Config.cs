@@ -181,7 +181,7 @@ public static class Config
     public static float SfxVolume { get; private set; } = 0.9f;
     public static float UiVolume { get; private set; } = 0.7f;
     public static float VoiceVolume { get; private set; } = 0.9f;
-    public static float VoiceChatVolume { get; private set; } = 0.9f;
+    public static float VoiceChatVolume { get; private set; } = VoiceLevels.DefaultVolume;
     public static float VoiceThreshold { get; private set; } = 0.35f;
     public static bool VoicePushToTalk { get; private set; }
     public static string VoiceInputDevice { get; private set; } = DefaultAudioDevice;
@@ -426,7 +426,7 @@ public static class Config
         SfxVolume = Vol(cfg, "sfx", SfxVolume);
         UiVolume = Vol(cfg, "ui", UiVolume);
         VoiceVolume = Vol(cfg, "voice", VoiceVolume);
-        VoiceChatVolume = Mathf.Clamp((float)cfg.GetValue("voice_chat", "volume", VoiceChatVolume).AsDouble(), 0f, 1f);
+        VoiceChatVolume = Mathf.Clamp((float)cfg.GetValue("voice_chat", "volume", VoiceChatVolume).AsDouble(), 0f, VoiceLevels.MaxVolume);
         VoiceThreshold = Mathf.Clamp((float)cfg.GetValue("voice_chat", "threshold", VoiceThreshold).AsDouble(), 0f, 1f);
         VoicePushToTalk = cfg.GetValue("voice_chat", "push_to_talk", VoicePushToTalk).AsBool();
         VoiceInputDevice = cfg.GetValue("voice_chat", "input_device", VoiceInputDevice).AsString();
@@ -739,7 +739,7 @@ public static class Config
 
     public static void SetVoiceChat(float volume, float threshold, bool pushToTalk, string inputDevice)
     {
-        VoiceChatVolume = Mathf.Clamp(volume, 0f, 1f);
+        VoiceChatVolume = Mathf.Clamp(volume, 0f, VoiceLevels.MaxVolume);
         VoiceThreshold = Mathf.Clamp(threshold, 0f, 1f);
         VoicePushToTalk = pushToTalk;
         VoiceInputDevice = inputDevice.Length == 0 ? DefaultAudioDevice : inputDevice;

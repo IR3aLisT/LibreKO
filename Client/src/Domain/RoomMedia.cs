@@ -8,6 +8,10 @@ public static class RoomMediaSubs
 {
     public const byte History = 1;
     public const byte Posted = 2;
+    public const byte Stored = 3;
+    public const byte React = 4;
+    public const byte Reactions = 5;
+    public const byte Kept = 6;
     public const byte NoteBegin = 10;
     public const byte NoteChunk = 11;
     public const byte NoteEnd = 12;
@@ -20,6 +24,8 @@ public static class RoomMediaSubs
     public const byte VoiceTransport = 24;
     public const byte VoiceRoster = 25;
     public const byte VoiceSilence = 26;
+    public const byte DirectHistory = 30;
+    public const byte DirectStored = 31;
 
     public const byte MemberJoined = 1;
     public const byte MemberLeft = 2;
@@ -43,9 +49,15 @@ public static class RoomMediaResults
     public const byte Busy = 12;
     public const byte Failed = 13;
     public const byte NotLeader = 14;
+    public const byte PartnerAway = 15;
+    public const byte Blocked = 16;
+    public const byte KeptLimit = 17;
 
     public static string Text(byte result) => result switch
     {
+        PartnerAway => "That player is not online.",
+        Blocked => "Private messages are blocked.",
+        KeptLimit => "You already keep as many rooms as you can.",
         NotInRoom => "You are not in a chat room.",
         PublicChannel => "Voice calls are available in private rooms.",
         VoiceOff => "Voice chat is turned off on this server.",
@@ -124,7 +136,9 @@ public enum RoomPostKind : byte
 
 public sealed record RoomPost(long Id, RoomPostKind Kind, int SenderId, string Name, DateTime Time, string Text, int DurationDs, int Size)
 {
+    public long Id { get; set; } = Id;
     public byte[] Waveform { get; init; } = [];
+    public MessageReactions Reactions { get; } = new();
 
     public static RoomPost Line(int senderId, string name, string text, DateTime time) =>
         new(0, RoomPostKind.Text, senderId, name, time, text, 0, 0);
@@ -163,6 +177,30 @@ public sealed class RoomTimeline
         if (!HistoryLoaded && post.Kind == RoomPostKind.Text) _early.Add(post);
         _posts.Add(post);
         Trim();
+    }
+
+    public RoomPost? Find(long id)
+    {
+        if (id <= 0) return null;
+        for (int i = _posts.Count - 1; i >= 0; i--)
+            if (_posts[i].Id == id) return _posts[i];
+        return null;
+    }
+
+    public (RoomPost Post, bool Added) Stored(RoomPost row)
+    {
+        if (Find(row.Id) is { } known) return (known, false);
+        if (row.Kind == RoomPostKind.Text)
+        {
+            var waiting = _posts.Where(p => p.Id == 0 && p.Kind == RoomPostKind.Text && p.SenderId == row.SenderId).ToList();
+            if ((waiting.FirstOrDefault(p => p.Text == row.Text) ?? waiting.FirstOrDefault()) is { } line)
+            {
+                line.Id = row.Id;
+                return (line, false);
+            }
+        }
+        Add(row);
+        return (row, true);
     }
 
     public int MergeHistory(IReadOnlyList<RoomPost> page, bool more)

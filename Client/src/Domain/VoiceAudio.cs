@@ -130,12 +130,36 @@ public sealed class VoiceJitterBuffer
     }
 }
 
+public static class VoiceLevels
+{
+    public const float MaxVolume = 2f;
+    public const float DefaultVolume = 1f;
+    public const float LimiterCeilingDb = -0.3f;
+    private const float UnbalancedRatio = 1f / 16f;
+
+    public static void ToMono(ReadOnlySpan<float> left, ReadOnlySpan<float> right, Span<float> mono)
+    {
+        double leftEnergy = 0, rightEnergy = 0;
+        for (int i = 0; i < left.Length; i++)
+        {
+            leftEnergy += left[i] * left[i];
+            rightEnergy += right[i] * right[i];
+        }
+        bool leftOnly = rightEnergy < leftEnergy * UnbalancedRatio;
+        bool rightOnly = leftEnergy < rightEnergy * UnbalancedRatio;
+        for (int i = 0; i < left.Length; i++)
+            mono[i] = leftOnly ? left[i] : rightOnly ? right[i] : (left[i] + right[i]) * 0.5f;
+    }
+}
+
 public sealed class VoiceAutoGain
 {
-    public const float TargetRms = 0.1f;
-    public const float MaxGain = 8f;
+    public const float TargetRms = 0.2f;
+    public const float MaxGain = 16f;
     public const float MinGain = 0.5f;
-    public const float PeakCeiling = 0.89f;
+    public const float Knee = 0.75f;
+    public const float Ceiling = 0.98f;
+    public const float PeakLimit = 1.4f;
     private const float RiseRate = 0.05f;
     private const float FallRate = 0.4f;
     private const float QuietRms = 1e-4f;
@@ -159,14 +183,22 @@ public sealed class VoiceAutoGain
             float wanted = Math.Clamp(TargetRms / rms, MinGain, MaxGain);
             Gain += (wanted - Gain) * (wanted < Gain ? FallRate : RiseRate);
         }
-        float target = peak * Gain > PeakCeiling ? PeakCeiling / peak : Gain;
+        float target = peak * Gain > PeakLimit ? PeakLimit / peak : Gain;
         float from = Math.Min(_applied, target);
         for (int i = 0; i < frame.Length; i++)
         {
             float gain = from + (target - from) * (i + 1) / frame.Length;
-            frame[i] = Math.Clamp(frame[i] * gain, -1f, 1f);
+            frame[i] = SoftLimit(frame[i] * gain);
         }
         _applied = target;
+    }
+
+    public static float SoftLimit(float sample)
+    {
+        float size = Math.Abs(sample);
+        if (size <= Knee) return sample;
+        float limited = Knee + (Ceiling - Knee) * MathF.Tanh((size - Knee) / (Ceiling - Knee));
+        return MathF.CopySign(limited, sample);
     }
 
     public void Reset()

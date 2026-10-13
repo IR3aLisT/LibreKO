@@ -68,6 +68,7 @@ public class CollectionRaceService : ICollectionRaceService
     private readonly IGameDataService gameDataService;
     private readonly IUserNotificationService userNotificationService;
     private readonly IMailService mailService;
+    private readonly ScheduleClock scheduleClock;
     private readonly ILogger<CollectionRaceService> logger;
 
     private readonly ConcurrentDictionary<byte, ActiveCollectionRace> _activeByZone = new();
@@ -79,12 +80,14 @@ public class CollectionRaceService : ICollectionRaceService
         IUserNotificationService userNotificationService,
         IPlayerProgressionService playerProgressionService,
         IMailService mailService,
+        ScheduleClock scheduleClock,
         ILogger<CollectionRaceService> logger)
     {
         this.sessionManager = sessionManager;
         this.gameDataService = gameDataService;
         this.userNotificationService = userNotificationService;
         this.mailService = mailService;
+        this.scheduleClock = scheduleClock;
         this.logger = logger;
         playerProgressionService.LevelChanged += SyncPlayerAsync;
     }
@@ -188,17 +191,18 @@ public class CollectionRaceService : ICollectionRaceService
                 await EndAsync(active, forced: false);
         }
 
-        if (now.Minute == _lastAutoCheckMinute)
+        var scheduleNow = scheduleClock.UtcNow;
+        if (scheduleNow.Minute == _lastAutoCheckMinute)
             return;
 
-        _lastAutoCheckMinute = now.Minute;
+        _lastAutoCheckMinute = scheduleNow.Minute;
 
         foreach (var race in gameDataService.CollectionRaceTable.Values)
         {
             if (!race.AutoStart || _activeByZone.ContainsKey(race.ZoneId))
                 continue;
 
-            if (gameDataService.CollectionRaceSchedulesByRace[race.Id].Any(s => s.Matches(now)))
+            if (gameDataService.CollectionRaceSchedulesByRace[race.Id].Any(s => s.Matches(scheduleNow)))
                 await StartRaceAsync(race.Id);
         }
     }

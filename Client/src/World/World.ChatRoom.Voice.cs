@@ -55,6 +55,7 @@ public partial class World
     private Label _roomConfigPasswordTitle = null!;
     private LineEdit _roomConfigPassword = null!;
     private OptionButton _roomConfigSize = null!;
+    private CheckBox _roomConfigKeep = null!;
     private Label _roomConfigError = null!;
     private Button _roomJoin = null!;
     private Button _roomMic = null!;
@@ -124,9 +125,9 @@ public partial class World
 
     private void AlignChatRoomColumns()
     {
-        void Match() => _roomLeaderBox.CustomMinimumSize = new Vector2(0, _roomVoiceRow.Size.Y + ChatRoomStackGap + _roomComposerRow.Size.Y);
+        void Match() => _roomLeaderBox.CustomMinimumSize = new Vector2(0, _roomVoiceRow.Size.Y + ChatRoomStackGap + _roomComposer.Size.Y);
         _roomVoiceRow.Resized += Match;
-        _roomComposerRow.Resized += Match;
+        _roomComposer.Resized += Match;
     }
 
     private void BuildChatRoomVoiceRow(VBoxContainer right)
@@ -163,11 +164,11 @@ public partial class World
         _roomVolume = new HSlider
         {
             MinValue = 0,
-            MaxValue = 1,
+            MaxValue = VoiceLevels.MaxVolume,
             Step = 0.05,
             CustomMinimumSize = new Vector2(ChatRoomVolumeWidth, 0),
             SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-            TooltipText = "Voice volume",
+            TooltipText = "Voice volume (up to 200%)",
             FocusMode = Control.FocusModeEnum.None,
         };
         _roomVolume.ValueChanged += value =>
@@ -199,7 +200,6 @@ public partial class World
         var voice = VoiceChat.I;
         var state = Net.I.NationChat;
         bool live = voice?.InVoice == true;
-        RefreshChatRoomRecording(voice?.Recording == true);
         _roomVoiceRow.Visible = state.InPrivate;
         _roomMembersColumn.Visible = state.InPrivate && Net.I.ChatRoomMembersShown;
         TintIcon(_roomMembersToggle, Net.I.ChatRoomMembersShown ? UiTheme.TextHi : UiTheme.TextLo);
@@ -564,6 +564,7 @@ public partial class World
         _roomConfigOption.Selected = state.RoomPrivate ? 1 : 0;
         _roomConfigPassword.Text = state.RoomPassword;
         _roomConfigSize.Selected = Math.Max(0, Array.IndexOf(NationChatRules.RoomSizes, state.RoomMax));
+        _roomConfigKeep.SetPressedNoSignal(state.Kept);
         _roomConfigError.Visible = false;
         ApplyChatRoomConfigOption();
     }
@@ -596,6 +597,11 @@ public partial class World
         _roomConfigSize = new OptionButton { FocusMode = Control.FocusModeEnum.None };
         foreach (int size in NationChatRules.RoomSizes) _roomConfigSize.AddItem(size.ToString());
         column.AddChild(_roomConfigSize);
+        _roomConfigKeep = UiTheme.FlatCheck("Keep the room when everyone leaves", false);
+        _roomConfigKeep.TooltipText = "The room stays in the list while empty, so members can come back to it later";
+        _roomConfigKeep.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _roomConfigKeep.CustomMinimumSize = new Vector2(ChatRoomSettingsWidth, 0);
+        column.AddChild(_roomConfigKeep);
         _roomConfigError = UiTheme.Text("", 11, UiTheme.Bad);
         _roomConfigError.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _roomConfigError.CustomMinimumSize = new Vector2(ChatRoomSettingsWidth, 0);
@@ -624,6 +630,7 @@ public partial class World
         _roomConfigError.Text = refusal;
         _roomConfigError.Visible = refusal.Length > 0;
         if (refusal.Length > 0) return;
+        if (_roomConfigKeep.ButtonPressed != Net.I.NationChat.Kept) Net.I.SendRoomKept(_roomConfigKeep.ButtonPressed);
         Net.I.SendNationOptions(title, isPrivate, password, NationChatRules.RoomSizes[Math.Max(0, _roomConfigSize.Selected)]);
     }
 
@@ -664,7 +671,7 @@ public partial class World
         _roomPeerName.AddThemeConstantOverride("font_embolden", 1);
         column.AddChild(_roomPeerName);
         column.AddChild(UiTheme.Text("Volume", 12, UiTheme.TextLo));
-        _roomPeerVolume = new HSlider { MinValue = 0, MaxValue = 1, Step = 0.05, FocusMode = Control.FocusModeEnum.None };
+        _roomPeerVolume = new HSlider { MinValue = 0, MaxValue = VoiceLevels.MaxVolume, Step = 0.05, FocusMode = Control.FocusModeEnum.None };
         _roomPeerVolume.ValueChanged += value => VoiceChat.I?.SetMix(_roomPeerId, new VoiceChat.PeerMix((float)value, _roomPeerMute.ButtonPressed));
         column.AddChild(_roomPeerVolume);
         _roomPeerMute = UiTheme.FlatCheck("Mute for me", false);

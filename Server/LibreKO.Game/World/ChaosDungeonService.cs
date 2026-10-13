@@ -199,7 +199,12 @@ public sealed class ChaosDungeonService : IChaosDungeonService
     private async Task LeaveAsync(UserSession session)
     {
         await RemoveChaosItemsAsync(session);
-        session.BlinkUntilTicks = 0;
+        if (session.IsBlinking)
+        {
+            session.BlinkUntilTicks = 0;
+            await session.Client.SendPacket(MovementPacketWriter.StateChange(
+                session.CharacterId, (byte)StateChangeType.Abnormal, (byte)session.SizeState));
+        }
         if (_activeMatches.TryGetValue(session.Room, out var match) && !match.IsCompleted)
             match.Participants.Remove(session.CharacterId);
     }

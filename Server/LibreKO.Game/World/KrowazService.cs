@@ -20,10 +20,12 @@ public sealed class KrowazService(
     IZoneTransitionService zoneTransitionService,
     IKrowazTrapService krowazTrapService,
     IOptions<GameServerSettings> settings,
+    ScheduleClock scheduleClock,
     ILogger<KrowazService> logger) : IKrowazService
 {
     public const byte Zone = (byte)ZoneId.KrowazDominion;
     public const int OpenMinutes = 60;
+    public const byte EntryMinLevel = 70;
     public static readonly int[] CountdownMinutes = [10, 8, 5, 3, 2, 1];
 
     private const int SecondsPerMinute = 60;
@@ -33,7 +35,7 @@ public sealed class KrowazService(
     private DateTime _closesAt;
     private int _lastCountdown;
     private int _lastSweepMinute = -1;
-    private int _lastOpenHour = -1;
+    private DateTime _lastOpenMinute = DateTime.MinValue;
 
     public bool IsOpen => sessionManager.Battle.KrowazOpen;
 
@@ -85,10 +87,11 @@ public sealed class KrowazService(
 
     public async Task TickAtAsync(DateTime now)
     {
-        if (!IsOpen && now.Minute == StartMinuteOfHour && now.Hour != _lastOpenHour
+        var minute = now.Date.AddHours(now.Hour).AddMinutes(now.Minute);
+        if (!IsOpen && now.Minute == StartMinuteOfHour && minute != _lastOpenMinute
             && settings.Value.Events.KrowazStartHours.Contains(now.Hour))
         {
-            _lastOpenHour = now.Hour;
+            _lastOpenMinute = minute;
             await OpenAtAsync(now);
         }
 
@@ -135,5 +138,5 @@ public sealed class KrowazService(
         }
     }
 
-    private DateTime Clock() => settings.Value.Events.UseLocalTimeForSchedules ? DateTime.Now : DateTime.UtcNow;
+    private DateTime Clock() => ScheduleTime.Now(settings.Value.Events, scheduleClock.UtcNow);
 }

@@ -1,0 +1,81 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace LibreKO.Domain;
+
+public readonly record struct Reaction(int CharacterId, string Name, string Emoji);
+
+public readonly record struct ReactionCount(string Emoji, int Count);
+
+public sealed class MessageReactions
+{
+    private readonly List<Reaction> _all = [];
+
+    public IReadOnlyList<Reaction> All => _all;
+
+    public int Total => _all.Count;
+
+    public string Of(int characterId) => _all.FirstOrDefault(r => r.CharacterId == characterId).Emoji ?? "";
+
+    public bool Set(int characterId, string name, string emoji)
+    {
+        int at = _all.FindIndex(r => r.CharacterId == characterId);
+        if (emoji.Length == 0)
+        {
+            if (at < 0) return false;
+            _all.RemoveAt(at);
+            return true;
+        }
+        if (at >= 0)
+        {
+            if (_all[at].Emoji == emoji) return false;
+            _all.RemoveAt(at);
+        }
+        _all.Add(new Reaction(characterId, name, emoji));
+        return true;
+    }
+
+    public IReadOnlyList<ReactionCount> Tally()
+    {
+        var order = new List<string>();
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var reaction in _all)
+        {
+            if (!counts.TryAdd(reaction.Emoji, 1)) counts[reaction.Emoji]++;
+            else order.Add(reaction.Emoji);
+        }
+        return order
+            .Select((emoji, index) => (Count: new ReactionCount(emoji, counts[emoji]), Index: index))
+            .OrderByDescending(e => e.Count.Count)
+            .ThenBy(e => e.Index)
+            .Select(e => e.Count)
+            .ToList();
+    }
+
+    public override bool Equals(object? obj) => obj is MessageReactions other && _all.SequenceEqual(other._all);
+
+    public override int GetHashCode() => _all.Count;
+
+    public IReadOnlyList<Reaction> Listed(string emoji, int self) =>
+        _all.Where(r => emoji.Length == 0 || r.Emoji == emoji)
+            .OrderByDescending(r => r.CharacterId == self)
+            .ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+}
+
+public static class ReactionRules
+{
+    public const int PillMax = 3;
+    public const int MaxLength = 32;
+
+    public static readonly IReadOnlyList<string> QuickPicks = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+    public static string Count(int total) => total > 1 ? total.ToString() : "";
+
+    public static string Title(int total) => total == 1 ? "1 reaction" : $"{total} reactions";
+
+    public static string Toggle(string current, string picked) => current == picked ? "" : picked;
+
+    public static bool Valid(string emoji) => emoji.Length is > 0 and <= MaxLength && !emoji.Any(char.IsControl);
+}

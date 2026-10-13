@@ -403,7 +403,7 @@ public partial class World : Node3D, IWorldContext
                 {
                     if (e.NpcGesturing) { e.NpcGesturing = false; e.ActionUntil = 0; }
                     if (e.ActionClip != null) { e.ActionClip = null; e.Clip = null; ResetEntityActionScale(e); }
-                    bool moving = EntityMoving(e, pos);
+                    bool moving = Domain.NpcStride.Continues(EntityMoving(e, pos), nowSec, e.NpcStepAt);
                     PlayClip(e, moving
                         ? e.Backwards ? "walk_reverse" : e.Speed >= RunThresholdOf(e) ? "run" : "walk"
                         : e.Sitting ? "sit" : "idle");

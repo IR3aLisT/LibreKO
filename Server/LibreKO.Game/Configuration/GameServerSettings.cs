@@ -138,6 +138,9 @@ public class ChatRoomSettings
     [Range(1, int.MaxValue)]
     public int NotesPerDay { get; set; } = 200;
 
+    [Range(0, int.MaxValue)]
+    public int KeptRoomsPerCharacter { get; set; } = 3;
+
     public VoiceSettings Voice { get; set; } = new();
 }
 
@@ -176,11 +179,11 @@ public class EventSettings
     [Range(0, int.MaxValue)]
     public int BattleWinLoyalty { get; set; } = 500;        // NP reward for winning side
 
-    public int[] ChaosStartHours { get; set; } = [];
+    public string ScheduleTimeZone { get; set; } = "Europe/Berlin";
 
-    public int[] KrowazStartHours { get; set; } = [14];
+    public int[] KrowazStartHours { get; set; } = [9, 22];
+
+    public int[] BifrostStartHours { get; set; } = [1, 5, 13, 17, 20];
 
     public bool ChaosNeedsMap { get; set; }
-
-    public bool UseLocalTimeForSchedules { get; set; } = false;
 }

@@ -62,6 +62,21 @@ public class ChaosBattleTests
     }
 
     [Fact]
+    public void CapesAreHiddenOnlyInZoneEightyFive()
+    {
+        Assert.False(ChaosBattle.ShowsCapes(ChaosBattle.Zone));
+        Assert.True(ChaosBattle.ShowsCapes(21));
+    }
+
+    [Fact]
+    public void SkillsAreLockedWhileYouBlinkInZoneEightyFive()
+    {
+        Assert.True(ChaosBattle.BattleLocked(ChaosBattle.Zone, RespawnBlink.Blinking));
+        Assert.False(ChaosBattle.BattleLocked(ChaosBattle.Zone, RespawnBlink.ChaosNormal));
+        Assert.False(ChaosBattle.BattleLocked(21, RespawnBlink.Blinking));
+    }
+
+    [Fact]
     public void TheRankingReaderTakesTheServersBytes()
     {
         var packet = new Packet(GameOpcodes.GS_RANK);

@@ -2,16 +2,19 @@
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Common.Infrastructure.Persistence;
+using LibreKO.Game.Configuration;
 using LibreKO.Game.Protocol.Writers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace LibreKO.Game.World;
 
 public interface ICastleSiegeService
 {
     CastleSiegePhase Phase { get; }
+    int WarSecondsLeft { get; }
     Task StartCountdownAsync();
     Task OpenAsync();
     Task CloseAsync();
@@ -35,6 +38,8 @@ public sealed class CastleSiegeService : BackgroundService, ICastleSiegeService
     private readonly INpcSummonService _summon;
     private readonly INpcLifecycleService _lifecycle;
     private readonly IServiceScopeFactory _scopes;
+    private readonly IOptions<GameServerSettings> _settings;
+    private readonly ScheduleClock _scheduleClock;
     private readonly ILogger<CastleSiegeService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -51,6 +56,8 @@ public sealed class CastleSiegeService : BackgroundService, ICastleSiegeService
         INpcSummonService summon,
         INpcLifecycleService lifecycle,
         IServiceScopeFactory scopes,
+        IOptions<GameServerSettings> settings,
+        ScheduleClock scheduleClock,
         ILogger<CastleSiegeService> logger)
     {
         _sessions = sessions;
@@ -59,11 +66,15 @@ public sealed class CastleSiegeService : BackgroundService, ICastleSiegeService
         _summon = summon;
         _lifecycle = lifecycle;
         _scopes = scopes;
+        _settings = settings;
+        _scheduleClock = scheduleClock;
         _logger = logger;
         _zones.ZoneAbilitySent += OnZoneAbilitySentAsync;
     }
 
     public CastleSiegePhase Phase { get; private set; }
+
+    public int WarSecondsLeft => Phase == CastleSiegePhase.War ? Math.Max(0, _warSeconds) : 0;
 
     private short OwnerClan => _gameData.SiegeWarfare?.MasterKnights ?? 0;
 
@@ -74,7 +85,7 @@ public sealed class CastleSiegeService : BackgroundService, ICastleSiegeService
         {
             try
             {
-                await TickAsync(DateTime.Now);
+                await TickAsync(ScheduleTime.Now(_settings.Value.Events, _scheduleClock.UtcNow));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

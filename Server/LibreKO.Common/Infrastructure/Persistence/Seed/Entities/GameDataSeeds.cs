@@ -411,6 +411,9 @@ public class GameEventSeed : SnapshotJsonSeed<GameEventData>
 public class SiegeWarfareSeed : JsonEntitySeed<SiegeWarfareData>
 {
     protected override string JsonFileName => "SiegeWarfare.json";
+
+    public override string[] PropertiesToUpdate =>
+        [nameof(SiegeWarfareData.WarDay), nameof(SiegeWarfareData.WarTime), nameof(SiegeWarfareData.WarMinute)];
 }
 
 public class CollectionRaceSeed : SnapshotJsonSeed<CollectionRaceData>

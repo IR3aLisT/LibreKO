@@ -493,6 +493,41 @@ namespace LibreKO.Common.Migrations
                     b.ToTable("ChatRoomMessages");
                 });
 
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.ChatRoomReaction", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("CharacterId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CharacterName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Emoji")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<long>("MessageId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId", "CharacterId")
+                        .IsUnique();
+
+                    b.ToTable("ChatRoomReactions");
+                });
+
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.DailyRankCounter", b =>
                 {
                     b.Property<int>("CharacterId")
@@ -3445,6 +3480,41 @@ namespace LibreKO.Common.Migrations
                     b.ToTable("ZoneInfos", (string)null);
                 });
 
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.KeptChatRoom", b =>
+                {
+                    b.Property<string>("RoomKey")
+                        .HasMaxLength(40)
+                        .HasColumnType("varchar(40)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime>("LastUsedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("MaxMembers")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<int>("OwnerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Password")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("varchar(16)");
+
+                    b.HasKey("RoomKey");
+
+                    b.HasIndex("OwnerId");
+
+                    b.ToTable("KeptChatRooms");
+                });
+
             modelBuilder.Entity("LibreKO.Common.Domain.Entities.KingBallotBox", b =>
                 {
                     b.Property<int>("Id")
@@ -4232,6 +4302,15 @@ namespace LibreKO.Common.Migrations
                     b.HasOne("LibreKO.Common.Domain.Entities.Account", null)
                         .WithMany()
                         .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("LibreKO.Common.Domain.Entities.ChatRoomReaction", b =>
+                {
+                    b.HasOne("LibreKO.Common.Domain.Entities.ChatRoomMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

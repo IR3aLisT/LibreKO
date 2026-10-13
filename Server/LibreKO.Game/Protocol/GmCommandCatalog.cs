@@ -36,7 +36,7 @@ public static class GmCommandCatalog
         new(Players, "+ban <name> / +unban <login>", "Ban or unban an account"),
         new(Players, "+hapis <name>", "Send a player to prison"),
         new(World, "+zone [id]", "List the zones, or go to a zone's home point"),
-        new(World, "+time <hh[:mm]>", "Set the game time for everyone"),
+        new(World, "+time <hh[:mm]> | reset", "Set the game time and the event clock for everyone"),
         new(World, "+weather <clear|rain|snow|leaves> [0-100]", "Set the weather for everyone"),
         new(World, "+terrain <0-4>", "Show yourself a terrain effect: 0 none, 1 hay, 2 swamp, 3 water, 4 slowing swamp"),
         new(World, "+objturn <npcId> <degrees> [1|2]", "Turn an object NPC around you to an angle: 1 the angle grows, 2 it shrinks"),

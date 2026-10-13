@@ -189,8 +189,37 @@ public class VoiceAudioTests
         {
             var shout = Sine(0.9f);
             gain.Process(shout, speech: true);
-            Assert.All(shout, sample => Assert.True(Math.Abs(sample) <= VoiceAutoGain.PeakCeiling + 1e-4f));
+            Assert.All(shout, sample => Assert.True(Math.Abs(sample) <= VoiceAutoGain.Ceiling + 1e-4f));
         }
+    }
+
+    [Fact]
+    public void TheSoftLimitPassesSpeechUntouchedAndRoundsPeaksUnderTheCeiling()
+    {
+        Assert.Equal(0.5f, VoiceAutoGain.SoftLimit(0.5f));
+        Assert.Equal(-VoiceAutoGain.Knee, VoiceAutoGain.SoftLimit(-VoiceAutoGain.Knee));
+        float loud = VoiceAutoGain.SoftLimit(VoiceAutoGain.PeakLimit);
+        Assert.InRange(loud, 0.95f, VoiceAutoGain.Ceiling);
+        Assert.True(VoiceAutoGain.SoftLimit(0.9f) < VoiceAutoGain.SoftLimit(1.1f));
+        Assert.Equal(-VoiceAutoGain.SoftLimit(1.2f), VoiceAutoGain.SoftLimit(-1.2f));
+    }
+
+    [Fact]
+    public void AMicrophoneOnOneChannelIsNotHalvedWhenMadeMono()
+    {
+        float[] left = Sine(0.4f);
+        float[] silent = new float[left.Length];
+        var mono = new float[left.Length];
+
+        VoiceLevels.ToMono(left, silent, mono);
+        Assert.Equal(left, mono);
+
+        VoiceLevels.ToMono(silent, left, mono);
+        Assert.Equal(left, mono);
+
+        float[] right = Sine(0.2f);
+        VoiceLevels.ToMono(left, right, mono);
+        Assert.Equal((left[10] + right[10]) * 0.5f, mono[10]);
     }
 
     private static float[] Tone(double seconds)

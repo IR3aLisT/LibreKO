@@ -70,6 +70,7 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
     public const int FinishCountdownSeconds = 20;
 
     public const int MaxPlayersPerNationPerRoom = 8;
+    public static readonly byte[] LevelBracketTops = [58, 68];
     public const int PointsPerAltarDelivery = 10;
     public const int PointsPerKill = 1;
     public const int RankRowsPerNation = 8;
@@ -151,22 +152,29 @@ public sealed class BorderDefenseWarService : IBorderDefenseWarService
 
     internal BdwMatch? GetMatch(ushort roomId) => _activeMatches.GetValueOrDefault(roomId);
 
+    public static int LevelBracket(byte level)
+    {
+        int bracket = 0;
+        while (bracket < LevelBracketTops.Length && level > LevelBracketTops[bracket])
+            bracket++;
+        return bracket;
+    }
+
     public async Task StartMatchesAsync(IReadOnlyList<int> participantCharacterIds, int durationSeconds)
     {
-        var karusSessions = new List<UserSession>();
-        var elmoSessions = new List<UserSession>();
+        var brackets = participantCharacterIds
+            .Select(sessionManager.GetByCharacterId)
+            .OfType<UserSession>()
+            .GroupBy(session => LevelBracket(session.Level))
+            .OrderBy(bracket => bracket.Key);
+        foreach (var bracket in brackets)
+            await StartBracketAsync(bracket.ToList(), durationSeconds);
+    }
 
-        foreach (var charId in participantCharacterIds)
-        {
-            var session = sessionManager.GetByCharacterId(charId);
-            if (session == null)
-                continue;
-
-            if (session.Nation == AccountNation.Karus)
-                karusSessions.Add(session);
-            else if (session.Nation == AccountNation.ElMorad)
-                elmoSessions.Add(session);
-        }
+    private async Task StartBracketAsync(List<UserSession> sessions, int durationSeconds)
+    {
+        var karusSessions = sessions.Where(s => s.Nation == AccountNation.Karus).ToList();
+        var elmoSessions = sessions.Where(s => s.Nation == AccountNation.ElMorad).ToList();
 
         while (karusSessions.Count > 0 && elmoSessions.Count > 0)
         {

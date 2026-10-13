@@ -29,18 +29,25 @@ public partial class VoiceChat
     private (long Note, float Fraction) _seekOnPlay;
     private (long Note, float Fraction) _previewPlaying;
     private bool _netHooked;
+    private string _noticeTarget = "";
 
     public bool Recording => _recorder != null;
     public double RecordingSeconds => _recorder?.Seconds ?? 0;
+    public string RecordingTarget { get; private set; } = "";
 
-    public event Action<byte[], double, byte[]>? NoteRecorded;
-    public event Action<string>? NoteNotice;
+    public bool RecordingFor(string target) =>
+        Recording && string.Equals(RecordingTarget, target, StringComparison.OrdinalIgnoreCase);
 
-    public bool StartRecording()
+    public event Action<byte[], double, byte[], string>? NoteRecorded;
+    public event Action<string, string>? NoteNotice;
+
+    public bool StartRecording(string target = "")
     {
-        if (Recording || !Net.I.NationChat.InRoom) return false;
-        if (!AskForMicrophone(() => StartRecording())) return false;
+        if (Recording || (target.Length == 0 && !Net.I.NationChat.InRoom)) return false;
+        _noticeTarget = target;
+        if (!AskForMicrophone(() => StartRecording(target))) return false;
         _recorder = new VoiceNoteRecorder();
+        RecordingTarget = target;
         RetainMic(InVoice);
         StateChanged?.Invoke();
         return true;
@@ -56,7 +63,7 @@ public partial class VoiceChat
         byte[] waveform = recorder.Waveform();
         recorder.Dispose();
         StateChanged?.Invoke();
-        if (send && seconds >= MinNoteSeconds) NoteRecorded?.Invoke(file, seconds, waveform);
+        if (send && seconds >= MinNoteSeconds) NoteRecorded?.Invoke(file, seconds, waveform, RecordingTarget);
     }
 
     private void RecordFrame(float[] frame, bool voice)
@@ -171,7 +178,7 @@ public partial class VoiceChat
     {
         _loadingNotes.Remove(noteId);
         _missingNotes.Add(noteId);
-        NoteNotice?.Invoke(RoomMediaResults.Text(RoomMediaResults.NotFound));
+        NoteNotice?.Invoke(Net.I.DirectPartnerOf(noteId), RoomMediaResults.Text(RoomMediaResults.NotFound));
         StateChanged?.Invoke();
     }
 
@@ -232,20 +239,15 @@ public partial class VoiceChat
 
     private void ProcessNotes()
     {
-        if (_recorder != null && !Net.I.NationChat.InRoom) StopRecording(send: false);
+        if (_recorder != null && RecordingTarget.Length == 0 && !Net.I.NationChat.InRoom) StopRecording(send: false);
     }
 
     private static string CacheRoot() => ProjectSettings.GlobalizePath(NoteCacheDir);
 
     private static string CachePath(RoomPost note) => Path.Combine(CacheRoot(), VoiceNoteRules.CacheName(Net.I.ServerHost, note));
 
-    private static RoomPost? NoteById(long noteId)
-    {
-        var posts = Net.I.RoomTimeline.Posts;
-        for (int i = posts.Count - 1; i >= 0; i--)
-            if (posts[i].Id == noteId && posts[i].Kind == RoomPostKind.VoiceNote) return posts[i];
-        return null;
-    }
+    private static RoomPost? NoteById(long noteId) =>
+        Net.I.FindChatPost(noteId) is { Kind: RoomPostKind.VoiceNote } note ? note : null;
 
     private static void PruneNoteCache()
     {

@@ -1,4 +1,6 @@
-﻿using Godot;
+﻿using System;
+using System.Collections.Generic;
+using Godot;
 using LibreKO.Domain;
 using LibreKO.Network;
 
@@ -29,15 +31,14 @@ public partial class World
     private Button? _inZoneLeaveBtn;
     private ConfirmationDialog? _inZoneLeaveAsk;
 
-    private bool _bifrostActive;
-    private bool _bifrostSignUp;
-    private int _bifrostRemaining;
-    private int _bifrostMaxSeen;
-    private bool _bifrostPromptShown;
-    private bool _isEventRegistered;
-    private string _eventTitle = "Juraid Mountain";
-    private TempleEventType _eventType;
+    private DateTime _bifrostEndsUtc;
+    private int _bannerMaxSeconds;
+    private TempleEventType _bannerShows;
+    private TempleEventType _pendingJoin;
+    private readonly HashSet<TempleEventType> _signUpPrompted = new();
+    private readonly Dictionary<int, (int Karus, int ElMorad)> _signUpCounts = new();
 
+    private const string BifrostTitle = "Bifrost";
     private const string JuraidSignUpText = "Sign up with the [Reserve Knight Captain] in your town.";
     private static readonly Color MapOfChaosLogColour = new("ff7f50");
 
@@ -120,7 +121,7 @@ public partial class World
         head.AddThemeConstantOverride("separation", 8);
         col.AddChild(head);
 
-        _bifrostTitleLbl = UiTheme.Text(_eventTitle, 12, UiTheme.GoldBright);
+        _bifrostTitleLbl = UiTheme.Text(BifrostTitle, 12, UiTheme.GoldBright);
         _bifrostTitleLbl.AddThemeConstantOverride("outline_size", 2);
         _bifrostTitleLbl.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         _bifrostTitleLbl.MouseFilter = Control.MouseFilterEnum.Ignore;
@@ -184,7 +185,7 @@ public partial class World
         headerRow.AddThemeConstantOverride("separation", 4);
         vb.AddChild(headerRow);
 
-        _joinModalTitle = UiTheme.Text(FormatModalTitle(_eventTitle), 11, UiTheme.GoldBright, HorizontalAlignment.Center);
+        _joinModalTitle = UiTheme.Text(FormatModalTitle(BifrostTitle), 11, UiTheme.GoldBright, HorizontalAlignment.Center);
         _joinModalTitle.AddThemeConstantOverride("outline_size", 2);
         _joinModalTitle.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         headerRow.AddChild(_joinModalTitle);
@@ -248,60 +249,102 @@ public partial class World
         btnRow.AddChild(_joinModalCloseBtn);
     }
 
+    private static TempleSignUpBoard SignUps => Net.I.SignUps;
+
+    private static string EventTitle(TempleEventType type) => type switch
+    {
+        TempleEventType.Chaos => "Chaos Dungeon",
+        TempleEventType.BorderDefenseWar => "Border Defense War",
+        TempleEventType.JuraidMountain => "Juraid Mountain",
+        TempleEventType.UnderTheCastle => "Under The Castle",
+        TempleEventType.ForgottenTemple => "Forgotten Temple",
+        _ => BifrostTitle,
+    };
+
+    private static TempleEventType TypeForJoinReply(int id) => id switch
+    {
+        TempleJoin.ChaosSignUpEventId or ChaosZone => TempleEventType.Chaos,
+        BdwZone => TempleEventType.BorderDefenseWar,
+        JuraidZone => TempleEventType.JuraidMountain,
+        UtcZone => TempleEventType.UnderTheCastle,
+        FtZone => TempleEventType.ForgottenTemple,
+        _ => TempleEventType.None,
+    };
+
     private void CloseJoinModal()
     {
         if (_joinModal != null && IsInstanceValid(_joinModal))
             _joinModal.Visible = false;
 
-        if (_bifrostActive)
-        {
-            CombatNotice($"[{_eventTitle}] Window closed. Click the top timer banner anytime to reopen.");
-        }
+        if (SignUps.AnyOpen)
+            CombatNotice($"[{EventTitle(SignUps.Current)}] Window closed. Click the top timer banner anytime to reopen.");
     }
 
     private static string FormatModalTitle(string title) => $"#  {title.ToUpper()}  #";
 
     private void OnBifrostTime(int remaining, TempleEventType eventType)
     {
-        if (remaining <= 0)
+        var utcNow = DateTime.UtcNow;
+        if (eventType == TempleEventType.None)
+            _bifrostEndsUtc = remaining > 0 ? utcNow.AddSeconds(remaining) : DateTime.MinValue;
+        else if (remaining <= 0)
+            CloseSignUp(eventType);
+        else if (SignUps.OpenSignUp(eventType, remaining, utcNow))
         {
-            EndBifrostEvent();
+            CombatNotice($"[{EventTitle(eventType)}] Registration is open ({remaining} seconds)!");
+            if (SignUps.Current == eventType) OfferSignUp(eventType);
+        }
+        RefreshBifrostBanner();
+    }
+
+    private void CloseSignUp(TempleEventType type)
+    {
+        if (!SignUps.IsOpen(type)) return;
+        SignUps.Close(type);
+        SignUpEnded(type);
+    }
+
+    private void SignUpEnded(TempleEventType type)
+    {
+        _signUpPrompted.Remove(type);
+        _signUpCounts.Remove(TempleJoin.SignUpEventId(type));
+        CombatNotice($"[{EventTitle(type)}] Event registration has ended.");
+    }
+
+    private int BifrostSecondsLeft(DateTime utcNow) =>
+        _bifrostEndsUtc > utcNow ? (int)Math.Ceiling((_bifrostEndsUtc - utcNow).TotalSeconds) : 0;
+
+    private void RefreshBifrostBanner()
+    {
+        if (_bifrostBanner == null || !IsInstanceValid(_bifrostBanner)) return;
+        var utcNow = DateTime.UtcNow;
+        var shows = SignUps.Current;
+        int seconds = shows != TempleEventType.None ? SignUps.SecondsLeft(shows, utcNow) : BifrostSecondsLeft(utcNow);
+        if (shows != _bannerShows)
+        {
+            _bannerShows = shows;
+            _bannerMaxSeconds = 0;
+        }
+
+        if (seconds <= 0)
+        {
+            _bifrostBanner.Visible = false;
+            if (_joinModal != null && IsInstanceValid(_joinModal)) _joinModal.Visible = false;
+            _bifrostTick.Stop();
             return;
         }
 
-        if (eventType != _eventType && _joinModalCount != null && IsInstanceValid(_joinModalCount))
-            _joinModalCount.Visible = false;
-        _eventType = eventType;
-        _eventTitle = eventType switch
-        {
-            TempleEventType.Chaos => "Chaos Dungeon",
-            TempleEventType.BorderDefenseWar => "Border Defense War",
-            TempleEventType.JuraidMountain => "Juraid Mountain",
-            TempleEventType.UnderTheCastle => "Under The Castle",
-            TempleEventType.ForgottenTemple => "Forgotten Temple",
-            _ => "Bifrost"
-        };
-
-        if (_bifrostTitleLbl != null && IsInstanceValid(_bifrostTitleLbl))
-            _bifrostTitleLbl.Text = _eventTitle;
+        if (shows == TempleEventType.None && _joinModal != null && IsInstanceValid(_joinModal))
+            _joinModal.Visible = false;
+        _bannerMaxSeconds = Math.Max(_bannerMaxSeconds, seconds);
+        string title = EventTitle(shows);
+        _bifrostTitleLbl.Text = title;
         if (_joinModalTitle != null && IsInstanceValid(_joinModalTitle))
-            _joinModalTitle.Text = FormatModalTitle(_eventTitle);
-
-        bool wasActive = _bifrostActive;
-        _bifrostActive = true;
-        _bifrostSignUp = eventType != TempleEventType.None;
-        _bifrostRemaining = remaining;
-        if (remaining > _bifrostMaxSeen) _bifrostMaxSeen = remaining;
-
+            _joinModalTitle.Text = FormatModalTitle(title);
         _bifrostBanner.Visible = true;
-        UpdateBifrostBanner();
         if (_bifrostTick.IsStopped()) _bifrostTick.Start();
-
-        if (!wasActive && _bifrostSignUp)
-        {
-            CombatNotice($"[{_eventTitle}] Registration is open ({remaining} seconds)!");
-            OfferBifrostJoin();
-        }
+        UpdateBifrostBanner(seconds);
+        UpdateJoinModalState();
     }
 
     private static readonly Color ChaosPickaxeColour = new("ff7f50");
@@ -312,25 +355,22 @@ public partial class World
 
     private void OnJoinModalToggle()
     {
-        if (!_isEventRegistered)
-        {
-            if (_eventType == TempleEventType.JuraidMountain) return;
-            if (_eventType == TempleEventType.Chaos && HoldsPickaxe())
-            {
-                ShowSkillMsgOut(ItemData.Text(ChaosBattle.PickaxeJoinText, "Disarm your Pickaxe and resubmit your request to participate."));
-                CombatNotice(ItemData.Text(ChaosBattle.PickaxeArmedText, ""), ChaosPickaxeColour);
-                return;
-            }
-            Net.I.SendBifrostJoin();
-            _isEventRegistered = true;
-            UpdateJoinModalState();
-        }
-        else
+        var type = SignUps.Current;
+        if (type == TempleEventType.None) return;
+        if (SignUps.Registered == type)
         {
             Net.I.SendBifrostDisband();
-            _isEventRegistered = false;
-            UpdateJoinModalState();
+            return;
         }
+        if (SignUps.Registered != TempleEventType.None || type == TempleEventType.JuraidMountain) return;
+        if (type == TempleEventType.Chaos && HoldsPickaxe())
+        {
+            ShowSkillMsgOut(ItemData.Text(ChaosBattle.PickaxeJoinText, "Disarm your Pickaxe and resubmit your request to participate."));
+            CombatNotice(ItemData.Text(ChaosBattle.PickaxeArmedText, ""), ChaosPickaxeColour);
+            return;
+        }
+        _pendingJoin = type;
+        Net.I.SendBifrostJoin(type);
     }
 
     private void UpdateJoinModalState()
@@ -338,14 +378,22 @@ public partial class World
         if (_joinModalStatus == null || !IsInstanceValid(_joinModalStatus)) return;
         if (_joinModalBtn == null || !IsInstanceValid(_joinModalBtn)) return;
 
-        bool npcSignUp = _eventType == TempleEventType.JuraidMountain;
-        _joinModalBtn.Visible = !npcSignUp || _isEventRegistered;
-        if (npcSignUp && !_isEventRegistered)
+        var type = SignUps.Current;
+        bool registeredHere = type != TempleEventType.None && SignUps.Registered == type;
+        bool registeredElsewhere = SignUps.Registered != TempleEventType.None && !registeredHere;
+        bool npcSignUp = type == TempleEventType.JuraidMountain;
+        _joinModalBtn.Visible = registeredHere || (!npcSignUp && !registeredElsewhere);
+        if (registeredElsewhere)
+        {
+            _joinModalStatus.Text = $"You are registered for {EventTitle(SignUps.Registered)}.";
+            _joinModalStatus.AddThemeColorOverride("font_color", UiTheme.TextLo);
+        }
+        else if (npcSignUp && !registeredHere)
         {
             _joinModalStatus.Text = JuraidSignUpText;
             _joinModalStatus.AddThemeColorOverride("font_color", UiTheme.TextHi);
         }
-        else if (_isEventRegistered)
+        else if (registeredHere)
         {
             _joinModalStatus.Text = "✓ Registered! You will be teleported automatically.";
             _joinModalStatus.AddThemeColorOverride("font_color", UiTheme.Good);
@@ -359,15 +407,25 @@ public partial class World
             _joinModalBtn.Text = "Join";
             _joinModalBtn.AddThemeColorOverride("font_color", UiTheme.TextHi);
         }
+
+        if (_joinModalCount == null || !IsInstanceValid(_joinModalCount)) return;
+        int eventId = TempleJoin.SignUpEventId(type);
+        _joinModalCount.Visible = _signUpCounts.TryGetValue(eventId, out var count);
+        if (_joinModalCount.Visible)
+            _joinModalCount.Text = TempleJoin.CountLine(eventId == TempleJoin.ChaosSignUpEventId, count.Karus, count.ElMorad);
     }
 
     private void OnBifrostJoinResult(byte result, int zone)
     {
-        _isEventRegistered = TempleJoin.SignedUp(result);
+        var type = TypeForJoinReply(zone);
+        if (type == TempleEventType.None)
+            type = _pendingJoin != TempleEventType.None ? _pendingJoin : SignUps.Current;
+        _pendingJoin = TempleEventType.None;
+        if (TempleJoin.SignedUp(result)) SignUps.SetRegistered(type);
         UpdateJoinModalState();
         if (result == TempleJoin.Joined)
         {
-            CombatNotice($"[{_eventTitle}] You have registered! Prepare for battle.");
+            CombatNotice($"[{EventTitle(type)}] You have registered! Prepare for battle.");
             return;
         }
         if (result == TempleJoin.NeedsMapOfChaos)
@@ -384,62 +442,42 @@ public partial class World
 
     private void OnTempleSignUps(int eventId, int karus, int elMorad)
     {
-        if (_joinModalCount == null || !IsInstanceValid(_joinModalCount)) return;
-        _joinModalCount.Text = TempleJoin.CountLine(eventId == (int)TempleEventType.Chaos, karus, elMorad);
-        _joinModalCount.Visible = true;
+        _signUpCounts[eventId] = (karus, elMorad);
+        UpdateJoinModalState();
     }
 
     private void OnBifrostDisband()
     {
-        _isEventRegistered = false;
+        var left = SignUps.Registered;
+        SignUps.ClearRegistered();
         UpdateJoinModalState();
         if (IsTempleEventZone(_zone))
             CombatNotice($"[{ZoneCatalog.Name(_zone)}] You left the event.");
         else
-            CombatNotice($"[{_eventTitle}] You cancelled your event registration.");
+            CombatNotice($"[{EventTitle(left != TempleEventType.None ? left : SignUps.Current)}] You cancelled your event registration.");
         RefreshInZoneLeaveUi();
-    }
-
-    private void EndBifrostEvent()
-    {
-        if (_bifrostActive && _bifrostSignUp) CombatNotice($"[{_eventTitle}] Event registration has ended.");
-        _bifrostActive = false;
-        _bifrostRemaining = 0;
-        _bifrostMaxSeen = 0;
-        _bifrostPromptShown = false;
-        _bifrostBanner.Visible = false;
-        if (_joinModal != null && IsInstanceValid(_joinModal)) _joinModal.Visible = false;
-        _isEventRegistered = false;
-        UpdateJoinModalState();
-        _bifrostTick.Stop();
     }
 
     private void OnBifrostTick()
     {
-        if (!_bifrostActive) { _bifrostTick.Stop(); return; }
-        if (_bifrostRemaining > 0) _bifrostRemaining--;
-        if (_bifrostRemaining <= 0) { EndBifrostEvent(); return; }
-        UpdateBifrostBanner();
+        foreach (var type in SignUps.Expire(DateTime.UtcNow)) SignUpEnded(type);
+        RefreshBifrostBanner();
     }
 
-    private void UpdateBifrostBanner()
+    private void UpdateBifrostBanner(int seconds)
     {
-        int s = Mathf.Max(0, _bifrostRemaining);
-        string timeStr = $"{s / 60:00}:{s % 60:00}";
+        string timeStr = $"{seconds / 60:00}:{seconds % 60:00}";
         _bifrostTimerLbl.Text = timeStr;
+        bool urgent = seconds <= BifrostUrgentSecs;
         if (_joinModalTimer != null && IsInstanceValid(_joinModalTimer))
         {
             _joinModalTimer.Text = timeStr;
-            if (_bifrostRemaining <= BifrostUrgentSecs)
-                _joinModalTimer.AddThemeColorOverride("font_color", BifrostUrgentCol);
-            else
-                _joinModalTimer.AddThemeColorOverride("font_color", UiTheme.GoldBright);
+            _joinModalTimer.AddThemeColorOverride("font_color", urgent ? BifrostUrgentCol : UiTheme.GoldBright);
         }
 
-        float frac = _bifrostMaxSeen > 0 ? Mathf.Clamp((float)_bifrostRemaining / _bifrostMaxSeen, 0f, 1f) : 0f;
+        float frac = _bannerMaxSeconds > 0 ? Mathf.Clamp((float)seconds / _bannerMaxSeconds, 0f, 1f) : 0f;
         _bifrostBar.Value = frac;
 
-        bool urgent = _bifrostRemaining <= BifrostUrgentSecs;
         var col = urgent ? BifrostUrgentCol : BifrostCalmCol;
         if (urgent)
         {
@@ -459,26 +497,26 @@ public partial class World
         }
     }
 
-    private void OfferBifrostJoin()
+    private void OfferSignUp(TempleEventType type)
     {
-        if (_bifrostPromptShown) return;
-        _bifrostPromptShown = true;
-        BifrostShowJoinPrompt();
+        if (!_signUpPrompted.Add(type)) return;
+        ShowSignUp(type);
     }
 
-    private void BifrostToggleJoin()
+    private void ShowSignUp(TempleEventType type)
     {
-        if (!_bifrostActive || !_bifrostSignUp) return;
+        if (!SignUps.Select(type)) return;
+        RefreshBifrostBanner();
         BifrostShowJoinPrompt();
     }
 
     private void BifrostShowJoinPrompt()
     {
-        if (!_bifrostActive || !_bifrostSignUp) return;
+        if (!SignUps.AnyOpen) return;
         if (_joinModalTitle != null && IsInstanceValid(_joinModalTitle))
-            _joinModalTitle.Text = FormatModalTitle(_eventTitle);
-        if (_bifrostTitleLbl != null && IsInstanceValid(_bifrostTitleLbl))
-            _bifrostTitleLbl.Text = _eventTitle;
+            _joinModalTitle.Text = FormatModalTitle(EventTitle(SignUps.Current));
+        _bifrostTitleLbl.Text = EventTitle(SignUps.Current);
+        UpdateJoinModalState();
         _joinModal.Visible = true;
     }
 

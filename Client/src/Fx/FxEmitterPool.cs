@@ -23,7 +23,6 @@ internal sealed class FxParticleTemplate
     public Vector3 BoxExtent;
     public Vector3 GatherPoint;
     public float OrbitRate;
-    public bool FixedOrientation;
     public float Start, Life, FadeIn, FadeOut, HideTime, ShowTime;
     public Vector3 Origin, Velocity, Acceleration;
 }

@@ -266,6 +266,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMonsterAggressionPolicy, MonsterAggressionPolicy>();
         services.AddSingleton<INpcAiTargetingService, NpcAiTargetingService>();
 
+        services.AddSingleton<ScheduleClock>();
         services.AddSingleton<EventSchedulerService>();
         services.AddSingleton<ICollectionRaceService, CollectionRaceService>();
         services.AddSingleton<ILotteryService, LotteryService>();

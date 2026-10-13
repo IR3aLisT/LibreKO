@@ -1,7 +1,9 @@
-using LibreKO.Common.Infrastructure.Network;
+﻿using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Game.Configuration;
 using LibreKO.Game.Protocol;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using LibreKO.Game.Protocol.Writers;
 
 using LibreKO.Common.Enums;
@@ -21,16 +23,20 @@ public interface IBifrostEventService
 
 public class BifrostEventService(
     SessionManager sessionManager,
+    IOptions<GameServerSettings> settings,
+    ScheduleClock scheduleClock,
     ILogger<BifrostEventService> logger) : BackgroundService, IBifrostEventService
 {
     private const ushort ZoneBifrost = (ushort)ZoneId.Bifrost;
     private const ushort ZoneRonarkLand = (ushort)ZoneId.RonarkLand;
 
     private const int DefaultMonumentMinutes = 120;
+    private const int StartMinuteOfHour = 0;
 
     private readonly object stateLock = new();
     private long remainingSecs;
     private bool isActive;
+    private DateTime lastStartMinute = DateTime.MinValue;
 
     public long RemainingSecs
     {
@@ -84,6 +90,7 @@ public class BifrostEventService(
         {
             try
             {
+                TickSchedule(ScheduleTime.Now(settings.Value.Events, scheduleClock.UtcNow));
                 await TickAsync();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -91,6 +98,16 @@ public class BifrostEventService(
                 logger.LogError(ex, "Bifrost tick error");
             }
         }
+    }
+
+    internal void TickSchedule(DateTime now)
+    {
+        var minute = now.Date.AddHours(now.Hour).AddMinutes(now.Minute);
+        if (IsActive || now.Minute != StartMinuteOfHour || minute == lastStartMinute
+            || !settings.Value.Events.BifrostStartHours.Contains(now.Hour))
+            return;
+        lastStartMinute = minute;
+        Start();
     }
 
     private async Task TickAsync()

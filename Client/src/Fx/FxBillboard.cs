@@ -12,7 +12,7 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
     private float _start, _life, _fadeIn, _fadeOut, _hideTime, _showTime;
     private float _w, _h, _wVel, _hVel, _wAcc, _hAcc;
     private bool _spins, _explicitRot, _flat;
-    private Vector3 _rotDeg;
+    private Basis _fixedBasis = Basis.Identity;
     private Basis _matrixBasis = Basis.Identity;
     private float _spinRate;
     private Color _lastColor = new Color(-1, -1, -1, -1);
@@ -67,7 +67,7 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
             _hideTime = _hideTime, _showTime = _showTime,
             _w = _w, _h = _h, _wVel = _wVel, _hVel = _hVel, _wAcc = _wAcc, _hAcc = _hAcc,
             _spins = _spins, _explicitRot = _explicitRot, _flat = _flat,
-            _rotDeg = _rotDeg, _matrixBasis = _matrixBasis, _spinRate = _spinRate,
+            _fixedBasis = _fixedBasis, _matrixBasis = _matrixBasis, _spinRate = _spinRate,
             _gap = _gap, _blendWord = _blendWord,
             _texFps = _texFps, _frameCount = _frameCount, _wrap = _wrap,
             _atlasCols = _atlasCols, _atlasRows = _atlasRows, _atlasFrames = _atlasFrames,
@@ -119,7 +119,7 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
             _flat = flat,
             _mirroredQuarterUv = p.ContainsKey("mirroredQuarterUv") && p["mirroredQuarterUv"].AsBool(),
             _gap = Fx.ReadF(p, "gap"),
-            _rotDeg = Fx.ReadVec3(p, "rot"),
+            _fixedBasis = Fx.FixedRotation(Fx.ReadVec3(p, "rot")),
             _matrixBasis = Fx.ReadKoMatrixBasis(p),
             _texFps = Fx.ReadF(p, "texFPS"),
             _frameCount = Mathf.Max(1, p["frameCount"].AsInt32()),
@@ -234,76 +234,45 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
         SetShown(true);
 
         Vector3 pos = _initPos + _initVel * t + 0.5f * _accel * (t * t);
-        if (_flat && GroundHeight != null)
-        {
-            if (_root != null)
-            {
-                _root.EnsureFrame();
-                Vector3 world = _root.FrameXf * pos;
-                world.Y = GroundY(world.X, world.Z, world.Y) + _gap;
-                pos = _root.FrameXfInverse * world;
-            }
-            else
-            {
-                var parent = GetParentOrNull<Node3D>();
-                Vector3 world = parent != null ? parent.GlobalTransform * pos : pos;
-                world.Y = GroundY(world.X, world.Z, world.Y) + _gap;
-                pos = parent != null ? parent.ToLocal(world) : world;
-            }
-        }
-        else if (_flat)
-            pos += new Vector3(0f, _gap, 0f);
-
         float w = Mathf.Max(0.001f, _w + _wVel * t + 0.5f * _wAcc * t * t);
         float h = Mathf.Max(0.001f, _h + _hVel * t + 0.5f * _hAcc * t * t);
 
-        if (_flat)
-        {
-            float spin = _spinRate * t;
-            EnsureGroundFan(w, h, spin, pos);
-            var fanScale = _fanW > 0f && _fanH > 0f ? new Vector3(w / _fanW, 1f, h / _fanH) : Vector3.One;
-            Transform = new Transform3D(new Basis(Vector3.Up, spin - _fanRot) * Basis.FromScale(fanScale), pos);
-        }
+        if (_flat) PlaceOnGround(pos, w, h, _spinRate * t);
         else
         {
-            Basis basis;
-            if (_explicitRot)
+            bool hasCam;
+            Transform3D camXf;
+            Basis parentInverse;
+            if (_root != null)
             {
-                var koBasis = Basis.FromEuler(new Vector3(
-                    Mathf.DegToRad(_rotDeg.X), Mathf.DegToRad(_rotDeg.Y), Mathf.DegToRad(_rotDeg.Z)));
-                var koQ = koBasis.GetRotationQuaternion();
-                var godotQ = new Quaternion(koQ.X, -koQ.Y, -koQ.Z, koQ.W);
-                basis = _matrixBasis * new Basis(godotQ);
+                _root.EnsureFrame();
+                hasCam = _root.HasCam;
+                camXf = _root.CamXf;
+                parentInverse = _root.FrameInverse;
             }
             else
             {
-                bool hasCam;
-                Transform3D camXf;
-                Basis parentInverse;
-                if (_root != null)
-                {
-                    _root.EnsureFrame();
-                    hasCam = _root.HasCam;
-                    camXf = _root.CamXf;
-                    parentInverse = _root.FrameInverse;
-                }
-                else
-                {
-                    hasCam = Fx.FrameCamera(this, out camXf);
-                    var parent = GetParentOrNull<Node3D>();
-                    parentInverse = (parent?.GlobalTransform.Basis.Orthonormalized() ?? Basis.Identity).Inverse();
-                }
-                if (hasCam)
-                {
-                    // View-plane, not look-at-position: FX_CAPTURE_HANDOFF.md measures 963u-apart
-                    // quads sharing one normal to 0.00 deg.
-                    Basis camBasis = camXf.Basis.Orthonormalized();
-                    Basis worldBasis = camBasis * _matrixBasis;
-                    if (_spins) worldBasis = worldBasis.Rotated(camBasis.Z, _spinRate * localT);
-                    basis = parentInverse * worldBasis;
-                }
-                else basis = Basis.Identity;
+                hasCam = Fx.FrameCamera(this, out camXf);
+                var parent = GetParentOrNull<Node3D>();
+                parentInverse = (parent?.GlobalTransform.Basis.Orthonormalized() ?? Basis.Identity).Inverse();
             }
+            Basis basis;
+            if (_explicitRot)
+            {
+                Basis worldBasis = _fixedBasis;
+                if (_spins) worldBasis *= new Basis(Vector3.Back, _spinRate * localT);
+                basis = parentInverse * worldBasis * _matrixBasis;
+            }
+            else if (hasCam)
+            {
+                // View-plane, not look-at-position: FX_CAPTURE_HANDOFF.md measures 963u-apart
+                // quads sharing one normal to 0.00 deg.
+                Basis camBasis = camXf.Basis.Orthonormalized();
+                Basis worldBasis = camBasis * _matrixBasis;
+                if (_spins) worldBasis = worldBasis.Rotated(camBasis.Z, _spinRate * localT);
+                basis = parentInverse * worldBasis;
+            }
+            else basis = Basis.Identity;
             // NOT Basis.Scaled — it scales the rows, so a yawed quad's width lands on world Z and the
             // disc collapses to a 1-unit lens at yaw 90.
             var local = new Transform3D(basis * Basis.FromScale(new Vector3(w, h, 1f)), pos);
@@ -399,10 +368,9 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
     private const float GroundFanRebakeMove = 0.5f;
     private const double GroundFanRebakeInterval = 0.1;
     private Vector3 _fanAt;
-    private float _fanYaw;
     private double _fanBakedAt;
 
-    private bool GroundFanStale(float w, float h, float rotation, Vector3 centre, float frameYaw)
+    private bool GroundFanStale(float w, float h, float rotation, Vector3 centre)
     {
         if (!_groundFanBuilt) return true;
         double now = Time.GetTicksMsec() * 0.001;
@@ -411,26 +379,43 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
         return sw > GroundFanRebakeScale || sw < 1f / GroundFanRebakeScale
             || sh > GroundFanRebakeScale || sh < 1f / GroundFanRebakeScale
             || Mathf.Abs(Mathf.AngleDifference(rotation, _fanRot)) > GroundFanRebakeAngle
-            || Mathf.Abs(Mathf.AngleDifference(frameYaw, _fanYaw)) > GroundFanRebakeAngle
             || centre.DistanceSquaredTo(_fanAt) > GroundFanRebakeMove * GroundFanRebakeMove;
     }
 
-    private void EnsureGroundFan(float w, float h, float rotation, Vector3 pos)
+    private void PlaceOnGround(Vector3 pos, float w, float h, float spin)
     {
         if (!IsInsideTree()) return;
-        _root?.EnsureFrame();
-        Transform3D frame = _root != null ? _root.FrameXf
-            : GetParentOrNull<Node3D>() is { } parent ? parent.GlobalTransform : Transform3D.Identity;
-        Vector3 gp = frame * pos;
-        float frameYaw = frame.Basis.Orthonormalized().GetEuler().Y;
-        if (!GroundFanStale(w, h, rotation, gp, frameYaw)) return;
+        Transform3D frame, toLocal;
+        if (_root != null)
+        {
+            _root.EnsureFrame();
+            frame = _root.FrameXf;
+            toLocal = _root.FrameXfInverse;
+        }
+        else
+        {
+            frame = GetParentOrNull<Node3D>()?.GlobalTransform ?? Transform3D.Identity;
+            toLocal = frame.AffineInverse();
+        }
+        Vector3 centre = frame * pos;
+        centre.Y = GroundY(centre.X, centre.Z, centre.Y) + _gap;
+        Vector3 frameScale = frame.Basis.Scale;
+        w *= Mathf.Abs(frameScale.X);
+        h *= Mathf.Abs(frameScale.Z);
+        EnsureGroundFan(w, h, spin, centre);
+        var fanScale = new Vector3(w / _fanW, 1f, h / _fanH);
+        Transform = toLocal * new Transform3D(new Basis(Vector3.Up, spin - _fanRot) * Basis.FromScale(fanScale), centre);
+    }
+
+    private void EnsureGroundFan(float w, float h, float rotation, Vector3 gp)
+    {
+        if (!GroundFanStale(w, h, rotation, gp)) return;
         _groundFanBuilt = true;
-        _fanW = w; _fanH = h; _fanRot = rotation; _fanAt = gp; _fanYaw = frameYaw;
+        _fanW = w; _fanH = h; _fanRot = rotation; _fanAt = gp;
         _fanBakedAt = Time.GetTicksMsec() * 0.001;
         _groundFan ??= new ArrayMesh();
         _groundFan.ClearSurfaces();
         if (Mesh != _groundFan) Mesh = _groundFan;
-        var toWorld = new Basis(Vector3.Up, frameYaw);
         float c = Mathf.Cos(rotation), s = Mathf.Sin(rotation);
         Vector3 right = new(c, 0f, -s);
         Vector3 forward = new(s, 0f, c);
@@ -452,8 +437,7 @@ public partial class FxBillboard : MeshInstance3D, IFxPooledPart, IFxPart
                 cz *= r / extent;
                 Vector3 off = right * (cx * w * 0.5f) + forward * (cz * h * 0.5f);
                 int v = 1 + (ring - 1) * rim + i;
-                Vector3 sample = toWorld * off;
-                verts[v] = new Vector3(off.X, GroundY(gp.X + sample.X, gp.Z + sample.Z, gp.Y - _gap) + _gap - gp.Y, off.Z);
+                verts[v] = new Vector3(off.X, GroundY(gp.X + off.X, gp.Z + off.Z, gp.Y - _gap) + _gap - gp.Y, off.Z);
                 uvs[v] = GroundUv(cx, cz, _mirroredQuarterUv);
             }
         }

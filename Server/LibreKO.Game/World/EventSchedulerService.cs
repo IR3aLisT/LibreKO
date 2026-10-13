@@ -1,4 +1,5 @@
-﻿using LibreKO.Common.Domain.Services;
+﻿using LibreKO.Common.Domain.Entities.GameData;
+using LibreKO.Common.Domain.Services;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Configuration;
@@ -9,6 +10,12 @@ using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
 
 namespace LibreKO.Game.World;
+
+public readonly record struct TempleEventStatus(
+    TempleEvent Contest, byte MinLevel, byte MaxLevel, bool JoinOpen, int SecondsLeft)
+{
+    public bool Fits(byte level) => TempleEventRules.Fits(level, MinLevel, MaxLevel);
+}
 
 public class EventSchedulerService(
     SessionManager sessionManager,
@@ -24,33 +31,56 @@ public class EventSchedulerService(
     IKrowazService krowazService,
     INereidMonumentService nereidMonuments,
     IGameDataService gameDataService,
+    ScheduleClock scheduleClock,
     ILogger<EventSchedulerService> logger) : BackgroundService
 {
     private DateTime _lastWarOpen = DateTime.MinValue;
     private bool _banishPending;
     private DateTime _banishTime;
-    private int _lastAutoCheckMinute = -1;
+    private DateTime _lastScheduleMinute = DateTime.MinValue;
 
-    private TempleEvent _templeEvent;
-    private byte _templeEventZone;
-    private byte _templeEventMinLevel;
-    private byte _templeEventMaxLevel;
-    private bool _templeEventJoinOpen;
-    private DateTime _templeEventStart;
-    private DateTime _templeEventEnd;
-    private DateTime _lastTempleEventCall = DateTime.MinValue;
-    private readonly HashSet<int> _templeParticipants = [];
+    private readonly object _runsLock = new();
+    private readonly Dictionary<TempleEvent, TempleEventRun> _runs = [];
 
-    public bool IsTempleEventJoinOpen => _templeEventJoinOpen;
-    public TempleEvent CurrentTempleEvent => _templeEvent;
-    public int TempleRemainingJoinSeconds => _templeEventJoinOpen ? (int)Math.Max(0, (_templeEventStart - DateTime.UtcNow).TotalSeconds) : 0;
-    public int TempleRemainingSeconds => _templeEvent != TempleEvent.None ? (int)Math.Max(0, (_templeEventEnd - DateTime.UtcNow).TotalSeconds) : 0;
-    public byte TempleMinLevel => _templeEventMinLevel;
-    public byte TempleMaxLevel => _templeEventMaxLevel;
+    private sealed class TempleEventRun(TempleEvent contest, byte minLevel, byte maxLevel, DateTime calledAt, DateTime start)
+    {
+        public TempleEvent Contest { get; } = contest;
+        public byte Zone { get; } = TempleEventRules.ZoneFor(contest);
+        public byte MinLevel { get; } = minLevel;
+        public byte MaxLevel { get; } = maxLevel;
+        public DateTime CalledAt { get; } = calledAt;
+        public DateTime Start { get; } = start;
+        public DateTime End { get; } = start.AddSeconds(TempleEventRules.DurationSecondsFor(contest));
+        public bool JoinOpen { get; set; } = true;
+        public HashSet<int> Participants { get; } = [];
+
+        public bool Fits(byte level) => TempleEventRules.Fits(level, MinLevel, MaxLevel);
+
+        public TempleEventStatus Status(DateTime utcNow) => new(Contest, MinLevel, MaxLevel, JoinOpen,
+            (int)Math.Max(0, ((JoinOpen ? Start : End) - utcNow).TotalSeconds));
+    }
+
+    public IReadOnlyList<TempleEventStatus> TempleEvents => TempleEventsAt(DateTime.UtcNow);
+
+    internal IReadOnlyList<TempleEventStatus> TempleEventsAt(DateTime utcNow)
+    {
+        lock (_runsLock)
+            return _runs.Values.OrderBy(r => r.CalledAt).Select(r => r.Status(utcNow)).ToList();
+    }
+
+    public bool IsTempleEventRunning(TempleEvent contest)
+    {
+        lock (_runsLock)
+            return _runs.ContainsKey(contest);
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Event scheduler service started");
+        var events = settings.Value.Events;
+        if (ScheduleTime.TryZone(events.ScheduleTimeZone, out var zone))
+            logger.LogInformation("Event scheduler service started on {Zone} time", zone.Id);
+        else
+            logger.LogWarning("Event schedule time zone {Zone} is unknown; schedules run on UTC", events.ScheduleTimeZone);
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         while (await timer.WaitForNextTickAsync(stoppingToken))
@@ -58,7 +88,7 @@ public class EventSchedulerService(
             try
             {
                 await TickBattleZone();
-                await TickTempleEvent();
+                await TickTempleEventsAsync(DateTime.UtcNow, scheduleClock.UtcNow);
                 await TickBanish();
                 await collectionRaceService.TickAsync();
                 await lotteryService.TickAsync();
@@ -187,258 +217,225 @@ public class EventSchedulerService(
         }
     }
 
-    private async Task TickTempleEvent()
+    internal async Task TickTempleEventsAsync(DateTime utcNow, DateTime? scheduleUtcNow = null)
     {
-        var utcNow = DateTime.UtcNow;
-        var scheduleNow = settings.Value.Events.UseLocalTimeForSchedules ? DateTime.Now : utcNow;
-
-        if (_templeEventZone == 0)
+        var scheduleNow = ScheduleTime.Now(settings.Value.Events, scheduleUtcNow ?? utcNow);
+        var minute = scheduleNow.Date.AddHours(scheduleNow.Hour).AddMinutes(scheduleNow.Minute);
+        if (minute != _lastScheduleMinute)
         {
-            if (scheduleNow.Minute != _lastAutoCheckMinute)
+            _lastScheduleMinute = minute;
+            foreach (var schedule in DueSchedules(scheduleNow))
             {
-                var due = DueTempleEvent(scheduleNow, out var scheduledMinLevel, out var scheduledMaxLevel, out var scheduledJoinWindowSeconds);
-                _lastAutoCheckMinute = scheduleNow.Minute;
-                if (due != TempleEvent.None)
+                var contest = schedule.Event;
+                byte minLevel = schedule.MinLevel > 0 ? schedule.MinLevel : TempleEventRules.DefaultMinLevel(contest);
+                byte maxLevel = schedule.MaxLevel > 0 ? schedule.MaxLevel : TempleEventRules.DefaultMaxLevel(contest);
+                int countdown = schedule.CountdownMinutes > 0 ? schedule.CountdownMinutes : TempleEventRules.DefaultCountdownMinutes;
+                await StartTempleEventAsync(contest, utcNow, countdown * TempleEventRules.SecondsPerMinute, null, minLevel, maxLevel);
+            }
+        }
+
+        foreach (var run in RunsSnapshot())
+        {
+            if (run.JoinOpen && utcNow >= run.Start)
+            {
+                int entrants;
+                lock (_runsLock)
                 {
-                    await StartTempleEventAsync(due, utcNow, scheduledJoinWindowSeconds, null, scheduledMinLevel, scheduledMaxLevel);
+                    run.JoinOpen = false;
+                    entrants = run.Participants.Count;
                 }
+                logger.LogInformation("{Contest} closed for entries with {Count} player(s) and runs for {Duration}",
+                    run.Contest, entrants, run.End - run.Start);
+                await WarpParticipantsToEventAsync(run);
             }
 
-            return;
-        }
-
-        if (_templeEventJoinOpen && utcNow >= _templeEventStart)
-        {
-            _templeEventJoinOpen = false;
-            logger.LogInformation(
-                "{Contest} closed for entries with {Count} player(s) and runs for {Duration}",
-                _templeEvent, _templeParticipants.Count, _templeEventEnd - _templeEventStart);
-
-            await WarpParticipantsToEventAsync();
-        }
-
-        if (utcNow >= _templeEventEnd
-            || (_templeEvent == TempleEvent.UnderTheCastle && !_templeEventJoinOpen && !underTheCastleService.IsActive)
-            || (_templeEvent == TempleEvent.ForgottenTemple && !_templeEventJoinOpen && !forgottenTempleService.IsActive))
-        {
-            logger.LogInformation("{Contest} in zone {Zone} ended", _templeEvent, _templeEventZone);
-            await WarpParticipantsOutAsync(_templeEventZone);
-            _templeEvent = TempleEvent.None;
-            _templeEventZone = 0;
-            _templeEventMinLevel = 0;
-            _templeEventMaxLevel = 0;
-            _templeEventJoinOpen = false;
-            _templeParticipants.Clear();
+            if (utcNow >= run.End || EndedEarly(run))
+            {
+                logger.LogInformation("{Contest} in zone {Zone} ended", run.Contest, run.Zone);
+                await WarpParticipantsOutAsync(run);
+                Remove(run);
+            }
         }
     }
 
-    private TempleEvent DueTempleEvent(DateTime now, out byte minLevel, out byte maxLevel, out int joinWindowSeconds)
+    private IEnumerable<TempleEventScheduleData> DueSchedules(DateTime scheduleNow) =>
+        (gameDataService.TempleEventSchedules ?? [])
+            .Where(s => s.Matches(scheduleNow))
+            .GroupBy(s => s.Event)
+            .Select(g => g.First());
+
+    private bool EndedEarly(TempleEventRun run) =>
+        !run.JoinOpen && run.Contest switch
+        {
+            TempleEvent.UnderTheCastle => !underTheCastleService.IsActive,
+            TempleEvent.ForgottenTemple => !forgottenTempleService.IsActive,
+            _ => false,
+        };
+
+    private List<TempleEventRun> RunsSnapshot()
     {
-        minLevel = 0;
-        maxLevel = 0;
-        joinWindowSeconds = TempleEventRules.JoinWindowSeconds;
+        lock (_runsLock)
+            return _runs.Values.OrderBy(r => r.CalledAt).ToList();
+    }
 
-        // 1. Check database-driven Temple Event schedules (Juraid Mountain, BDW)
-        var schedule = gameDataService.TempleEventSchedules?.FirstOrDefault(s => s.Matches(now));
-        if (schedule != null)
+    private void Remove(TempleEventRun run)
+    {
+        lock (_runsLock)
         {
-            var contest = schedule.Event;
-            byte defMin = contest switch
-            {
-                TempleEvent.JuraidMountain => TempleEventRules.JuraidMountainDefaultMinLevel,
-                TempleEvent.UnderTheCastle => TempleEventRules.UnderTheCastleDefaultMinLevel,
-                TempleEvent.ForgottenTemple => TempleEventRules.ForgottenTempleLowMinLevel,
-                _ => TempleEventRules.BorderDefenseWarDefaultMinLevel,
-            };
-            byte defMax = contest switch
-            {
-                TempleEvent.JuraidMountain => TempleEventRules.JuraidMountainDefaultMaxLevel,
-                TempleEvent.UnderTheCastle => TempleEventRules.UnderTheCastleDefaultMaxLevel,
-                TempleEvent.ForgottenTemple => TempleEventRules.ForgottenTempleHighMaxLevel,
-                _ => TempleEventRules.BorderDefenseWarDefaultMaxLevel,
-            };
-
-            minLevel = schedule.MinLevel > 0 ? schedule.MinLevel : defMin;
-            maxLevel = schedule.MaxLevel > 0 ? schedule.MaxLevel : defMax;
-            int countdownMin = schedule.CountdownMinutes > 0 ? schedule.CountdownMinutes : TempleEventRules.DefaultCountdownMinutes;
-            joinWindowSeconds = countdownMin * 60;
-            return contest;
+            if (_runs.TryGetValue(run.Contest, out var current) && ReferenceEquals(current, run))
+                _runs.Remove(run.Contest);
         }
-
-        // 2. Configuration-driven start hours (Chaos)
-        if (now.Minute == TempleEventRules.StartMinuteOfHour)
-        {
-            var events = settings.Value.Events;
-            if (events.ChaosStartHours.Contains(now.Hour))
-                return TempleEvent.Chaos;
-        }
-
-        return TempleEvent.None;
     }
 
     private async Task StartTempleEventAsync(
         TempleEvent contest,
         DateTime now,
-        int joinWindowSeconds = TempleEventRules.JoinWindowSeconds,
-        UserSession? autoJoinSession = null,
-        byte minLevel = 0,
-        byte maxLevel = 0)
+        int joinWindowSeconds,
+        UserSession? autoJoinSession,
+        byte minLevel,
+        byte maxLevel)
     {
-        _templeEvent = contest;
-        _templeEventZone = TempleEventRules.ZoneFor(contest);
-        _templeEventMinLevel = minLevel;
-        _templeEventMaxLevel = maxLevel;
-        _templeEventJoinOpen = true;
-        _templeEventStart = now.AddSeconds(joinWindowSeconds);
-        _templeEventEnd = _templeEventStart
-            .AddSeconds(TempleEventRules.DurationSecondsFor(contest));
-        _lastTempleEventCall = now;
-        _templeParticipants.Clear();
-        if (autoJoinSession != null)
+        var run = new TempleEventRun(contest, minLevel, maxLevel, now, now.AddSeconds(joinWindowSeconds));
+        lock (_runsLock)
         {
-            bool eligible = (_templeEventMinLevel == 0 || autoJoinSession.Level >= _templeEventMinLevel)
-                         && (_templeEventMaxLevel == 0 || autoJoinSession.Level <= _templeEventMaxLevel);
-            if (eligible)
+            if (_runs.ContainsKey(contest))
             {
-                _templeParticipants.Add(autoJoinSession.CharacterId);
+                logger.LogInformation("{Contest} is already running; this call is skipped", contest);
+                return;
             }
+            _runs[contest] = run;
+            if (autoJoinSession != null && run.Fits(autoJoinSession.Level) && !InAnotherRun(run, autoJoinSession.CharacterId))
+                run.Participants.Add(autoJoinSession.CharacterId);
         }
 
         logger.LogInformation(
             "{Contest} (Level {Min}-{Max}) called in zone {Zone}; entries are open for {Window}",
-            contest, _templeEventMinLevel, _templeEventMaxLevel, _templeEventZone, TimeSpan.FromSeconds(joinWindowSeconds));
+            contest, minLevel, maxLevel, run.Zone, TimeSpan.FromSeconds(joinWindowSeconds));
 
-        string contestName = TempleEventRules.NameFor(contest);
-
-        string timeStr = joinWindowSeconds >= 60
-            ? (joinWindowSeconds / 60 == 1 ? "1 Minute" : $"{joinWindowSeconds / 60} Minutes")
+        string timeStr = joinWindowSeconds >= TempleEventRules.SecondsPerMinute
+            ? (joinWindowSeconds / TempleEventRules.SecondsPerMinute == 1 ? "1 Minute" : $"{joinWindowSeconds / TempleEventRules.SecondsPerMinute} Minutes")
             : $"{joinWindowSeconds} Seconds";
 
-        string levelNotice = _templeEventMinLevel > 0
-            ? (_templeEventMaxLevel > 0 && _templeEventMaxLevel < ProgressionTable.MaxLevel
-                ? $" (Level {_templeEventMinLevel}-{_templeEventMaxLevel})"
-                : $" (Level {_templeEventMinLevel}+)")
+        string levelNotice = minLevel > 0
+            ? (maxLevel > 0 && maxLevel < ProgressionTable.MaxLevel
+                ? $" (Level {minLevel}-{maxLevel})"
+                : $" (Level {minLevel}+)")
             : string.Empty;
 
-        var noticePkt = NoticePacketWriter.Broadcast($"### [EVENT] {contestName}{levelNotice} registration is now OPEN ({timeStr})! ###");
+        var noticePkt = NoticePacketWriter.Broadcast($"### [EVENT] {TempleEventRules.NameFor(contest)}{levelNotice} registration is now OPEN ({timeStr})! ###");
         await sessionManager.BroadcastToAll(noticePkt);
 
-        var bifrostPkt = BifrostPacketWriter.Remaining(TempleSubOpcode.BifrostRemaining, joinWindowSeconds, (byte)contest);
+        var signUpPkt = BifrostPacketWriter.Remaining(TempleSubOpcode.BifrostRemaining, joinWindowSeconds, (byte)contest);
         foreach (var s in sessionManager.GetAll())
         {
-            if (_templeEventMinLevel > 0 && s.Level < _templeEventMinLevel)
-                continue;
-            if (_templeEventMaxLevel > 0 && s.Level > _templeEventMaxLevel)
-                continue;
-            await s.Client.SendPacket(bifrostPkt);
+            if (run.Fits(s.Level))
+                await s.Client.SendPacket(signUpPkt);
         }
     }
 
-    private async Task WarpParticipantsToEventAsync()
+    private bool InAnotherRun(TempleEventRun run, int characterId) =>
+        _runs.Values.Any(r => !ReferenceEquals(r, run) && r.Participants.Contains(characterId));
+
+    private static Packet SignUpClosed(TempleEvent contest) =>
+        BifrostPacketWriter.Remaining(TempleSubOpcode.BifrostRemaining, 0, (byte)contest);
+
+    private async Task WarpParticipantsToEventAsync(TempleEventRun run)
     {
+        List<int> participants;
+        lock (_runsLock)
+            participants = run.Participants.ToList();
+
         logger.LogInformation("Warping {Count} participants to zone {Zone} for {Contest}",
-            _templeParticipants.Count, _templeEventZone, _templeEvent);
+            participants.Count, run.Zone, run.Contest);
 
-        var closeBifrostPkt = BifrostPacketWriter.Remaining(TempleSubOpcode.BifrostRemaining, 0);
-        await sessionManager.BroadcastToAll(closeBifrostPkt);
+        await sessionManager.BroadcastToAll(SignUpClosed(run.Contest));
 
-        var startPkt = NoticePacketWriter.Broadcast($"### [EVENT] {TempleEventRules.NameFor(_templeEvent)} has started! Teleporting registered players... ###");
+        var startPkt = NoticePacketWriter.Broadcast($"### [EVENT] {TempleEventRules.NameFor(run.Contest)} has started! Teleporting registered players... ###");
         await sessionManager.BroadcastToAll(startPkt);
 
-        if (_templeEvent == TempleEvent.JuraidMountain)
+        switch (run.Contest)
         {
-            await juraidMountainService.StartMatchesAsync(_templeParticipants.ToList(), TempleEventRules.JuraidMountainDurationSeconds);
-            return;
-        }
-
-        if (_templeEvent == TempleEvent.BorderDefenseWar)
-        {
-            await borderDefenseWarService.StartMatchesAsync(_templeParticipants.ToList(), TempleEventRules.BorderDefenseWarDurationSeconds);
-            return;
-        }
-
-        if (_templeEvent == TempleEvent.Chaos)
-        {
-            await chaosDungeonService.StartMatchesAsync(_templeParticipants.ToList(), TempleEventRules.ChaosDurationSeconds);
-            return;
-        }
-
-        if (_templeEvent == TempleEvent.UnderTheCastle)
-        {
-            underTheCastleService.Start();
-            foreach (var charId in _templeParticipants)
-            {
-                var session = sessionManager.GetByCharacterId(charId);
-                if (session != null)
+            case TempleEvent.JuraidMountain:
+                await juraidMountainService.StartMatchesAsync(participants, TempleEventRules.JuraidMountainDurationSeconds);
+                return;
+            case TempleEvent.BorderDefenseWar:
+                await borderDefenseWarService.StartMatchesAsync(participants, TempleEventRules.BorderDefenseWarDurationSeconds);
+                return;
+            case TempleEvent.Chaos:
+                await chaosDungeonService.StartMatchesAsync(participants, TempleEventRules.ChaosDurationSeconds);
+                return;
+            case TempleEvent.UnderTheCastle:
+                underTheCastleService.Start();
+                foreach (var session in Sessions(participants))
                     await underTheCastleService.EnterAsync(session);
-            }
-            return;
-        }
-
-        if (_templeEvent == TempleEvent.ForgottenTemple)
-        {
-            forgottenTempleService.Start(minLevel: _templeEventMinLevel, maxLevel: _templeEventMaxLevel);
-            foreach (var charId in _templeParticipants)
-            {
-                var session = sessionManager.GetByCharacterId(charId);
-                if (session != null)
+                return;
+            case TempleEvent.ForgottenTemple:
+                forgottenTempleService.Start(minLevel: run.MinLevel, maxLevel: run.MaxLevel);
+                foreach (var session in Sessions(participants))
                     await forgottenTempleService.EnterAsync(session);
-            }
-            return;
+                return;
         }
 
-        foreach (var charId in _templeParticipants)
+        foreach (var session in Sessions(participants))
         {
-            var session = sessionManager.GetByCharacterId(charId);
-            if (session != null && session.ZoneId != _templeEventZone)
+            if (session.ZoneId == run.Zone)
+                continue;
+            try
             {
-                try
-                {
-                    await zoneTransitionService.ChangeZoneAsync(session, _templeEventZone, 0f, 0f);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Failed to warp player {CharId} to temple event zone {Zone}", charId, _templeEventZone);
-                }
+                await zoneTransitionService.ChangeZoneAsync(session, run.Zone, 0f, 0f);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to warp player {CharId} to temple event zone {Zone}", session.CharacterId, run.Zone);
             }
         }
     }
 
-    private async Task WarpParticipantsOutAsync(byte zoneId)
+    private IEnumerable<UserSession> Sessions(IEnumerable<int> characterIds) =>
+        characterIds.Select(sessionManager.GetByCharacterId).OfType<UserSession>();
+
+    private async Task CloseContestAsync(TempleEvent contest, bool rewarded)
     {
-        var endPkt = NoticePacketWriter.Broadcast($"### [EVENT] {TempleEventRules.NameFor(_templeEvent)} has ended! Returning participants to Moradon... ###");
+        switch (contest)
+        {
+            case TempleEvent.JuraidMountain:
+                await juraidMountainService.CancelAllMatchesAsync();
+                break;
+            case TempleEvent.BorderDefenseWar:
+                if (rewarded)
+                    await borderDefenseWarService.FinishAllMatchesAsync();
+                else
+                    await borderDefenseWarService.CancelAllMatchesAsync();
+                break;
+            case TempleEvent.Chaos:
+                if (rewarded)
+                    await chaosDungeonService.FinishAllMatchesAsync();
+                else
+                    await chaosDungeonService.CancelAllMatchesAsync();
+                break;
+            case TempleEvent.UnderTheCastle:
+                await underTheCastleService.CloseAsync();
+                break;
+            case TempleEvent.ForgottenTemple:
+                await forgottenTempleService.CloseAsync();
+                break;
+        }
+    }
+
+    private async Task WarpParticipantsOutAsync(TempleEventRun run)
+    {
+        var endPkt = NoticePacketWriter.Broadcast($"### [EVENT] {TempleEventRules.NameFor(run.Contest)} has ended! Returning participants to Moradon... ###");
         await sessionManager.BroadcastToAll(endPkt);
 
-        if (_templeEvent == TempleEvent.JuraidMountain || juraidMountainService.HasActiveMatches)
-        {
-            await juraidMountainService.CancelAllMatchesAsync();
-        }
+        await CloseContestAsync(run.Contest, rewarded: true);
+        await SendZoneHomeAsync(run.Zone);
+    }
 
-        if (_templeEvent == TempleEvent.BorderDefenseWar || borderDefenseWarService.HasActiveMatches)
-        {
-            await borderDefenseWarService.FinishAllMatchesAsync();
-        }
+    private async Task SendZoneHomeAsync(byte zoneId)
+    {
+        var playersInEvent = sessionManager.GetAll().Where(s => zoneId != 0 && s.ZoneId == zoneId).ToList();
 
-        if (_templeEvent == TempleEvent.Chaos || chaosDungeonService.HasActiveMatches)
-        {
-            await chaosDungeonService.FinishAllMatchesAsync();
-        }
-
-        if (_templeEvent == TempleEvent.UnderTheCastle || underTheCastleService.IsActive)
-        {
-            await underTheCastleService.CloseAsync();
-        }
-
-        if (_templeEvent == TempleEvent.ForgottenTemple || forgottenTempleService.IsActive)
-        {
-            await forgottenTempleService.CloseAsync();
-        }
-
-        var playersInEvent = sessionManager.GetAll()
-            .Where(s => zoneId != 0 && s.ZoneId == zoneId)
-            .ToList();
-
-        logger.LogInformation("Warping {Count} players out of event zones back to Moradon", playersInEvent.Count);
+        logger.LogInformation("Warping {Count} players out of event zone {Zone} back to Moradon", playersInEvent.Count, zoneId);
 
         foreach (var session in playersInEvent)
         {
@@ -453,47 +450,72 @@ public class EventSchedulerService(
         }
     }
 
-    public TempleJoinResult TryJoinTempleEvent(UserSession session)
+    public TempleEvent SignUpFor(UserSession session)
     {
-        if (_templeEventZone == 0 || !_templeEventJoinOpen)
-            return TempleJoinResult.NotOpen;
-        if (_templeParticipants.Contains(session.CharacterId))
-            return TempleJoinResult.AlreadyJoined;
-        if (_templeEventMinLevel > 0 && session.Level < _templeEventMinLevel)
-            return TempleJoinResult.LevelTooLow;
-        if (_templeEventMaxLevel > 0 && session.Level > _templeEventMaxLevel)
-            return TempleJoinResult.LevelTooHigh;
-        if (_templeEvent == TempleEvent.Chaos && settings.Value.Events.ChaosNeedsMap
-            && !JobChangeRules.HasItemInBag(session, TempleEventRules.MapOfChaos))
-            return TempleJoinResult.NeedsMapOfChaos;
-
-        _templeParticipants.Add(session.CharacterId);
-        return TempleJoinResult.Joined;
+        lock (_runsLock)
+            return PickSignUp(session)?.Contest ?? TempleEvent.None;
     }
 
-    public (ushort Karus, ushort ElMorad) TempleSignUps()
+    private TempleEventRun? PickSignUp(UserSession session)
     {
-        ushort karus = 0, elMorad = 0;
-        foreach (var characterId in _templeParticipants)
+        var open = _runs.Values.Where(r => r.JoinOpen).OrderByDescending(r => r.CalledAt).ToList();
+        return open.FirstOrDefault(r => r.Participants.Contains(session.CharacterId))
+            ?? open.FirstOrDefault(r => r.Fits(session.Level))
+            ?? open.FirstOrDefault();
+    }
+
+    public TempleJoinResult TryJoinTempleEvent(UserSession session, TempleEvent contest = TempleEvent.None)
+    {
+        lock (_runsLock)
         {
-            var player = sessionManager.GetByCharacterId(characterId);
-            if (player == null) continue;
+            var run = contest == TempleEvent.None ? PickSignUp(session) : _runs.GetValueOrDefault(contest);
+            if (run is not { JoinOpen: true })
+                return TempleJoinResult.NotOpen;
+            if (run.Participants.Contains(session.CharacterId))
+                return TempleJoinResult.AlreadyJoined;
+            if (InAnotherRun(run, session.CharacterId))
+                return TempleJoinResult.OtherDungeon;
+            if (run.MinLevel > 0 && session.Level < run.MinLevel)
+                return TempleJoinResult.LevelTooLow;
+            if (run.MaxLevel > 0 && session.Level > run.MaxLevel)
+                return TempleJoinResult.LevelTooHigh;
+            if (run.Contest == TempleEvent.Chaos && settings.Value.Events.ChaosNeedsMap
+                && !JobChangeRules.HasItemInBag(session, TempleEventRules.MapOfChaos))
+                return TempleJoinResult.NeedsMapOfChaos;
+
+            run.Participants.Add(session.CharacterId);
+            return TempleJoinResult.Joined;
+        }
+    }
+
+    public (ushort Karus, ushort ElMorad) TempleSignUps(TempleEvent contest)
+    {
+        List<int> participants;
+        lock (_runsLock)
+            participants = _runs.TryGetValue(contest, out var run) ? run.Participants.ToList() : [];
+
+        ushort karus = 0, elMorad = 0;
+        foreach (var player in Sessions(participants))
+        {
             if (player.Nation == AccountNation.Karus) karus++;
             else elMorad++;
         }
         return (karus, elMorad);
     }
 
-    public void LeaveTempleEvent(int characterId)
+    public TempleEvent LeaveTempleEvent(int characterId)
     {
-        _templeParticipants.Remove(characterId);
+        var leftSignUp = TempleEvent.None;
+        lock (_runsLock)
+        {
+            foreach (var run in _runs.Values)
+            {
+                if (run.Participants.Remove(characterId) && run.JoinOpen)
+                    leftSignUp = run.Contest;
+            }
+        }
+        return leftSignUp;
     }
-
-    public byte TempleEventZone => _templeEventZone;
-
-    public TempleEvent TempleEventInProgress => _templeEvent;
-
-    public bool TempleEventAcceptingEntries => _templeEventJoinOpen;
 
     public async Task CallTempleEventAsync(
         TempleEvent contest,
@@ -505,120 +527,47 @@ public class EventSchedulerService(
         if (contest == TempleEvent.None)
             return;
 
-        if (contest is TempleEvent.JuraidMountain or TempleEvent.BorderDefenseWar or TempleEvent.UnderTheCastle or TempleEvent.ForgottenTemple)
+        var schedules = gameDataService.TempleEventSchedules?.Where(s => s.Event == contest).ToList() ?? [];
+        if (minLevel == 0)
+            minLevel = schedules.Count > 0 ? schedules.Min(s => s.MinLevel) : TempleEventRules.DefaultMinLevel(contest);
+        if (maxLevel == 0)
+            maxLevel = schedules.Count > 0 ? schedules.Max(s => s.MaxLevel) : TempleEventRules.DefaultMaxLevel(contest);
+        if (joinWindowSeconds <= 0)
         {
-            var matchingSchedules = gameDataService.TempleEventSchedules?.Where(s => s.Event == contest).ToList();
-            byte defMin = contest switch
-            {
-                TempleEvent.JuraidMountain => TempleEventRules.JuraidMountainDefaultMinLevel,
-                TempleEvent.UnderTheCastle => TempleEventRules.UnderTheCastleDefaultMinLevel,
-                TempleEvent.ForgottenTemple => TempleEventRules.ForgottenTempleLowMinLevel,
-                _ => TempleEventRules.BorderDefenseWarDefaultMinLevel,
-            };
-            byte defMax = contest switch
-            {
-                TempleEvent.JuraidMountain => TempleEventRules.JuraidMountainDefaultMaxLevel,
-                TempleEvent.UnderTheCastle => TempleEventRules.UnderTheCastleDefaultMaxLevel,
-                TempleEvent.ForgottenTemple => TempleEventRules.ForgottenTempleHighMaxLevel,
-                _ => TempleEventRules.BorderDefenseWarDefaultMaxLevel,
-            };
-
-            if (minLevel == 0)
-                minLevel = matchingSchedules != null && matchingSchedules.Count > 0
-                    ? matchingSchedules.Min(s => s.MinLevel)
-                    : defMin;
-            if (maxLevel == 0)
-                maxLevel = matchingSchedules != null && matchingSchedules.Count > 0
-                    ? matchingSchedules.Max(s => s.MaxLevel)
-                    : defMax;
-
-            if (joinWindowSeconds <= 0)
-            {
-                var defaultCountdown = matchingSchedules?.FirstOrDefault()?.CountdownMinutes ?? TempleEventRules.DefaultCountdownMinutes;
-                joinWindowSeconds = defaultCountdown > 0 ? defaultCountdown * 60 : TempleEventRules.JoinWindowSeconds;
-            }
-        }
-        else if (joinWindowSeconds <= 0)
-        {
-            joinWindowSeconds = TempleEventRules.JoinWindowSeconds;
+            var countdown = schedules.FirstOrDefault()?.CountdownMinutes ?? TempleEventRules.DefaultCountdownMinutes;
+            joinWindowSeconds = countdown > 0 ? countdown * TempleEventRules.SecondsPerMinute : TempleEventRules.JoinWindowSeconds;
         }
 
         await StartTempleEventAsync(contest, DateTime.UtcNow, joinWindowSeconds, autoJoinSession, minLevel, maxLevel);
     }
 
-    public async Task<bool> CancelTempleEventAsync()
+    public async Task<bool> CancelTempleEventAsync(TempleEvent contest = TempleEvent.None)
     {
-        if (_templeEvent == TempleEvent.None)
+        List<TempleEventRun> cancelled;
+        lock (_runsLock)
         {
-            return false;
+            cancelled = _runs.Values.Where(r => contest == TempleEvent.None || r.Contest == contest).ToList();
+            foreach (var run in cancelled)
+                _runs.Remove(run.Contest);
         }
 
-        var closeBifrostPkt = BifrostPacketWriter.Remaining(TempleSubOpcode.BifrostRemaining, 0);
-        await sessionManager.BroadcastToAll(closeBifrostPkt);
-
-        var contestName = TempleEventRules.NameFor(_templeEvent);
-
-        if (_templeEventJoinOpen)
+        foreach (var run in cancelled)
         {
-            var cancelNotice = NoticePacketWriter.Broadcast($"### [EVENT] {contestName} registration has been CANCELLED! ###");
-            await sessionManager.BroadcastToAll(cancelNotice);
-        }
-        else
-        {
-            var cancelNotice = NoticePacketWriter.Broadcast($"### [EVENT] {contestName} has been CANCELLED! Returning players to Moradon... ###");
-            await sessionManager.BroadcastToAll(cancelNotice);
-            if (_templeEventZone != 0)
+            var contestName = TempleEventRules.NameFor(run.Contest);
+            if (run.JoinOpen)
             {
-                await WarpParticipantsOutAsync(_templeEventZone);
+                await sessionManager.BroadcastToAll(SignUpClosed(run.Contest));
+                await sessionManager.BroadcastToAll(NoticePacketWriter.Broadcast($"### [EVENT] {contestName} registration has been CANCELLED! ###"));
             }
-        }
-
-        if (_templeEvent == TempleEvent.JuraidMountain || juraidMountainService.HasActiveMatches)
-        {
-            await juraidMountainService.CancelAllMatchesAsync();
-        }
-
-        if (_templeEvent == TempleEvent.BorderDefenseWar || borderDefenseWarService.HasActiveMatches)
-        {
-            await borderDefenseWarService.CancelAllMatchesAsync();
-        }
-
-        if (_templeEvent == TempleEvent.Chaos || chaosDungeonService.HasActiveMatches)
-        {
-            await chaosDungeonService.CancelAllMatchesAsync();
-        }
-
-        if (_templeEvent == TempleEvent.UnderTheCastle || underTheCastleService.IsActive)
-        {
-            await underTheCastleService.CloseAsync();
-        }
-
-        if (_templeEvent == TempleEvent.ForgottenTemple || forgottenTempleService.IsActive)
-        {
-            await forgottenTempleService.CloseAsync();
-        }
-
-        byte[] eventZones = [(byte)ZoneId.JuradMountain, (byte)ZoneId.BorderDefenseWar, (byte)ZoneId.ChaosDungeon, (byte)ZoneId.UnderCastle, (byte)ZoneId.ForgottenTemple];
-        foreach (var ez in eventZones)
-        {
-            var playersInZone = sessionManager.GetAll().Where(s => s.ZoneId == ez).ToList();
-            foreach (var s in playersInZone)
+            else
             {
-                try
-                {
-                    await zoneTransitionService.ChangeZoneAsync(s, (byte)ZoneId.Moradon, 0f, 0f);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Failed to warp player {Name} out of event zone {Zone}", s.Name, ez);
-                }
+                await sessionManager.BroadcastToAll(NoticePacketWriter.Broadcast($"### [EVENT] {contestName} has been CANCELLED! Returning players to Moradon... ###"));
             }
+
+            await CloseContestAsync(run.Contest, rewarded: false);
+            await SendZoneHomeAsync(run.Zone);
         }
 
-        _templeEvent = TempleEvent.None;
-        _templeEventZone = 0;
-        _templeEventJoinOpen = false;
-        _templeParticipants.Clear();
-        return true;
+        return cancelled.Count > 0;
     }
 }

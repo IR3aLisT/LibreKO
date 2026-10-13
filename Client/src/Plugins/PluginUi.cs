@@ -260,7 +260,7 @@ public sealed class PluginUi
         "equipview", "exchange", "fishinghall", "forces", "fortune", "genie", "globalmap",
         "inventory", "itemcombine", "kingballot", "kingelection", "kingnominate", "kingplan", "kingvote", "lottery",
         "mail", "mailcompose", "mailread", "marketprice", "merchantmenu", "messenger", "namechange", "nation_chat",
-        "nation_chat_create", "nation_chat_members", "nation_chat_password", "nation_chat_search", "nationintro",
+        "nation_chat_create", "nation_chat_password", "nationintro",
         "nationtax", "nationtaxrate", "npc_dialog", "party", "pet", "piecechange", "presets", "quest_available",
         "quest_receipt", "quest_target", "quests", "rank", "rebirth", "repair", "report", "repurchase", "roulette", "seal",
         "seek_party", "sellstall", "shop", "shoppingmall", "siegechallengers", "siegedefenders", "siegeguard",

@@ -639,7 +639,7 @@ public partial class World
 
     private bool HotbarUsable(SkillData.Skill s, double now)
     {
-        if (!SkillReady(s, now) || !SkillRequirementMet(s)) return false;
+        if (ChaosBattleLocked || !SkillReady(s, now) || !SkillRequirementMet(s)) return false;
         var gear = SelfGear();
         if (!SkillUsable.GearAllows(s.NeedWeapon, HeldItemClass(gear, InventoryConstants.VisRightHand),
                 HeldItemClass(gear, InventoryConstants.VisLeftHand))) return false;
@@ -647,9 +647,12 @@ public partial class World
         if (!SkillUsable.BuffAllows(s.NeedBuffSkill, id => Net.I.BuffEnds.TryGetValue(id, out double end) && end > now)) return false;
         if (s.Id is CoinSkillA or CoinSkillB && Sheet.Gold < CoinSkillFloor) return false;
         if (!SoccerSkillAllowed(s)) return false;
-        if (s.UseItem == 0 || s.IsResurrect || ItemData.Get(s.UseItem) == null) return true;
-        return CountInBackpack(s.ConsumedItem) >= (s.IsRanged ? Mathf.Max(1, s.NeedArrow) : 1);
+        return SkillItemHeld(s);
     }
+
+    private bool SkillItemHeld(SkillData.Skill s) =>
+        s.UseItem == 0 || s.IsResurrect || ItemData.Get(s.UseItem) == null
+        || CountInBackpack(s.ConsumedItem) >= (s.IsRanged ? Mathf.Max(1, s.NeedArrow) : 1);
 
     private void SaveHotbar()
     {
@@ -852,7 +855,7 @@ public partial class World
         private static readonly Color FilledColor = new(0.07f, 0.08f, 0.10f, 0.92f);
         private static readonly Color SlotBorder = new(0.32f, 0.34f, 0.40f);
         private static readonly Color EmptyBorder = new(0.32f, 0.34f, 0.40f, 0.35f);
-        private static readonly Color DimColor = new(0.5f, 0.5f, 0.5f);
+        public static readonly Color DimColor = new(0.5f, 0.5f, 0.5f);
         private static readonly Color ShortColor = new(1f, 0.42f, 0.36f);
         private static readonly Color KeyColor = new("6cff6c");
 

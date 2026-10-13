@@ -134,4 +134,17 @@ public class RespawnBlinkTests : GameTestBase
         RespawnBlinkService.AllowsSkill(new MagicData { Id = 490010, Type1 = (byte)MagicSkillType.OverTime }).Should().BeTrue();
         RespawnBlinkService.AllowsSkill(new MagicData { Id = Strike, Type1 = (byte)MagicSkillType.Melee }).Should().BeFalse();
     }
+
+    [Fact]
+    public void NoChaosSkillWhileBlinking()
+    {
+        RespawnBlinkService.AllowsSkill(new MagicData
+        {
+            Id = 490222, Type1 = (byte)MagicSkillType.OverTime, Skill = ChaosRules.ChaosSkillTree,
+        }).Should().BeFalse();
+        RespawnBlinkService.AllowsSkill(new MagicData
+        {
+            Id = 490223, Type1 = (byte)MagicSkillType.Buff, Skill = ChaosRules.ChaosSkillTree,
+        }).Should().BeFalse();
+    }
 }

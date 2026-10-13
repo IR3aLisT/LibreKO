@@ -52,7 +52,7 @@ public sealed class RoomMediaTests : IDisposable
         var options = Options.Create(_settings);
         _history = new ChatRoomHistory(_provider.GetRequiredService<IServiceScopeFactory>(), options,
             Substitute.For<ILogger<ChatRoomHistory>>(), _clock);
-        _rooms = new NationChatService(_sessions, _history, Substitute.For<ILogger<NationChatService>>());
+        _rooms = new NationChatService(_sessions, _history, Substitute.For<ILogger<NationChatService>>(), options, _clock);
         var relay = new VoiceRelayService(_roster, _sessions, options, Substitute.For<ILogger<VoiceRelayService>>(), _clock);
         _media = new RoomMediaService(_sessions, _rooms, _history, _roster, relay, options,
             Substitute.For<ILogger<RoomMediaService>>(), _clock);
@@ -183,13 +183,14 @@ public sealed class RoomMediaTests : IDisposable
 
     internal static readonly byte[] Wave = Enumerable.Range(0, ChatRoomMessage.WaveformMaxSamples).Select(i => (byte)(i * 4)).ToArray();
 
-    private async Task<byte> Upload(UserSession who, byte[] file, int durationDs, int chunk = 1000)
+    private async Task<byte> Upload(UserSession who, byte[] file, int durationDs, int chunk = 1000, string partner = "")
     {
         var begin = Media(RoomMediaPacketWriter.NoteBegin);
         begin.WriteUShort((ushort)durationDs);
         begin.WriteUInt((uint)file.Length);
         begin.WriteByte((byte)Wave.Length);
         begin.WriteBytes(Wave);
+        if (partner.Length > 0) begin.WriteString(partner);
         await ToMedia(who, begin);
         var started = LastMedia(who.CharacterId, RoomMediaPacketWriter.NoteBegin);
         byte result = started.ReadByte();
@@ -617,5 +618,231 @@ public sealed class RoomMediaTests : IDisposable
         await EnterPublic(pub, 3);
         _rooms.TryGetSeat(2, out var channel).Should().BeTrue();
         channel.Key.Should().Be("pub:3");
+    }
+
+    private static Packet ReactTo(long messageId, string emoji)
+    {
+        var packet = Media(RoomMediaPacketWriter.React);
+        packet.WriteLong(messageId);
+        packet.WriteString(emoji);
+        return packet;
+    }
+
+    private static (long Id, int Who, string Name, string Emoji) ReadReaction(Packet packet) =>
+        (packet.ReadLong(), packet.ReadInt(), packet.ReadString(), packet.ReadString());
+
+    private static (long Id, ChatRoomMessageKind Kind, int Sender, string Name, string Text) ReadRowHead(Packet packet)
+    {
+        long id = packet.ReadLong();
+        var kind = (ChatRoomMessageKind)packet.ReadByte();
+        int sender = packet.ReadInt();
+        string name = packet.ReadString();
+        packet.ReadUInt();
+        return (id, kind, sender, name, kind == ChatRoomMessageKind.Text ? packet.ReadString() : "");
+    }
+
+    private static Packet Keep(bool on)
+    {
+        var packet = Media(RoomMediaPacketWriter.Kept);
+        packet.WriteByte((byte)(on ? 1 : 0));
+        return packet;
+    }
+
+    private static Packet DirectHistory(string partner, long before = 0)
+    {
+        var packet = Media(RoomMediaPacketWriter.DirectHistory);
+        packet.WriteString(partner);
+        packet.WriteLong(before);
+        return packet;
+    }
+
+    [Fact]
+    public async Task ARoomLineIsTaggedWithItsStoredIdForEveryMember()
+    {
+        var owner = Player(1);
+        var friend = Player(2);
+        ushort roomId = await CreateRoom(owner);
+        await EnterRoom(friend, roomId);
+
+        await _rooms.SayAsync(owner, roomId, "hello room");
+
+        foreach (int member in new[] { 1, 2 })
+        {
+            var row = ReadRowHead(LastMedia(member, RoomMediaPacketWriter.Stored));
+            row.Id.Should().BePositive();
+            row.Should().Be((row.Id, ChatRoomMessageKind.Text, 1, "Player1", "hello room"));
+        }
+    }
+
+    [Fact]
+    public async Task MembersReactOnceEachAndTheRoomSeesEveryChange()
+    {
+        var owner = Player(1);
+        var friend = Player(2);
+        var outsider = Player(3);
+        ushort roomId = await CreateRoom(owner);
+        await EnterRoom(friend, roomId);
+        await EnterPublic(outsider, 1);
+        await _rooms.SayAsync(owner, roomId, "react to me");
+        long id = LastMedia(1, RoomMediaPacketWriter.Stored).ReadLong();
+
+        await ToMedia(friend, ReactTo(id, "❤"));
+        ReadReaction(LastMedia(1, RoomMediaPacketWriter.React)).Should().Be((id, 2, "Player2", "❤"));
+        ReadReaction(LastMedia(2, RoomMediaPacketWriter.React)).Should().Be((id, 2, "Player2", "❤"));
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await ToMedia(friend, ReactTo(id, "❤"));
+        MediaOf(1, RoomMediaPacketWriter.React).Should().HaveCount(1, "the same reaction twice changes nothing");
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await ToMedia(friend, ReactTo(id, "🙏"));
+        ReadReaction(LastMedia(1, RoomMediaPacketWriter.React)).Emoji.Should().Be("🙏");
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await ToMedia(outsider, ReactTo(id, "😂"));
+        MediaOf(1, RoomMediaPacketWriter.React).Should().HaveCount(2, "someone outside the room cannot react");
+
+        var late = Player(4);
+        await EnterRoom(late, roomId);
+        var ask = Media(RoomMediaPacketWriter.History);
+        ask.WriteLong(0);
+        await ToMedia(late, ask);
+        var reactions = LastMedia(4, RoomMediaPacketWriter.Reactions);
+        reactions.ReadUShort().Should().Be(1);
+        ReadReaction(reactions).Should().Be((id, 2, "Player2", "🙏"));
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        await ToMedia(friend, ReactTo(id, ""));
+        ReadReaction(LastMedia(4, RoomMediaPacketWriter.React)).Should().Be((id, 2, "Player2", ""));
+        using var scope = _provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<AppDbContext>().ChatRoomReactions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WhispersAreStoredForBothSidesAndComeBackAsHistory()
+    {
+        var sender = Player(1);
+        var receiver = Player(2);
+        var stranger = Player(3);
+
+        await _media.WhisperSentAsync(sender, receiver, "psst");
+
+        var toSender = LastMedia(1, RoomMediaPacketWriter.DirectStored);
+        toSender.ReadString().Should().Be("Player2");
+        var row = ReadRowHead(toSender);
+        row.Should().Be((row.Id, ChatRoomMessageKind.Text, 1, "Player1", "psst"));
+        var toReceiver = LastMedia(2, RoomMediaPacketWriter.DirectStored);
+        toReceiver.ReadString().Should().Be("Player1");
+        toReceiver.ReadLong().Should().Be(row.Id);
+
+        await ToMedia(receiver, DirectHistory("Player1"));
+        var page = LastMedia(2, RoomMediaPacketWriter.DirectHistory);
+        page.ReadString().Should().Be("Player1");
+        page.ReadByte().Should().Be(1);
+        ReadRowHead(page).Text.Should().Be("psst");
+        page.ReadByte().Should().Be(0);
+
+        await ToMedia(stranger, DirectHistory("Player1"));
+        var empty = LastMedia(3, RoomMediaPacketWriter.DirectHistory);
+        empty.ReadString();
+        empty.ReadByte().Should().Be(0);
+
+        await ToMedia(receiver, ReactTo(row.Id, "😂"));
+        ReadReaction(LastMedia(1, RoomMediaPacketWriter.React)).Should().Be((row.Id, 2, "Player2", "😂"));
+        await ToMedia(stranger, ReactTo(row.Id, "👍"));
+        MediaOf(3, RoomMediaPacketWriter.React).Should().BeEmpty();
+        MediaOf(1, RoomMediaPacketWriter.React).Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task AVoiceNoteToAWhisperPartnerReachesBothAndOnlyThem()
+    {
+        var sender = Player(1);
+        var receiver = Player(2);
+        var stranger = Player(3);
+        var file = OggOpus(channels: 1, durationMs: 3000, bodyBytes: 5000);
+
+        (await Upload(sender, file, 30, partner: "Player2")).Should().Be(RoomMediaResults.Ok);
+
+        var posted = LastMedia(2, RoomMediaPacketWriter.DirectStored);
+        posted.ReadString().Should().Be("Player1");
+        var row = ReadRowHead(posted);
+        row.Kind.Should().Be(ChatRoomMessageKind.VoiceNote);
+        LastMedia(1, RoomMediaPacketWriter.DirectStored).ReadString().Should().Be("Player2");
+
+        var fetch = Media(RoomMediaPacketWriter.NoteFetch);
+        fetch.WriteLong(row.Id);
+        await ToMedia(receiver, fetch);
+        LastMedia(2, RoomMediaPacketWriter.NoteFetch).ReadByte().Should().Be(RoomMediaResults.Ok);
+        await ToMedia(stranger, fetch);
+        LastMedia(3, RoomMediaPacketWriter.NoteFetch).ReadByte().Should().Be(RoomMediaResults.NotFound);
+
+        _clock.Advance(TimeSpan.FromSeconds(_settings.ChatRooms.NoteMinIntervalSeconds));
+        receiver.BlockPrivateChat = true;
+        (await Upload(sender, file, 30, partner: "Player2")).Should().Be(RoomMediaResults.Blocked);
+        (await Upload(sender, file, 30, partner: "Nobody")).Should().Be(RoomMediaResults.PartnerAway);
+    }
+
+    [Fact]
+    public async Task AKeptRoomOutlivesItsMembersAndARestart()
+    {
+        var owner = Player(1);
+        var friend = Player(2);
+        ushort roomId = await CreateRoom(owner);
+        await EnterRoom(friend, roomId);
+        _rooms.TryGetSeat(1, out var seat).Should().BeTrue();
+
+        await ToMedia(friend, Keep(true));
+        LastMedia(2, RoomMediaPacketWriter.Kept).ReadByte().Should().Be(RoomMediaResults.NotLeader);
+        await ToMedia(owner, Keep(true));
+        foreach (int member in new[] { 1, 2 })
+        {
+            var kept = LastMedia(member, RoomMediaPacketWriter.Kept);
+            kept.ReadByte().Should().Be(RoomMediaResults.Ok);
+            kept.ReadByte().Should().Be(1);
+        }
+
+        await ToRooms(owner, Nation(NationChatPacketWriter.PrivateLeave));
+        await ToRooms(friend, Nation(NationChatPacketWriter.PrivateLeave));
+        await EnterRoom(friend, roomId);
+        _rooms.TryGetSeat(2, out var back).Should().BeTrue("a kept room stays open when it empties");
+        back.Key.Should().Be(seat.Key);
+        back.OwnerId.Should().Be(1, "the leader keeps the lead while away");
+        await ToRooms(friend, Nation(NationChatPacketWriter.PrivateLeave));
+
+        var restarted = new NationChatService(_sessions, _history, Substitute.For<ILogger<NationChatService>>(), Options.Create(_settings), _clock);
+        await restarted.RestoreKeptAsync();
+        var enter = Nation(NationChatPacketWriter.PrivateEnter);
+        enter.WriteUShort(NationChatService.PrivateRoomIdBase);
+        enter.WriteByte(0);
+        enter.ResetOffset();
+        await restarted.HandleAsync(owner.Client, enter);
+        restarted.TryGetSeat(1, out var restored).Should().BeTrue();
+        restored.Key.Should().Be(seat.Key);
+        restored.OwnerId.Should().Be(1);
+
+        await restarted.SetKeptAsync(owner, false);
+        using var scope = _provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<AppDbContext>().KeptChatRooms.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task KeptRoomsAreCappedPerLeaderAndPrunedWhenUnused()
+    {
+        _settings.ChatRooms.KeptRoomsPerCharacter = 1;
+        var owner = Player(1);
+        ushort first = await CreateRoom(owner);
+        await ToMedia(owner, Keep(true));
+        await ToRooms(owner, Nation(NationChatPacketWriter.PrivateLeave));
+        await CreateRoom(owner);
+
+        await ToMedia(owner, Keep(true));
+        LastMedia(1, RoomMediaPacketWriter.Kept).ReadByte().Should().Be(RoomMediaResults.KeptLimit);
+
+        _clock.Advance(TimeSpan.FromDays(_settings.ChatRooms.HistoryDays + 1));
+        (await _rooms.PruneKeptAsync(_clock.GetUtcNow().UtcDateTime.AddDays(-_settings.ChatRooms.HistoryDays))).Should().Be(1);
+        var visitor = Player(2);
+        await EnterRoom(visitor, first);
+        _rooms.TryGetSeat(2, out _).Should().BeFalse();
     }
 }

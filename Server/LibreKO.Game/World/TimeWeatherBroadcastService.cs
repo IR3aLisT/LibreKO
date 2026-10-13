@@ -1,4 +1,4 @@
-using LibreKO.Common.Enums;
+﻿using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Common.Gameplay;
 using Microsoft.Extensions.Hosting;
@@ -108,6 +108,8 @@ public class TimeWeatherBroadcastService(
 
     public void SetTimeOfDay(int hour, int minute) =>
         _minuteOffset = Wrap(hour * 60 + minute - EpochMinuteOfDay);
+
+    public void ResetTimeOfDay() => _minuteOffset = 0;
 
     public static bool TryParseTimeOfDay(string text, out int hour, out int minute)
     {

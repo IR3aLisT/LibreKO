@@ -1,4 +1,5 @@
 ﻿using Godot;
+using LibreKO.Domain;
 using LibreKO.Network;
 
 namespace LibreKO;
@@ -581,12 +582,13 @@ public partial class World
 
     private static (int Id, Color Dye) ResolveCape(int capeId, int r, int g, int b, bool isGm)
     {
-        if (isGm || capeId == Cape.GmCapeId) return (Cape.GmCapeId, Colors.White);
-        return (capeId, new Color(r / 255f, g / 255f, b / 255f));
+        int worn = GmCape.Worn(capeId, isGm);
+        if (worn == GmCape.Id) return (worn, Colors.White);
+        return (worn, new Color(r / 255f, g / 255f, b / 255f));
     }
 
-    private static void DressCape(Node3D? body, int capeId, int r, int g, int b, bool isGm, int race,
-                                  bool highDetail = false)
+    private void DressCape(Node3D? body, int capeId, int r, int g, int b, bool isGm, int race,
+                           bool highDetail = false)
     {
         if (body == null || !GodotObject.IsInstanceValid(body)) return;
         var (look, lookRace) = AccessoryHostFor(body, race);
@@ -600,7 +602,7 @@ public partial class World
         race = lookRace;
         var (id, dye) = ResolveCape(capeId, r, g, b, isGm);
         var existing = body.GetNodeOrNull<Cape>("Cape");
-        if (!Cape.Enabled || !Cape.IsRenderable(id))
+        if (!Cape.Enabled || !Cape.IsRenderable(id) || !ChaosBattle.ShowsCapes(_zone))
         {
             existing?.QueueFree();
             return;
@@ -630,7 +632,7 @@ public partial class World
                + $"cloth={_selfVisual?.GetNodeOrNull<Cape>("Cape")?.Resolution ?? "-"}");
     }
 
-    private static void DressEntityCape(Node3D body, EntitySnapshot info)
+    private void DressEntityCape(Node3D body, EntitySnapshot info)
     {
         if (info.IsNpc) return;
         DressCape(body, info.CapeId, info.CapeR, info.CapeG, info.CapeB, info.IsGm, info.Race);

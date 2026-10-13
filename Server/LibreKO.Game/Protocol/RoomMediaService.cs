@@ -12,17 +12,21 @@ namespace LibreKO.Game.Protocol;
 public interface IRoomMediaService
 {
     Task HandleAsync(IClient client, Packet packet);
+    Task WhisperSentAsync(UserSession from, UserSession to, string text);
 }
 
 public sealed class RoomMediaService : IRoomMediaService
 {
     public const int NoteLengthSlackMs = 500;
     public const int DecisecondsPerSecond = 10;
+    public const int ReactionMinIntervalMs = 250;
+    public const int PartnerNameMaxLength = 20;
 
-    private sealed class Upload(uint id, string roomKey, int size, byte[] waveform)
+    private sealed class Upload(uint id, string roomKey, int partnerId, int size, byte[] waveform)
     {
         public uint Id { get; } = id;
         public string RoomKey { get; } = roomKey;
+        public int PartnerId { get; } = partnerId;
         public byte[] Waveform { get; } = waveform;
         public byte[] Data { get; } = new byte[size];
         public int Received { get; set; }
@@ -48,6 +52,7 @@ public sealed class RoomMediaService : IRoomMediaService
     private readonly Dictionary<int, Upload> _uploads = [];
     private readonly Dictionary<int, NoteQuota> _quotas = [];
     private readonly HashSet<(string RoomKey, int CharacterId)> _silenced = [];
+    private readonly Dictionary<int, long> _lastReaction = [];
     private uint _nextUpload;
 
     public RoomMediaService(
@@ -82,6 +87,9 @@ public sealed class RoomMediaService : IRoomMediaService
         switch (sub)
         {
             case RoomMediaPacketWriter.History: await SendHistoryAsync(session, packet); break;
+            case RoomMediaPacketWriter.React: await ReactAsync(session, packet); break;
+            case RoomMediaPacketWriter.Kept: await KeepAsync(session, packet); break;
+            case RoomMediaPacketWriter.DirectHistory: await SendDirectHistoryAsync(session, packet); break;
             case RoomMediaPacketWriter.NoteBegin: await BeginNoteAsync(session, packet); break;
             case RoomMediaPacketWriter.NoteChunk: await TakeChunkAsync(session, packet); break;
             case RoomMediaPacketWriter.NoteEnd: await EndNoteAsync(session, packet); break;
@@ -109,10 +117,114 @@ public sealed class RoomMediaService : IRoomMediaService
             await session.Client.SendPacket(RoomMediaPacketWriter.HistoryPage([], false));
             return;
         }
-        var rows = await _history.PageAsync(seat.Key, before, RoomMediaPacketWriter.HistoryPageMax + 1);
-        bool more = rows.Count > RoomMediaPacketWriter.HistoryPageMax;
-        var page = more ? rows.Skip(rows.Count - RoomMediaPacketWriter.HistoryPageMax).ToList() : rows;
+        var (page, more) = await PageOfAsync(seat.Key, before);
         await session.Client.SendPacket(RoomMediaPacketWriter.HistoryPage(page, more));
+        await SendReactionsAsync(session, page);
+    }
+
+    private async Task SendDirectHistoryAsync(UserSession session, Packet packet)
+    {
+        if (packet.RemainingBytes < 2) return;
+        string partnerName = packet.ReadString();
+        if (packet.RemainingBytes < 8 || partnerName.Length is 0 or > PartnerNameMaxLength) return;
+        long before = packet.ReadLong();
+        int partnerId = _sessions.GetByName(partnerName)?.CharacterId ?? await _history.CharacterIdOfAsync(partnerName);
+        if (partnerId == 0 || partnerId == session.CharacterId)
+        {
+            await session.Client.SendPacket(RoomMediaPacketWriter.DirectPage(partnerName, [], false));
+            return;
+        }
+        var (page, more) = await PageOfAsync(ChatRoomKeys.Direct(session.CharacterId, partnerId), before);
+        await session.Client.SendPacket(RoomMediaPacketWriter.DirectPage(partnerName, page, more));
+        await SendReactionsAsync(session, page);
+    }
+
+    private async Task<(IReadOnlyList<ChatRoomMessage> Page, bool More)> PageOfAsync(string key, long before)
+    {
+        var rows = await _history.PageAsync(key, before, RoomMediaPacketWriter.HistoryPageMax + 1);
+        bool more = rows.Count > RoomMediaPacketWriter.HistoryPageMax;
+        return (more ? rows.Skip(rows.Count - RoomMediaPacketWriter.HistoryPageMax).ToList() : rows, more);
+    }
+
+    private async Task SendReactionsAsync(UserSession session, IReadOnlyList<ChatRoomMessage> page)
+    {
+        var reactions = await _history.ReactionsOfAsync(page.Select(row => row.Id).ToList());
+        if (reactions.Count > 0)
+            await session.Client.SendPacket(RoomMediaPacketWriter.ReactionList(reactions));
+    }
+
+    public async Task WhisperSentAsync(UserSession from, UserSession to, string text)
+    {
+        if (from.IsBot || to.IsBot) return;
+        ChatRoomMessage line;
+        try
+        {
+            line = await _history.AppendTextAsync(ChatRoomKeys.Direct(from.CharacterId, to.CharacterId), from.CharacterId, from.Name, text);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Whisper from {Name} was not stored", from.Name);
+            return;
+        }
+        await SendDirectAsync(from, to, line);
+    }
+
+    private async Task SendDirectAsync(UserSession from, UserSession to, ChatRoomMessage row)
+    {
+        await SendToAsync([from.CharacterId], RoomMediaPacketWriter.DirectRow(to.Name, row));
+        await SendToAsync([to.CharacterId], RoomMediaPacketWriter.DirectRow(from.Name, row));
+    }
+
+    private async Task ReactAsync(UserSession session, Packet packet)
+    {
+        if (packet.RemainingBytes < 10) return;
+        long messageId = packet.ReadLong();
+        string emoji = packet.ReadString().Trim();
+        if (emoji.Length > ChatRoomReaction.EmojiMaxLength || emoji.Any(char.IsControl)) return;
+        long now = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+        lock (_gate)
+        {
+            if (_lastReaction.TryGetValue(session.CharacterId, out long last) && now - last < ReactionMinIntervalMs) return;
+            _lastReaction[session.CharacterId] = now;
+        }
+        var message = await _history.FindAsync(messageId);
+        if (message == null) return;
+        IEnumerable<int> audience;
+        int partner = ChatRoomKeys.PartnerOf(message.RoomKey, session.CharacterId);
+        if (partner != 0) audience = [session.CharacterId, partner];
+        else if (_rooms.TryGetSeat(session.CharacterId, out var seat) && seat.Key == message.RoomKey) audience = seat.Members;
+        else return;
+        if (!await _history.ReactAsync(messageId, session.CharacterId, session.Name, emoji)) return;
+        await SendToAsync(audience, RoomMediaPacketWriter.Reaction(messageId, session.CharacterId, session.Name, emoji));
+    }
+
+    private async Task KeepAsync(UserSession session, Packet packet)
+    {
+        if (packet.RemainingBytes < 1) return;
+        await _rooms.SetKeptAsync(session, packet.ReadByte() != 0);
+    }
+
+    private byte DirectRefusal(UserSession session, string partnerName, out UserSession? partner)
+    {
+        partner = partnerName.Length is 0 or > PartnerNameMaxLength ? null : _sessions.GetByName(partnerName);
+        if (session.BlockPrivateChat) return RoomMediaResults.Blocked;
+        if (partner == null || partner == session) return RoomMediaResults.PartnerAway;
+        if (partner.BlockPrivateChat) return RoomMediaResults.Blocked;
+        return RoomMediaResults.Ok;
+    }
+
+    private (byte Result, string Key, int PartnerId) NoteTarget(UserSession session, string partnerName)
+    {
+        if (partnerName.Length > 0)
+        {
+            byte refusal = DirectRefusal(session, partnerName, out var partner);
+            return refusal == RoomMediaResults.Ok
+                ? (refusal, ChatRoomKeys.Direct(session.CharacterId, partner!.CharacterId), partner.CharacterId)
+                : (refusal, "", 0);
+        }
+        return _rooms.TryGetSeat(session.CharacterId, out var seat)
+            ? (RoomMediaResults.Ok, seat.Key, 0)
+            : (RoomMediaResults.NotInRoom, "", 0);
     }
 
     private async Task BeginNoteAsync(UserSession session, Packet packet)
@@ -127,25 +239,27 @@ public sealed class RoomMediaService : IRoomMediaService
             if (samples > ChatRoomMessage.WaveformMaxSamples || samples > packet.RemainingBytes) return;
             waveform = packet.ReadBytes(samples);
         }
-        byte result;
+        string partnerName = packet.RemainingBytes >= 2 ? packet.ReadString() : "";
         uint uploadId = 0;
         var now = _clock.GetUtcNow().UtcDateTime;
-        if (!_rooms.TryGetSeat(session.CharacterId, out var seat)) result = RoomMediaResults.NotInRoom;
-        else if (Silenced(session)) result = RoomMediaResults.Silenced;
-        else if (durationDs > Settings.NoteMaxSeconds * DecisecondsPerSecond) result = RoomMediaResults.TooLong;
-        else if (size <= 0 || size > Settings.NoteMaxBytes) result = RoomMediaResults.TooBig;
-        else
+        var (result, key, partnerId) = NoteTarget(session, partnerName);
+        if (result == RoomMediaResults.Ok)
         {
-            lock (_gate)
+            if (Silenced(session)) result = RoomMediaResults.Silenced;
+            else if (durationDs > Settings.NoteMaxSeconds * DecisecondsPerSecond) result = RoomMediaResults.TooLong;
+            else if (size <= 0 || size > Settings.NoteMaxBytes) result = RoomMediaResults.TooBig;
+            else
             {
-                var quota = QuotaOf(session.CharacterId, now);
-                if ((now - quota.Last).TotalSeconds < Settings.NoteMinIntervalSeconds) result = RoomMediaResults.TooSoon;
-                else if (quota.Count >= Settings.NotesPerDay) result = RoomMediaResults.DailyLimit;
-                else
+                lock (_gate)
                 {
-                    uploadId = ++_nextUpload;
-                    _uploads[session.CharacterId] = new Upload(uploadId, seat.Key, size, waveform);
-                    result = RoomMediaResults.Ok;
+                    var quota = QuotaOf(session.CharacterId, now);
+                    if ((now - quota.Last).TotalSeconds < Settings.NoteMinIntervalSeconds) result = RoomMediaResults.TooSoon;
+                    else if (quota.Count >= Settings.NotesPerDay) result = RoomMediaResults.DailyLimit;
+                    else
+                    {
+                        uploadId = ++_nextUpload;
+                        _uploads[session.CharacterId] = new Upload(uploadId, key, partnerId, size, waveform);
+                    }
                 }
             }
         }
@@ -187,12 +301,16 @@ public sealed class RoomMediaService : IRoomMediaService
         {
             if (!_uploads.Remove(session.CharacterId, out upload) || upload.Id != id) upload = null;
         }
-        byte result = RoomMediaResults.Ok;
         OggOpusInfo info = default;
-        if (upload == null || upload.Received != upload.Data.Length) result = RoomMediaResults.BadUpload;
-        else if (!_rooms.TryGetSeat(session.CharacterId, out var seat) || seat.Key != upload.RoomKey) result = RoomMediaResults.NotInRoom;
-        else if (!OggOpusInfo.TryRead(upload.Data, out info) || info.Channels != 1) result = RoomMediaResults.BadUpload;
-        else if (info.DurationMs > Settings.NoteMaxSeconds * 1000 + NoteLengthSlackMs) result = RoomMediaResults.TooLong;
+        UserSession? partner = null;
+        byte result = upload == null || upload.Received != upload.Data.Length
+            ? RoomMediaResults.BadUpload
+            : UploadTargetRefusal(session, upload, out partner);
+        if (result == RoomMediaResults.Ok)
+        {
+            if (!OggOpusInfo.TryRead(upload!.Data, out info) || info.Channels != 1) result = RoomMediaResults.BadUpload;
+            else if (info.DurationMs > Settings.NoteMaxSeconds * 1000 + NoteLengthSlackMs) result = RoomMediaResults.TooLong;
+        }
         if (result != RoomMediaResults.Ok)
         {
             await session.Client.SendPacket(RoomMediaPacketWriter.Result(RoomMediaPacketWriter.NoteEnd, result));
@@ -217,9 +335,26 @@ public sealed class RoomMediaService : IRoomMediaService
             quota.Count++;
         }
         await session.Client.SendPacket(RoomMediaPacketWriter.Result(RoomMediaPacketWriter.NoteEnd, RoomMediaResults.Ok));
-        if (_rooms.TryGetSeat(session.CharacterId, out var room))
+        if (partner != null)
+            await SendDirectAsync(session, partner, note);
+        else if (_rooms.TryGetSeat(session.CharacterId, out var room))
             await SendToAsync(room.Members, RoomMediaPacketWriter.PostedRow(note));
     }
+
+    private byte UploadTargetRefusal(UserSession session, Upload upload, out UserSession? partner)
+    {
+        partner = null;
+        if (upload.PartnerId == 0)
+            return _rooms.TryGetSeat(session.CharacterId, out var seat) && seat.Key == upload.RoomKey
+                ? RoomMediaResults.Ok
+                : RoomMediaResults.NotInRoom;
+        var online = _sessions.GetByCharacterId(upload.PartnerId);
+        return online == null ? RoomMediaResults.PartnerAway : DirectRefusal(session, online.Name, out partner);
+    }
+
+    private bool CanRead(UserSession session, string roomKey) =>
+        ChatRoomKeys.PartnerOf(roomKey, session.CharacterId) != 0
+        || _rooms.TryGetSeat(session.CharacterId, out var seat) && seat.Key == roomKey;
 
     private async Task FetchNoteAsync(UserSession session, Packet packet)
     {
@@ -227,7 +362,7 @@ public sealed class RoomMediaService : IRoomMediaService
         long noteId = packet.ReadLong();
         var note = await _history.FindNoteAsync(noteId);
         byte[]? file = null;
-        if (note != null && _rooms.TryGetSeat(session.CharacterId, out var seat) && seat.Key == note.RoomKey)
+        if (note != null && CanRead(session, note.RoomKey))
             file = await _history.ReadNoteAsync(note);
         if (file == null)
         {
@@ -359,7 +494,7 @@ public sealed class RoomMediaService : IRoomMediaService
     {
         lock (_gate)
         {
-            _uploads.Remove(characterId);
+            if (_uploads.TryGetValue(characterId, out var upload) && upload.PartnerId == 0) _uploads.Remove(characterId);
             _silenced.Remove((roomKey, characterId));
         }
         var member = _roster.Leave(characterId, out _);

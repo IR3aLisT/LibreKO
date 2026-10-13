@@ -2,6 +2,7 @@
 using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Game.Protocol;
 using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
 using Microsoft.Extensions.DependencyInjection;
@@ -118,11 +119,63 @@ public class ChaosDungeonTests : GameTestBase
         ranking.ReadShort().Should().Be(1);
     }
 
-    private static UserSession Player(SessionManager sessions, int id, AccountNation nation)
+    [Fact]
+    public async Task TheEntryBlinkEndsInChaosNormal()
+    {
+        using var provider = CreateProvider(_ => { },
+            gameData => gameData.GetCoefficient(Arg.Any<short>()).Returns(new CoefficientData()));
+        var sessions = provider.GetRequiredService<SessionManager>();
+        var chaos = provider.GetRequiredService<IChaosDungeonService>();
+        var sent = new List<Packet>();
+        var a = Player(sessions, 700, AccountNation.Karus, sent);
+
+        await chaos.StartMatchesAsync([700], TempleEventRules.ChaosDurationSeconds);
+        LastAbnormal(a, sent).Should().Be((int)PlayerAppearanceState.Blinking);
+
+        await provider.GetRequiredService<IRespawnBlinkService>()
+            .ExpireAsync(a, DateTime.UtcNow.AddSeconds(ChaosRules.BattleLockSeconds + 1).Ticks);
+
+        a.IsBlinking.Should().BeFalse();
+        LastAbnormal(a, sent).Should().Be((int)PlayerAppearanceState.ChaosNormal);
+    }
+
+    [Fact]
+    public async Task LeavingDuringTheBattleLockEndsTheBlinkForTheClient()
+    {
+        using var provider = CreateProvider(_ => { },
+            gameData => gameData.GetCoefficient(Arg.Any<short>()).Returns(new CoefficientData()));
+        var sessions = provider.GetRequiredService<SessionManager>();
+        var chaos = (ChaosDungeonService)provider.GetRequiredService<IChaosDungeonService>();
+        var sent = new List<Packet>();
+        var a = Player(sessions, 701, AccountNation.Karus, sent);
+
+        await chaos.StartMatchesAsync([701], TempleEventRules.ChaosDurationSeconds);
+        await chaos.OnPlayerLeavingZoneAsync(a, ChaosRules.Zone);
+
+        a.IsBlinking.Should().BeFalse();
+        LastAbnormal(a, sent).Should().Be((int)PlayerAppearanceState.Normal);
+    }
+
+    private static int? LastAbnormal(UserSession session, List<Packet> sent)
+    {
+        int? last = null;
+        foreach (var packet in sent)
+        {
+            if (packet.GetOpcode() != (byte)GameOpcodes.GS_STATE_CHANGE) continue;
+            packet.ResetOffset();
+            if (packet.ReadInt() != session.CharacterId) continue;
+            if (packet.ReadByte() != (byte)StateChangeType.Abnormal) continue;
+            last = packet.ReadInt();
+        }
+        return last;
+    }
+
+    private static UserSession Player(SessionManager sessions, int id, AccountNation nation, List<Packet>? sent = null)
     {
         var client = Substitute.For<IClient>();
         client.Id.Returns(Guid.NewGuid());
-        client.SendPacket(Arg.Any<Packet>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        client.SendPacket(sent == null ? Arg.Any<Packet>() : Arg.Do<Packet>(sent.Add), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
         var session = sessions.CreateSession(client, characterId: id, accountId: id + 1);
         session.Name = $"P{id}";
         session.Nation = nation;

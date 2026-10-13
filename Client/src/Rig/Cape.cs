@@ -11,8 +11,6 @@ public partial class Cape : MeshInstance3D, IFxTicked
 {
     public int FxSlot { get; set; } = FxTickLane.Unlisted;
 
-    public const int GmCapeId = 99;
-
     private const float RefNeckY = 1.7346f;
     private const string AssetDir = "res://assets/capes/";
 

@@ -1,8 +1,11 @@
-﻿using LibreKO.Common.Enums;
+﻿using LibreKO.Common.Domain.Entities;
+using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
+using LibreKO.Game.Configuration;
 using LibreKO.Game.Protocol.Writers;
 using LibreKO.Game.World;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace LibreKO.Game.Protocol;
 
@@ -15,13 +18,18 @@ public interface INationChatService
     Task LeaveAllAsync(UserSession session);
     bool TryGetSeat(int characterId, out ChatRoomSeat seat);
     int[] MembersOf(string roomKey);
+    Task SetKeptAsync(UserSession session, bool keep);
+    Task RestoreKeptAsync();
+    Task<int> PruneKeptAsync(DateTime unusedBefore);
     event Action<int, string>? SeatReleased;
 }
 
 public sealed class NationChatService(
     SessionManager sessionManager,
     IChatRoomHistory history,
-    ILogger<NationChatService> logger) : INationChatService
+    ILogger<NationChatService> logger,
+    IOptions<GameServerSettings>? settings = null,
+    TimeProvider? clock = null) : INationChatService
 {
     public const int PublicCapacity = 500;
     public const int TitleMaxLength = 30;
@@ -42,15 +50,24 @@ public sealed class NationChatService(
     private sealed class PrivateRoom
     {
         public ushort Id { get; init; }
-        public string Key { get; } = $"room:{Guid.NewGuid():N}";
+        public string Key { get; init; } = $"room:{Guid.NewGuid():N}";
         public string Name { get; set; } = "";
         public string Password { get; set; } = "";
         public ushort MaxMembers { get; set; }
         public int OwnerId { get; set; }
         public List<int> Members { get; } = [];
+        public bool Kept { get; set; }
+        public DateTime CreatedAt { get; init; }
+        public DateTime LastUsedAt { get; set; }
 
         public bool Locked => Password.Length > 0;
     }
+
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
+    private int KeptRoomsPerCharacter => settings?.Value.ChatRooms.KeptRoomsPerCharacter ?? new ChatRoomSettings().KeptRoomsPerCharacter;
+
+    private DateTime Now => _clock.GetUtcNow().UtcDateTime;
 
     private readonly record struct Seat(bool Public, ushort RoomId);
 
@@ -96,9 +113,120 @@ public sealed class NationChatService(
             return;
         await SendToAsync(seat.Members, NationChatPacketWriter.Say(session.CharacterId, session.Name, text, session.ZoneId));
         if (session.IsBot) return;
-        try { await history.AppendTextAsync(seat.Key, session.CharacterId, session.Name, text); }
+        ChatRoomMessage? line = null;
+        try { line = await history.AppendTextAsync(seat.Key, session.CharacterId, session.Name, text); }
         catch (Exception ex) { logger.LogWarning(ex, "Room line from {Name} was not stored", session.Name); }
+        if (line != null)
+            await SendToAsync(MembersOf(seat.Key), RoomMediaPacketWriter.StoredRow(line));
     }
+
+    public async Task SetKeptAsync(UserSession session, bool keep)
+    {
+        byte result;
+        List<int> members = [];
+        KeptChatRoom? save = null;
+        string? drop = null;
+        lock (_gate)
+        {
+            if (!_seats.TryGetValue(session.CharacterId, out var seat) || seat.Public || !_rooms.TryGetValue(seat.RoomId, out var room))
+                result = RoomMediaResults.NotInRoom;
+            else if (room.OwnerId != session.CharacterId)
+                result = RoomMediaResults.NotLeader;
+            else if (keep && !room.Kept && _rooms.Values.Count(r => r.Kept && r.OwnerId == session.CharacterId) >= KeptRoomsPerCharacter)
+                result = RoomMediaResults.KeptLimit;
+            else
+            {
+                result = RoomMediaResults.Ok;
+                if (room.Kept != keep)
+                {
+                    room.Kept = keep;
+                    room.LastUsedAt = Now;
+                    members = [.. room.Members];
+                    if (keep) save = KeptRowOf(room);
+                    else drop = room.Key;
+                }
+            }
+        }
+        if (result != RoomMediaResults.Ok)
+        {
+            await session.Client.SendPacket(RoomMediaPacketWriter.KeptState(result, false));
+            return;
+        }
+        if (save != null) await SaveKeptAsync(save);
+        if (drop != null) await DropKeptAsync(drop);
+        if (members.Count > 0)
+            await SendToAsync(members, RoomMediaPacketWriter.KeptState(RoomMediaResults.Ok, keep));
+    }
+
+    public async Task RestoreKeptAsync()
+    {
+        IReadOnlyList<KeptChatRoom> rows;
+        try { rows = await history.KeptRoomsAsync(); }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Kept chat rooms could not be loaded");
+            return;
+        }
+        int restored = 0;
+        lock (_gate)
+        {
+            foreach (var row in rows)
+            {
+                if (_nextRoomId == ushort.MaxValue || _rooms.Values.Any(r => r.Key == row.RoomKey)) continue;
+                var room = new PrivateRoom
+                {
+                    Id = _nextRoomId++,
+                    Key = row.RoomKey,
+                    Name = row.Name,
+                    Password = row.Password,
+                    MaxMembers = RoomSize((ushort)Math.Clamp(row.MaxMembers, 0, ushort.MaxValue)),
+                    OwnerId = row.OwnerId,
+                    Kept = true,
+                    CreatedAt = row.CreatedAt,
+                    LastUsedAt = row.LastUsedAt,
+                };
+                _rooms[room.Id] = room;
+                restored++;
+            }
+        }
+        if (restored > 0) logger.LogInformation("Restored {Count} kept chat rooms", restored);
+    }
+
+    public async Task<int> PruneKeptAsync(DateTime unusedBefore)
+    {
+        List<string> keys;
+        lock (_gate)
+        {
+            var stale = _rooms.Values.Where(r => r.Kept && r.Members.Count == 0 && r.LastUsedAt < unusedBefore).ToList();
+            foreach (var room in stale) _rooms.Remove(room.Id);
+            keys = stale.Select(r => r.Key).ToList();
+        }
+        foreach (string key in keys) await DropKeptAsync(key);
+        return keys.Count;
+    }
+
+    private async Task SaveKeptAsync(KeptChatRoom row)
+    {
+        try { await history.SaveKeptRoomAsync(row); }
+        catch (Exception ex) { logger.LogWarning(ex, "Kept chat room {Key} was not saved", row.RoomKey); }
+    }
+
+    private async Task DropKeptAsync(string key)
+    {
+        try { await history.DeleteKeptRoomAsync(key); }
+        catch (Exception ex) { logger.LogWarning(ex, "Kept chat room {Key} was not deleted", key); }
+    }
+
+    private static KeptChatRoom KeptRowOf(PrivateRoom room) => new()
+    {
+        RoomKey = room.Key,
+        Name = room.Name,
+        Password = room.Password,
+        MaxMembers = room.MaxMembers,
+        OwnerId = room.OwnerId,
+        CreatedAt = room.CreatedAt,
+        LastUsedAt = room.LastUsedAt,
+    };
 
     public bool TryGetSeat(int characterId, out ChatRoomSeat seat)
     {
@@ -225,6 +353,8 @@ public sealed class NationChatService(
                     Password = isPrivate ? password : "",
                     MaxMembers = RoomSize(maxMembers),
                     OwnerId = session.CharacterId,
+                    CreatedAt = Now,
+                    LastUsedAt = Now,
                 };
                 room.Members.Add(session.CharacterId);
                 _rooms[room.Id] = room;
@@ -248,6 +378,8 @@ public sealed class NationChatService(
         byte result;
         List<int> others = [];
         ushort count = 0;
+        bool kept = false;
+        NationChatPacketWriter.RoomInfo? leading = null;
         lock (_gate)
         {
             _rooms.TryGetValue(roomId, out var room);
@@ -260,16 +392,21 @@ public sealed class NationChatService(
             {
                 others = [.. room.Members];
                 room.Members.Add(session.CharacterId);
+                room.LastUsedAt = Now;
                 _seats[session.CharacterId] = new Seat(false, roomId);
                 count = (ushort)room.Members.Count;
+                kept = room.Kept;
+                if (room.OwnerId == session.CharacterId) leading = InfoOf(room);
                 result = NationChatResults.Ok;
             }
         }
         await session.Client.SendPacket(result == NationChatResults.Ok
             ? NationChatPacketWriter.Entered(roomId)
             : NationChatPacketWriter.Result(NationChatPacketWriter.PrivateEnter, result));
-        if (result == NationChatResults.Ok)
-            await SendToAsync(others, NationChatPacketWriter.MemberMoved(NationChatPacketWriter.SayEntered, count, session.Name));
+        if (result != NationChatResults.Ok) return;
+        if (leading is { } info) await session.Client.SendPacket(NationChatPacketWriter.NewOwner(info));
+        await session.Client.SendPacket(RoomMediaPacketWriter.KeptState(RoomMediaResults.Ok, kept));
+        await SendToAsync(others, NationChatPacketWriter.MemberMoved(NationChatPacketWriter.SayEntered, count, session.Name));
     }
 
     private Task LeavePrivateAsync(UserSession session) => LeavePrivateAsync(session, reply: true);
@@ -280,13 +417,19 @@ public sealed class NationChatService(
         ushort count;
         UserSession? heir = null;
         PrivateRoom room;
+        KeptChatRoom? save = null;
         lock (_gate)
         {
             if (!_seats.TryGetValue(session.CharacterId, out var seat) || seat.Public || !_rooms.TryGetValue(seat.RoomId, out room!))
                 return;
             room.Members.Remove(session.CharacterId);
             _seats.Remove(session.CharacterId);
-            if (room.Members.Count == 0)
+            room.LastUsedAt = Now;
+            if (room.Kept)
+            {
+                if (room.Members.Count == 0) save = KeptRowOf(room);
+            }
+            else if (room.Members.Count == 0)
                 _rooms.Remove(room.Id);
             else if (room.OwnerId == session.CharacterId)
             {
@@ -297,6 +440,7 @@ public sealed class NationChatService(
             count = (ushort)rest.Count;
         }
         Released(session.CharacterId, room.Key);
+        if (save != null) await SaveKeptAsync(save);
         if (reply)
             await session.Client.SendPacket(NationChatPacketWriter.Result(NationChatPacketWriter.PrivateLeave, NationChatResults.Ok));
         if (rest.Count == 0) return;
@@ -333,6 +477,7 @@ public sealed class NationChatService(
             return;
 
         byte result;
+        KeptChatRoom? save = null;
         lock (_gate)
         {
             if (!_rooms.TryGetValue(roomId, out var room)) result = NationChatResults.OptionsNoRoom;
@@ -345,9 +490,11 @@ public sealed class NationChatService(
                     room.Name = name;
                     room.Password = isPrivate ? password : "";
                     room.MaxMembers = (ushort)Math.Max(RoomSize(maxMembers), room.Members.Count);
+                    if (room.Kept) save = KeptRowOf(room);
                 }
             }
         }
+        if (save != null) await SaveKeptAsync(save);
         await session.Client.SendPacket(NationChatPacketWriter.Result(NationChatPacketWriter.Options, result));
     }
 
@@ -361,6 +508,7 @@ public sealed class NationChatService(
         UserSession? heir = null;
         List<int> members = [];
         NationChatPacketWriter.RoomInfo info = default;
+        KeptChatRoom? save = null;
         lock (_gate)
         {
             if (!_rooms.TryGetValue(roomId, out var room)) result = NationChatResults.OptionsNoRoom;
@@ -373,9 +521,11 @@ public sealed class NationChatService(
                 room.OwnerId = targetId;
                 members = [.. room.Members];
                 info = InfoOf(room);
+                if (room.Kept) save = KeptRowOf(room);
                 result = NationChatResults.Ok;
             }
         }
+        if (save != null) await SaveKeptAsync(save);
         await session.Client.SendPacket(NationChatPacketWriter.Result(NationChatPacketWriter.HandOver, result));
         if (result != NationChatResults.Ok || heir == null) return;
         await heir.Client.SendPacket(NationChatPacketWriter.NewOwner(info));

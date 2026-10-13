@@ -35,6 +35,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<SheriffReportEntity> SheriffReports { get; set; }
     public DbSet<SheriffVoteEntity> SheriffVotes { get; set; }
     public DbSet<ChatRoomMessage> ChatRoomMessages { get; set; }
+    public DbSet<ChatRoomReaction> ChatRoomReactions { get; set; }
+    public DbSet<KeptChatRoom> KeptChatRooms { get; set; }
 
     // Static game data
     public DbSet<LevelUpData> LevelUp { get; set; }

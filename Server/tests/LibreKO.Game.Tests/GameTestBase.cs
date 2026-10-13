@@ -212,6 +212,7 @@ public abstract class GameTestBase
         services.AddSingleton<INpcAiMovementService, NpcAiMovementService>();
         services.AddSingleton<IMonsterAggressionPolicy, MonsterAggressionPolicy>();
         services.AddSingleton<INpcAiTargetingService, NpcAiTargetingService>();
+        services.AddSingleton<ScheduleClock>();
         services.AddSingleton<EventSchedulerService>();
         services.AddSingleton<MovementBroadcastService>();
         services.Configure<GameServerSettings>(settings =>

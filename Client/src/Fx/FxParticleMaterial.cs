@@ -40,9 +40,7 @@ internal static class FxParticleMaterial
         bool fixedY = p.ContainsKey("velAlign") && p["velAlign"].AsBool();
         bool fixedRotation = p.ContainsKey("rotAbs") && p["rotAbs"].AsBool();
         mat.SetShaderParameter("orientation", fixedRotation ? 2 : fixedY ? 1 : 0);
-        Vector3 rot = Fx.ReadVec3(p, "rot") * (Mathf.Pi / 180f);
-        Quaternion q = Basis.FromEuler(rot).GetRotationQuaternion();
-        mat.SetShaderParameter("fixed_basis", new Basis(new Quaternion(q.X, -q.Y, -q.Z, q.W)));
+        mat.SetShaderParameter("fixed_basis", Fx.FixedRotation(Fx.ReadVec3(p, "rot")));
         Vector2 grid = Vector2.One;
         if (p.ContainsKey("atlas"))
         {
@@ -180,9 +178,7 @@ void vertex() {
         right = length(right) > 0.0001 ? normalize(right) : vec3(1.0, 0.0, 0.0);
         facing = mat3(right, vec3(0.0, 1.0, 0.0), cross(right, vec3(0.0, 1.0, 0.0)));
     } else if (orientation == 2) {
-        facing = mat3(MODEL_MATRIX[0].xyz / max(birth_scale.x, 0.0001),
-                      MODEL_MATRIX[1].xyz / max(birth_scale.y, 0.0001),
-                      MODEL_MATRIX[2].xyz / max(birth_scale.z, 0.0001)) * fixed_basis;
+        facing = fixed_basis;
     }
     MODELVIEW_MATRIX = VIEW_MATRIX * mat4(vec4(facing[0], 0.0), vec4(facing[1], 0.0), vec4(facing[2], 0.0), MODEL_MATRIX[3]);
     VERTEX = point;

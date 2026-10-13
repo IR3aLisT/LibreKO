@@ -141,6 +141,7 @@ public partial class World
         ReapCorpses(now);
         CueReadySkills(now);
         UpdateHotbarReady(now);
+        ChaosSkillPageTick();
         PetBarTick(now);
         BuffBarTick(now);
         BlindTick(now);

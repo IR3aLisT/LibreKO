@@ -399,7 +399,6 @@ public static class Fx
             BoxExtent = boxExtent,
             GatherPoint = gatherPoint,
             OrbitRate = orbitRate,
-            FixedOrientation = p.ContainsKey("rotAbs") && p["rotAbs"].AsBool(),
             Start = ReadF(p, "startTime"),
             Life = ReadF(p, "life"),
             Origin = ReadVec3(p, "initPos"),
@@ -528,6 +527,12 @@ public static class Fx
     internal static Vector3 ReadSpinRate(Godot.Collections.Dictionary p) => FxSpin.RateFromBaked(ReadVec3(p, "rotVel"));
 
     internal static float ReadRollRate(Godot.Collections.Dictionary p) => FxSpin.RollFromBaked(ReadF(p, "rollRate"));
+
+    internal static Basis FixedRotation(Vector3 degrees)
+    {
+        Quaternion q = Basis.FromEuler(degrees * (Mathf.Pi / 180f), EulerOrder.Zyx).GetRotationQuaternion();
+        return new Basis(new Quaternion(q.X, -q.Y, -q.Z, q.W));
+    }
 
     internal static Basis ReadKoMatrixBasis(Godot.Collections.Dictionary p)
     {

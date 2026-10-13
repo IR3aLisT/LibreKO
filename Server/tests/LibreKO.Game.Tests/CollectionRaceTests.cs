@@ -77,6 +77,7 @@ public class CollectionRaceTests
             _userNotificationService,
             _playerProgressionService,
             _mailService,
+            new ScheduleClock(),
             Substitute.For<ILogger<CollectionRaceService>>());
     }
 

@@ -20,18 +20,21 @@ public class LotteryService : ILotteryService
     private readonly object _stateLock = new();
     private int _lastAnnouncedMinute = -1;
     private int _lastAutoCheckMinute = -1;
+    private readonly ScheduleClock _scheduleClock;
 
     public LotteryService(
         SessionManager sessionManager,
         IGameDataService gameDataService,
         IUserNotificationService userNotificationService,
         IMailService mailService,
+        ScheduleClock scheduleClock,
         ILogger<LotteryService> logger)
     {
         _sessionManager = sessionManager;
         _gameDataService = gameDataService;
         _userNotificationService = userNotificationService;
         _mailService = mailService;
+        _scheduleClock = scheduleClock;
         _logger = logger;
     }
 
@@ -262,7 +265,7 @@ public class LotteryService : ILotteryService
         }
 
         // Automatic schedule checking via database (matching Collection Race)
-        var utcNow = DateTime.UtcNow;
+        var utcNow = _scheduleClock.UtcNow;
         if (utcNow.Minute != _lastAutoCheckMinute)
         {
             _lastAutoCheckMinute = utcNow.Minute;

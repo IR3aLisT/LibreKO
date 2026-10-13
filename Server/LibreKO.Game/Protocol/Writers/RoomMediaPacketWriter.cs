@@ -7,6 +7,10 @@ public static class RoomMediaPacketWriter
 {
     public const byte History = 1;
     public const byte Posted = 2;
+    public const byte Stored = 3;
+    public const byte React = 4;
+    public const byte Reactions = 5;
+    public const byte Kept = 6;
     public const byte NoteBegin = 10;
     public const byte NoteChunk = 11;
     public const byte NoteEnd = 12;
@@ -19,6 +23,8 @@ public static class RoomMediaPacketWriter
     public const byte VoiceTransport = 24;
     public const byte VoiceRoster = 25;
     public const byte VoiceSilence = 26;
+    public const byte DirectHistory = 30;
+    public const byte DirectStored = 31;
 
     public const byte MemberJoined = 1;
     public const byte MemberLeft = 2;
@@ -26,16 +32,22 @@ public static class RoomMediaPacketWriter
 
     public const int HistoryPageMax = 50;
     public const int ChunkBytes = 8192;
+    public const int ReactionsPerPacketMax = 500;
 
     public readonly record struct VoicePeer(int CharacterId, byte Flags);
 
     public static Packet HistoryPage(IReadOnlyList<ChatRoomMessage> rows, bool more)
     {
         var packet = Media(History);
-        packet.WriteByte((byte)rows.Count);
-        foreach (var row in rows)
-            WriteRow(packet, row);
-        packet.WriteByte((byte)(more ? 1 : 0));
+        WriteRows(packet, rows, more);
+        return packet;
+    }
+
+    public static Packet DirectPage(string partnerName, IReadOnlyList<ChatRoomMessage> rows, bool more)
+    {
+        var packet = Media(DirectHistory);
+        packet.WriteString(partnerName);
+        WriteRows(packet, rows, more);
         return packet;
     }
 
@@ -43,6 +55,54 @@ public static class RoomMediaPacketWriter
     {
         var packet = Media(Posted);
         WriteRow(packet, row);
+        return packet;
+    }
+
+    public static Packet StoredRow(ChatRoomMessage row)
+    {
+        var packet = Media(Stored);
+        WriteRow(packet, row);
+        return packet;
+    }
+
+    public static Packet DirectRow(string partnerName, ChatRoomMessage row)
+    {
+        var packet = Media(DirectStored);
+        packet.WriteString(partnerName);
+        WriteRow(packet, row);
+        return packet;
+    }
+
+    public static Packet Reaction(long messageId, int characterId, string characterName, string emoji)
+    {
+        var packet = Media(React);
+        packet.WriteLong(messageId);
+        packet.WriteInt(characterId);
+        packet.WriteString(characterName);
+        packet.WriteString(emoji);
+        return packet;
+    }
+
+    public static Packet ReactionList(IReadOnlyList<ChatRoomReaction> reactions)
+    {
+        var packet = Media(Reactions);
+        int count = Math.Min(reactions.Count, ReactionsPerPacketMax);
+        packet.WriteUShort((ushort)count);
+        for (int i = 0; i < count; i++)
+        {
+            var reaction = reactions[i];
+            packet.WriteLong(reaction.MessageId);
+            packet.WriteInt(reaction.CharacterId);
+            packet.WriteString(reaction.CharacterName);
+            packet.WriteString(reaction.Emoji);
+        }
+        return packet;
+    }
+
+    public static Packet KeptState(byte result, bool kept)
+    {
+        var packet = Result(Kept, result);
+        packet.WriteByte((byte)(kept ? 1 : 0));
         return packet;
     }
 
@@ -147,6 +207,14 @@ public static class RoomMediaPacketWriter
 
     public static ushort Deciseconds(int ms) => (ushort)Math.Clamp((ms + 50) / 100, 0, ushort.MaxValue);
 
+    private static void WriteRows(Packet packet, IReadOnlyList<ChatRoomMessage> rows, bool more)
+    {
+        packet.WriteByte((byte)rows.Count);
+        foreach (var row in rows)
+            WriteRow(packet, row);
+        packet.WriteByte((byte)(more ? 1 : 0));
+    }
+
     private static void WriteRow(Packet packet, ChatRoomMessage row)
     {
         packet.WriteLong(row.Id);
@@ -191,4 +259,7 @@ public static class RoomMediaResults
     public const byte Busy = 12;
     public const byte Failed = 13;
     public const byte NotLeader = 14;
+    public const byte PartnerAway = 15;
+    public const byte Blocked = 16;
+    public const byte KeptLimit = 17;
 }

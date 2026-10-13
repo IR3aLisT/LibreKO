@@ -36,7 +36,7 @@ public partial class World
     private double _skillLockUntil;
     private int _disarmToken;
 
-    private bool SkillsLocked() => Now() < _skillLockUntil;
+    private bool SkillsLocked() => Now() < _skillLockUntil || ChaosBattleLocked;
 
     private void ApplySelfStatus(int buffType, int speedPercent, double seconds)
     {

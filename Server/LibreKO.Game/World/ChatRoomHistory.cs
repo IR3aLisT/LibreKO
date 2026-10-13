@@ -13,11 +13,18 @@ public readonly record struct ChatRoomPruneResult(int Rows, int Files);
 
 public interface IChatRoomHistory
 {
-    Task AppendTextAsync(string roomKey, int senderId, string senderName, string text);
+    Task<ChatRoomMessage> AppendTextAsync(string roomKey, int senderId, string senderName, string text);
     Task<ChatRoomMessage> AppendNoteAsync(string roomKey, int senderId, string senderName, int durationMs, byte[] file, byte[] waveform);
     Task<IReadOnlyList<ChatRoomMessage>> PageAsync(string roomKey, long beforeId, int count);
+    Task<ChatRoomMessage?> FindAsync(long id);
     Task<ChatRoomMessage?> FindNoteAsync(long id);
     Task<byte[]?> ReadNoteAsync(ChatRoomMessage note);
+    Task<bool> ReactAsync(long messageId, int characterId, string characterName, string emoji);
+    Task<IReadOnlyList<ChatRoomReaction>> ReactionsOfAsync(IReadOnlyCollection<long> messageIds);
+    Task<int> CharacterIdOfAsync(string name);
+    Task<IReadOnlyList<KeptChatRoom>> KeptRoomsAsync();
+    Task SaveKeptRoomAsync(KeptChatRoom room);
+    Task DeleteKeptRoomAsync(string roomKey);
     Task<ChatRoomPruneResult> PruneAsync();
 }
 
@@ -36,11 +43,11 @@ public sealed class ChatRoomHistory(
 
     public string NotesRoot => Path.GetFullPath(Rooms.NotesPath, AppContext.BaseDirectory);
 
-    public async Task AppendTextAsync(string roomKey, int senderId, string senderName, string text)
+    public async Task<ChatRoomMessage> AppendTextAsync(string roomKey, int senderId, string senderName, string text)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        db.ChatRoomMessages.Add(new ChatRoomMessage
+        var line = new ChatRoomMessage
         {
             RoomKey = roomKey,
             Kind = ChatRoomMessageKind.Text,
@@ -48,8 +55,10 @@ public sealed class ChatRoomHistory(
             SenderName = senderName,
             CreatedAt = _clock.GetUtcNow().UtcDateTime,
             Text = text,
-        });
+        };
+        db.ChatRoomMessages.Add(line);
         await db.SaveChangesAsync();
+        return line;
     }
 
     public async Task<ChatRoomMessage> AppendNoteAsync(string roomKey, int senderId, string senderName, int durationMs, byte[] file, byte[] waveform)
@@ -102,6 +111,13 @@ public sealed class ChatRoomHistory(
         return page;
     }
 
+    public async Task<ChatRoomMessage?> FindAsync(long id)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.ChatRoomMessages.AsNoTracking().SingleOrDefaultAsync(m => m.Id == id);
+    }
+
     public async Task<ChatRoomMessage?> FindNoteAsync(long id)
     {
         using var scope = scopeFactory.CreateScope();
@@ -118,6 +134,90 @@ public sealed class ChatRoomHistory(
         return await File.ReadAllBytesAsync(full);
     }
 
+    public async Task<bool> ReactAsync(long messageId, int characterId, string characterName, string emoji)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var current = await db.ChatRoomReactions.SingleOrDefaultAsync(r => r.MessageId == messageId && r.CharacterId == characterId);
+        if (emoji.Length == 0)
+        {
+            if (current == null) return false;
+            db.ChatRoomReactions.Remove(current);
+        }
+        else if (current == null)
+        {
+            db.ChatRoomReactions.Add(new ChatRoomReaction
+            {
+                MessageId = messageId,
+                CharacterId = characterId,
+                CharacterName = characterName,
+                Emoji = emoji,
+                CreatedAt = _clock.GetUtcNow().UtcDateTime,
+            });
+        }
+        else if (current.Emoji == emoji) return false;
+        else
+        {
+            current.Emoji = emoji;
+            current.CharacterName = characterName;
+            current.CreatedAt = _clock.GetUtcNow().UtcDateTime;
+        }
+        await db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<IReadOnlyList<ChatRoomReaction>> ReactionsOfAsync(IReadOnlyCollection<long> messageIds)
+    {
+        if (messageIds.Count == 0) return [];
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.ChatRoomReactions.AsNoTracking()
+            .Where(r => messageIds.Contains(r.MessageId))
+            .OrderBy(r => r.Id)
+            .ToListAsync();
+    }
+
+    public async Task<int> CharacterIdOfAsync(string name)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Characters.AsNoTracking().Where(c => c.Name == name).Select(c => c.Id).FirstOrDefaultAsync();
+    }
+
+    public async Task<IReadOnlyList<KeptChatRoom>> KeptRoomsAsync()
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.KeptChatRooms.AsNoTracking().OrderBy(r => r.CreatedAt).ToListAsync();
+    }
+
+    public async Task SaveKeptRoomAsync(KeptChatRoom room)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var current = await db.KeptChatRooms.SingleOrDefaultAsync(r => r.RoomKey == room.RoomKey);
+        if (current == null) db.KeptChatRooms.Add(room);
+        else
+        {
+            current.Name = room.Name;
+            current.Password = room.Password;
+            current.MaxMembers = room.MaxMembers;
+            current.OwnerId = room.OwnerId;
+            current.LastUsedAt = room.LastUsedAt;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    public async Task DeleteKeptRoomAsync(string roomKey)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var current = await db.KeptChatRooms.SingleOrDefaultAsync(r => r.RoomKey == roomKey);
+        if (current == null) return;
+        db.KeptChatRooms.Remove(current);
+        await db.SaveChangesAsync();
+    }
+
     public async Task<ChatRoomPruneResult> PruneAsync()
     {
         var cutoff = _clock.GetUtcNow().UtcDateTime.AddDays(-Rooms.HistoryDays);
@@ -131,6 +231,8 @@ public sealed class ChatRoomHistory(
             foreach (var message in batch)
                 if (message.NoteStoragePath != null && TryDelete(Path.Combine(NotesRoot, message.NoteStoragePath)))
                     files++;
+            var ids = batch.Select(m => m.Id).ToList();
+            db.ChatRoomReactions.RemoveRange(await db.ChatRoomReactions.Where(r => ids.Contains(r.MessageId)).ToListAsync());
             db.ChatRoomMessages.RemoveRange(batch);
             await db.SaveChangesAsync();
             rows += batch.Count;

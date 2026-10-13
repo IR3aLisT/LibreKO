@@ -37,6 +37,7 @@ public class TempleJoinTests
             Substitute.For<IKrowazService>(),
             Substitute.For<INereidMonumentService>(),
             Substitute.For<IGameDataService>(),
+            new ScheduleClock(),
             Substitute.For<ILogger<EventSchedulerService>>());
     }
 
@@ -93,7 +94,7 @@ public class TempleJoinTests
         _scheduler.TryJoinTempleEvent(Player(2, 60, AccountNation.Karus));
         _scheduler.TryJoinTempleEvent(Player(3, 60));
 
-        _scheduler.TempleSignUps().Should().Be(((ushort)2, (ushort)1));
+        _scheduler.TempleSignUps(TempleEvent.BorderDefenseWar).Should().Be(((ushort)2, (ushort)1));
     }
 
     [Fact]

@@ -249,7 +249,31 @@ public static class UiTheme
         c.AddThemeColorOverride("font_hover_color", TextHi);
         c.AddThemeColorOverride("font_pressed_color", GoldBright);
         c.AddThemeColorOverride("font_hover_pressed_color", GoldBright);
+        c.AddThemeIconOverride("unchecked", CheckIcon(on: false, disabled: false));
+        c.AddThemeIconOverride("checked", CheckIcon(on: true, disabled: false));
+        c.AddThemeIconOverride("unchecked_disabled", CheckIcon(on: false, disabled: true));
+        c.AddThemeIconOverride("checked_disabled", CheckIcon(on: true, disabled: true));
         return c;
+    }
+
+    private const int CheckIconSize = 14;
+    private const float CheckDisabledOpacity = 0.45f;
+    private static readonly Dictionary<(bool On, bool Disabled, bool Touch), Texture2D> CheckIcons = new();
+
+    private static Texture2D CheckIcon(bool on, bool disabled)
+    {
+        if (CheckIcons.TryGetValue((on, disabled, Platform.TouchUi), out var cached)) return cached;
+        string box = on
+            ? $"<rect x='1' y='1' width='12' height='12' rx='2.5' fill='#{Gold.ToHtml(false)}' stroke='#{GoldBright.ToHtml(false)}' stroke-width='1.2'/>"
+              + $"<path d='M3.7 7.3 L6.1 9.6 L10.5 4.7' fill='none' stroke='#{Ink.ToHtml(false)}' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/>"
+            : $"<rect x='1.2' y='1.2' width='11.6' height='11.6' rx='2.5' fill='#{Ink.ToHtml(false)}' fill-opacity='0.55' stroke='#{TextLo.ToHtml(false)}' stroke-width='1.4'/>";
+        string opacity = disabled ? CheckDisabledOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture) : "1";
+        string svg = $"<svg xmlns='http://www.w3.org/2000/svg' width='{CheckIconSize}' height='{CheckIconSize}'><g opacity='{opacity}'>{box}</g></svg>";
+        var image = new Image();
+        image.LoadSvgFromString(svg, Platform.Pick(1f, 2f));
+        var texture = ImageTexture.CreateFromImage(image);
+        CheckIcons[(on, disabled, Platform.TouchUi)] = texture;
+        return texture;
     }
 
     public static StyleBoxFlat MeterTrack()

@@ -20,9 +20,12 @@ public partial class World
     private GridContainer? _chaosSkillGrid;
     private Label? _chaosSkillPageLabel;
     private List<SkillData.Skill>? _chaosSkills;
+    private readonly List<ChaosSkillIcon> _chaosSkillIcons = new();
     private int _chaosSkillPageIndex;
 
     private bool InChaosZone => _zone == ChaosBattle.Zone;
+
+    private bool ChaosBattleLocked => ChaosBattle.BattleLocked(_zone, Net.I.SelfAbnormal);
 
     private bool ToggleChaosSkillPage()
     {
@@ -76,12 +79,23 @@ public partial class World
     {
         if (_chaosSkillGrid == null) return;
         foreach (var child in _chaosSkillGrid.GetChildren()) child.QueueFree();
+        _chaosSkillIcons.Clear();
         var skills = ChaosSkills();
         int first = _chaosSkillPageIndex * ChaosSkillsPerPage;
         for (int i = first; i < Mathf.Min(skills.Count, first + ChaosSkillsPerPage); i++)
             _chaosSkillGrid.AddChild(ChaosSkillEntry(skills[i]));
         _chaosSkillPageLabel!.Text = $"Page {_chaosSkillPageIndex + 1}/{ChaosSkillPages}";
         _chaosSkillPage!.ResetSize();
+        ChaosSkillPageTick();
+    }
+
+    private void ChaosSkillPageTick()
+    {
+        if (_chaosSkillPage == null || !IsInstanceValid(_chaosSkillPage) || !_chaosSkillPage.Visible) return;
+        bool locked = ChaosBattleLocked;
+        foreach (var icon in _chaosSkillIcons)
+            if (IsInstanceValid(icon))
+                icon.SetUsable(!locked && SkillItemHeld(icon.Skill));
     }
 
     private Control ChaosSkillEntry(SkillData.Skill skill)
@@ -93,6 +107,7 @@ public partial class World
             CustomMinimumSize = new Vector2(ChaosSkillIconSize, ChaosSkillIconSize),
             TooltipText = ChaosSkillTooltip(skill),
         };
+        _chaosSkillIcons.Add(icon);
         row.AddChild(icon);
         var name = UiTheme.Text(skill.Name, 12, UiTheme.TextHi);
         name.CustomMinimumSize = new Vector2(ChaosSkillNameWidth, 0);
@@ -136,6 +151,7 @@ public partial class World
     {
         private readonly SkillData.Skill _skill;
         private readonly System.Action<int> _add;
+        private bool _usable = true;
 
         public ChaosSkillIcon(SkillData.Skill skill, System.Action<int> add)
         {
@@ -145,6 +161,15 @@ public partial class World
             ExpandMode = ExpandModeEnum.IgnoreSize;
             StretchMode = StretchModeEnum.KeepAspectCentered;
             MouseFilter = MouseFilterEnum.Stop;
+        }
+
+        public SkillData.Skill Skill => _skill;
+
+        public void SetUsable(bool usable)
+        {
+            if (_usable == usable) return;
+            _usable = usable;
+            Modulate = usable ? Colors.White : HotSlotCell.DimColor;
         }
 
         public override void _GuiInput(InputEvent ev)

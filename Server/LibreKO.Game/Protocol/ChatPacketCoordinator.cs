@@ -16,6 +16,7 @@ public class ChatPacketCoordinator(
     IUserNotificationService userNotificationService,
     ICombatNotificationService combatNotificationService,
     INationChatService nationChat,
+    IRoomMediaService roomMedia,
     ILogger<ChatPacketCoordinator> logger) : IChatPacketCoordinator
 {
     private const int MessageMaxLength = 128;
@@ -64,7 +65,10 @@ public class ChatPacketCoordinator(
             {
                 var target = sessionManager.GetByCharacterId(session.PrivateChatUser);
                 if (target != null)
+                {
                     await target.Client.SendPacket(result);
+                    await roomMedia.WhisperSentAsync(session, target, message);
+                }
                 break;
             }
 

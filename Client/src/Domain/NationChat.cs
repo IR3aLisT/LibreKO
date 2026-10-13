@@ -45,7 +45,6 @@ public static class NationChatRules
     public const int PasswordMaxLength = 8;
     public const int PublicRows = 16;
     public const int PrivateRows = 20;
-    public const int MemberRows = 10;
     public const double RefreshCooldownSeconds = 10.0;
     public const int NoRoom = -1;
     public const byte KickedCode = 5;
@@ -125,12 +124,6 @@ public static class NationChatRules
 
     public static string Title(string name, int members, int capacity) =>
         members > 0 ? $"{name} ({members}/{capacity})" : name;
-
-    public static string Summary(bool isPublic, bool locked, int members, int capacity)
-    {
-        string kind = isPublic ? "Public channel" : locked ? "Private room · locked" : "Private room";
-        return members > 0 ? $"{kind} · {members}/{capacity} members" : kind;
-    }
 }
 
 public sealed class NationChatState
@@ -144,8 +137,11 @@ public sealed class NationChatState
     public string RoomPassword { get; private set; } = "";
     public int RoomMax { get; private set; } = NationChatRules.RoomSizes[0];
     public int RoomMembers { get; private set; }
+    public bool Kept { get; private set; }
 
     public bool InRoom => InPublic || InPrivate;
+
+    public void KeptChanged(bool kept) => Kept = kept && InPrivate;
 
     public void Describe(string name, bool locked, int members, int max)
     {
@@ -205,5 +201,6 @@ public sealed class NationChatState
         RoomPassword = "";
         RoomMax = NationChatRules.RoomSizes[0];
         RoomMembers = 0;
+        Kept = false;
     }
 }

@@ -16,9 +16,13 @@ public static class TempleJoin
     public const byte LevelTooHigh = 11;
 
     public const int MapOfChaosCentreText = 18800;
+    public const int ChaosSignUpEventId = 24;
     public const string LevelTooHighText = "Your level is too high to apply.";
 
     public static bool SignedUp(byte result) => result is Joined or AlreadyJoined;
+
+    public static int SignUpEventId(TempleEventType type) =>
+        type == TempleEventType.Chaos ? ChaosSignUpEventId : (int)type;
 
     public static int TextId(byte result) => result switch
     {

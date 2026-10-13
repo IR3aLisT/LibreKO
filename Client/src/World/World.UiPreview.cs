@@ -967,33 +967,51 @@ public partial class World
         return DetachPreviewControl(_targetBox);
     }
 
-    internal Control BuildEventsUiPreview()
+    internal Control BuildEventsUiPreview(string variant = "")
     {
         Sheet.SeedProgress(level: 62, exp: 0, maxExp: 1_000_000);
         BuildEventsWindow();
         var utc = DateTime.UtcNow;
         var soon = utc.AddMinutes(PreviewEventLeadMinutes);
-        var later = utc.AddMinutes(PreviewEventLaterMinutes);
-        _eventSchedule = new EventSchedule(
+        const int daily = EventSchedule.EveryDay;
+        _eventSchedule = new EventSchedule(TimeSpan.Zero,
             new List<EventNow>
             {
-                new(EventKind.Temple, "Juraid Mountain", EventPhase.SignUp, PreviewSignUpSeconds, 40, 83),
-                new(EventKind.CollectionRace, "Moradon Hunt", EventPhase.Running, PreviewRaceSeconds, 1, 83),
+                new(EventKind.Temple, (int)TempleEventType.BorderDefenseWar, "Border Defense War", EventPhase.SignUp, PreviewSignUpSeconds, 20, 83),
+                new(EventKind.CollectionRace, 0, "Moradon Rookie Roundup", EventPhase.Running, PreviewRaceSeconds, 1, 35),
             },
-            new List<EventSlot>
+            new List<ScheduledEvent>
             {
-                new(EventKind.Temple, "Forgotten Temple", EventSchedule.EveryDay, soon.Hour, soon.Minute, 60, 83),
-                new(EventKind.Temple, "Under The Castle", EventSchedule.EveryDay, later.Hour, later.Minute, 70, 83),
-                new(EventKind.Lottery, "Daily Lottery", EventSchedule.EveryDay, later.Hour, later.Minute, 0, 0),
+                new(EventKind.Temple, "Border Defense War", "8 vs 8 capture the flag", 20, 83,
+                    new List<EventSlot> { new(daily, 23, 0), new(daily, 8, 0), new(daily, 10, 0), new(daily, 13, 0), new(daily, 18, 0) }),
+                new(EventKind.Temple, "Forgotten Temple", "Hold out against the monster waves", 46, 59,
+                    new List<EventSlot> { new(daily, soon.Hour, soon.Minute), new(daily, 16, 0) }),
+                new(EventKind.Temple, "Under The Castle", "Boss dungeon, one hour", 70, 83,
+                    new List<EventSlot> { new((int)DayOfWeek.Friday, 18, 0) }),
+                new(EventKind.CastleSiege, "Castle Siege War", "Clan war for Delos Castle", 0, 0,
+                    new List<EventSlot> { new((int)DayOfWeek.Sunday, 17, 30) }),
+                new(EventKind.Krowaz, "Krowaz's Dominion", "Opens for 60 minutes", 70, 0,
+                    new List<EventSlot> { new(daily, 7, 0), new(daily, 20, 0) }),
+                new(EventKind.Lottery, "Moradon Grand Lottery", "Lottery draw, 15 minutes", 0, 0,
+                    new List<EventSlot> { new(daily, 12, 0), new(daily, 16, 0), new(daily, 20, 0) }),
+                new(EventKind.CollectionRace, "Moradon Rookie Roundup", "Collection Race, 60 minutes, first 3 win", 1, 35,
+                    new List<EventSlot> { new((int)DayOfWeek.Sunday, 10, 0), new((int)DayOfWeek.Wednesday, 11, 0) }),
             },
             utc);
+        if (variant == PreviewEventsRaces) _eventsTabRaces.ButtonPressed = true;
         RefreshEventsWindow();
         _eventsPanel.Visible = true;
+        if (variant == PreviewEventsEnd)
+        {
+            var bar = _eventsScroll.GetVScrollBar();
+            bar.Changed += () => bar.Value = bar.MaxValue;
+        }
         return DetachPreviewControl(_eventsPanel);
     }
 
     private const int PreviewEventLeadMinutes = 15;
-    private const int PreviewEventLaterMinutes = 95;
+    internal const string PreviewEventsRaces = "races";
+    internal const string PreviewEventsEnd = "end";
     private const int PreviewSignUpSeconds = 412;
     private const int PreviewRaceSeconds = 1830;
 
@@ -1561,16 +1579,6 @@ public partial class World
                 _ncCreatePassword.Text = "1234";
                 _ncCreateSize.Selected = 1;
                 return DetachPreviewControl(_ncCreate);
-            case "members":
-                Net.I.NationChat.OwnRoom(PreviewNationRoom, "Siege at nine", true, "1234", 30);
-                _ncMembers.Visible = true;
-                _ncSelectedMember = 9003;
-                OnNationMembers(new NationRoomMembers(PreviewNationRoom, "Siege at nine", _myId, 30,
-                [
-                    new NationRoomMember(_myId, "Tester10"), new NationRoomMember(9001, "Rikka"),
-                    new NationRoomMember(9003, "Borin"), new NationRoomMember(9004, "Arwen"),
-                ]));
-                return DetachPreviewControl(_ncMembers);
             default:
                 Net.I.NationChat.OwnRoom(PreviewNationRoom, "Siege at nine", true, "1234", 30);
                 ShowNationTabQuietly(publicTab: false);
@@ -1603,6 +1611,7 @@ public partial class World
     private const int PreviewRoomSize = 30;
     private const int PreviewPublicMembers = 212;
     private const float PreviewRecordingLevel = 0.55f;
+    private const double PreviewRecordingSeconds = 7;
     private const double PreviewRoomRepostSeconds = 0.3;
     private const float PreviewRoomPlayed = 0.38f;
     private const int PreviewRoomNotesScroll = 150;
@@ -1616,6 +1625,52 @@ public partial class World
         return VoiceWaveform.FromLevels(levels);
     }
     private const float PreviewRoomSettingsLevel = 0.62f;
+    private const long PreviewReactedPost = 103;
+    private const long PreviewReactPost = 106;
+
+    private void SeedPreviewRoomReactions(RoomTimeline timeline)
+    {
+        string heart = ReactionRules.QuickPicks[1];
+        if (timeline.Find(PreviewReactedPost) is { } asked)
+        {
+            asked.Reactions.Set(PreviewRoomBorin, "Borin", heart);
+            asked.Reactions.Set(PreviewRoomArwen, "Arwen", heart);
+            asked.Reactions.Set(_myId, "Tester10", "🙏");
+        }
+        timeline.Find(105)?.Reactions.Set(PreviewRoomKaito, "Kaito", "👍");
+        if (timeline.Find(108) is { } mine)
+        {
+            mine.Reactions.Set(PreviewRoomRikka, "Rikka", "😂");
+            mine.Reactions.Set(PreviewRoomBorin, "Borin", "😂");
+            mine.Reactions.Set(PreviewRoomArwen, "Arwen", "(Laughing)");
+            mine.Reactions.Set(PreviewRoomKaito, "Kaito", "😮");
+        }
+    }
+
+    private void PreviewRoomReactionPopup(bool details)
+    {
+        if (!IsInstanceValid(_reactionLayer)) ChatReactionsInit();
+        EnsureReactionPopups();
+        var timer = new Godot.Timer { WaitTime = PreviewRoomRepostSeconds, OneShot = true, Autostart = true };
+        timer.Timeout += () =>
+        {
+            Window popup = details ? _reactionDetails! : _reactionBar!;
+            popup.GetParent().RemoveChild(popup);
+            _roomWindow.AddChild(popup);
+            if (details && Net.I.RoomTimeline.Find(PreviewReactedPost) is { } reacted && _roomThread.PillOf(reacted) is { } pill)
+            {
+                _roomThread.StickBottom = false;
+                OpenReactionDetails(_roomThread, reacted, pill);
+            }
+            else if (!details && Net.I.RoomTimeline.Find(PreviewReactPost) is { } target)
+            {
+                _roomThread.Pinned = target;
+                _roomThread.ShowReactButton(target);
+                if (_roomThread.ReactButtonOf(target) is { } button) OpenReactionBar(_roomThread, target, button);
+            }
+        };
+        _roomWindow.AddChild(timer);
+    }
     private static readonly Vector2I PreviewRoomSettingsAt = new(1010, 420);
 
     internal Control BuildChatRoomUiPreview(string page)
@@ -1663,6 +1718,7 @@ public partial class World
             new RoomPost(107, RoomPostKind.VoiceNote, _myId, "Tester10", now.AddMinutes(-4), "", 47, 12000) { Waveform = PreviewWaveform(3) },
             new RoomPost(108, RoomPostKind.Text, _myId, "Tester10", now.AddMinutes(-4), "listen to that (Laughing)", 0, 0),
         ], more: true);
+        SeedPreviewRoomReactions(Net.I.RoomTimeline);
         Net.I.RoomTimeline.Add(RoomPost.Notice("Borin has entered. (Current players: 6)", now.AddMinutes(-2)));
         Net.I.RoomTimeline.Add(RoomPost.Line(PreviewRoomBorin, "Borin", "here", now.AddMinutes(-1)));
         if (page == "voice")
@@ -1685,6 +1741,7 @@ public partial class World
         else VoiceChat.I?.PreviewNote(0, 0f, 0, 0f);
         ShowChatRoom();
         if (page == "voice") SelectChatRoomMember(PreviewRoomBorin);
+        if (page is "reactions" or "react") PreviewRoomReactionPopup(page == "reactions");
         if (page == "older")
         {
             Net.I.RoomTimeline.MergeHistory(
@@ -1698,8 +1755,8 @@ public partial class World
             {
                 Net.I.RoomTimeline.Add(new RoomPost(109, RoomPostKind.VoiceNote, PreviewRoomRikka, "Rikka", DateTime.Now, "", 63, 16000));
                 RenderChatRoom();
-                _roomStickBottom = false;
-                _roomScroll.ScrollVertical = 0;
+                _roomThread.StickBottom = false;
+                _roomThread.ScrollVertical = 0;
             };
             _roomWindow.AddChild(repost);
         }
@@ -1709,10 +1766,9 @@ public partial class World
             var scroll = new Godot.Timer { WaitTime = PreviewRoomRepostSeconds, OneShot = true, Autostart = true };
             scroll.Timeout += () =>
             {
-                _roomStickBottom = false;
-                _roomScroll.ScrollVertical = PreviewRoomNotesScroll;
-                RefreshChatRoomNote(_roomNotes[105]);
-                RefreshChatRoomNote(_roomNotes[110]);
+                _roomThread.StickBottom = false;
+                _roomThread.ScrollVertical = PreviewRoomNotesScroll;
+                _roomThread.RefreshNotes();
             };
             _roomWindow.AddChild(scroll);
         }
@@ -1732,6 +1788,7 @@ public partial class World
         }
         if (page == "config")
         {
+            room.KeptChanged(true);
             FillChatRoomConfig();
             var card = _roomConfig!;
             card.GetParent().RemoveChild(card);
@@ -1746,9 +1803,9 @@ public partial class World
         if (page == "recording")
         {
             _roomTick.Stop();
-            RefreshChatRoomRecording(true);
-            _roomRecordClock.Text = $"{VoiceNoteRules.Clock(7)} / {VoiceNoteRules.Clock(VoiceNoteRules.MaxSeconds)}";
-            _roomRecordLevel.Value = PreviewRecordingLevel;
+            var record = new Godot.Timer { WaitTime = PreviewRoomRepostSeconds, OneShot = true, Autostart = true };
+            record.Timeout += () => _roomComposer.ShowRecording(PreviewRecordingSeconds, PreviewRecordingLevel);
+            _roomWindow.AddChild(record);
         }
         return DetachPreviewControl(_roomWindow);
     }
@@ -2770,28 +2827,47 @@ public partial class World
         return DetachPreviewControl(_equipViewPanel);
     }
 
+    private const string PreviewWhisperPartner = "Rikka";
+
     internal Control BuildWhisperUiPreview(bool minimized = false)
     {
         ItemData.EnsureLoaded();
         Chat = new ChatSystem(this);
+        _myId = PreviewRoomSelf;
+        var me = Net.I.LastEnter;
+        me.Name = "Tester10";
+        me.Nation = Nations.Karus;
+        Net.I.SeedPreviewEnter(me);
+        if (!IsInstanceValid(_reactionLayer)) ChatReactionsInit();
         WhisperInit();
-        OpenWhisperWith("Tester10");
-        var chat = _whispers["Tester10"];
-        if (Net.I.WhisperHistory("Tester10").Count == 0)
+        var timeline = Net.I.DirectTimeline(PreviewWhisperPartner);
+        if (timeline.Posts.Count == 0)
         {
-            AppendWhisper(chat, mine: false, notice: true, ItemData.Text(ChatSystem.TextWhisperConnected, "Successfully connected for a private chat"));
-            AppendWhisper(chat, mine: false, notice: false, "hey, are you farming Ronark?");
-            AppendWhisper(chat, mine: true, notice: false, "yep, west side by the bridge. bring pots");
-            AppendWhisper(chat, mine: false, notice: false, "omw (Smile)");
-            AppendWhisper(chat, mine: true, notice: false, "invite me when you get here");
-            AppendWhisper(chat, mine: false, notice: false, "which channel are you on?");
-            AppendWhisper(chat, mine: true, notice: false, "channel 2, near the north gate");
-            AppendWhisper(chat, mine: false, notice: false, "ok give me a sec, repairing");
-            AppendWhisper(chat, mine: true, notice: false, "no rush, I'll hold the spot");
-            AppendWhisper(chat, mine: false, notice: false, "ready, invite me");
-            AppendWhisper(chat, mine: true, notice: false, $"also got this {ChatItemLink.Token(MarketPricePreviewItem)} for you");
-            AppendWhisper(chat, mine: false, notice: false, $"{ChatItemLink.Token(MarketPricePreviewItem)} nice, thanks! how much do you want for it?");
+            var now = DateTime.Now;
+            int them = PreviewRoomRikka;
+            string partner = PreviewWhisperPartner;
+            timeline.MergeHistory(
+            [
+                new RoomPost(201, RoomPostKind.Text, them, partner, now.AddDays(-1).AddHours(-2), "hey, are you farming Ronark?", 0, 0),
+                new RoomPost(202, RoomPostKind.Text, _myId, "Tester10", now.AddDays(-1).AddHours(-2), "yep, west side by the bridge. bring pots", 0, 0),
+                new RoomPost(203, RoomPostKind.Text, them, partner, now.AddMinutes(-20), "omw (Smile)", 0, 0),
+                new RoomPost(204, RoomPostKind.VoiceNote, them, partner, now.AddMinutes(-18), "", 86, 21000) { Waveform = PreviewWaveform(4) },
+                new RoomPost(205, RoomPostKind.Text, _myId, "Tester10", now.AddMinutes(-17), "channel 2, near the north gate", 0, 0),
+                new RoomPost(206, RoomPostKind.VoiceNote, _myId, "Tester10", now.AddMinutes(-12), "", 41, 10000) { Waveform = PreviewWaveform(5) },
+                new RoomPost(207, RoomPostKind.Text, _myId, "Tester10", now.AddMinutes(-3), $"also got this {ChatItemLink.Token(MarketPricePreviewItem)} for you", 0, 0),
+                new RoomPost(208, RoomPostKind.Text, them, partner, now.AddMinutes(-2), $"{ChatItemLink.Token(MarketPricePreviewItem)} nice, thanks! how much do you want for it?", 0, 0),
+            ], more: true);
+            timeline.Find(202)?.Reactions.Set(them, partner, ReactionRules.QuickPicks[0]);
+            timeline.Find(204)?.Reactions.Set(_myId, "Tester10", "😂");
+            if (timeline.Find(207) is { } gift)
+            {
+                gift.Reactions.Set(them, partner, ReactionRules.QuickPicks[1]);
+                gift.Reactions.Set(_myId, "Tester10", ReactionRules.QuickPicks[1]);
+            }
+            timeline.Add(RoomPost.Notice(ItemData.Text(ChatSystem.TextWhisperConnected, "Successfully connected for a private chat"), now.AddMinutes(-1)));
         }
+        OpenWhisperWith(PreviewWhisperPartner);
+        var chat = _whispers[PreviewWhisperPartner];
         if (!minimized) return DetachPreviewControl(chat.Window);
 
         chat.Window.SetMinimized(true);

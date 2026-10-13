@@ -55,6 +55,10 @@ public static class ChaosBattle
 
     public static bool ItemUsable(int zone, int kind) => zone != Zone || kind == ChaosItemKind;
 
+    public static bool ShowsCapes(int zone) => zone != Zone;
+
+    public static bool BattleLocked(int zone, int selfAbnormal) => zone == Zone && selfAbnormal == RespawnBlink.Blinking;
+
     public static int WinnerCut(int count) => Math.Max(1, (int)Math.Floor(count * WinnerShare + WinnerRounding));
 
     public static List<ChaosLadderLine> Ladder(IReadOnlyList<ChaosRankRow> rows, string ownName)
