@@ -251,6 +251,12 @@ namespace LibreKO.Common.Migrations
                     b.Property<short>("DisplayTitleId")
                         .HasColumnType("smallint");
 
+                    b.Property<byte>("DrakiEntranceLimit")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.Property<DateTime?>("DrakiEntranceLimitResetDate")
+                        .HasColumnType("datetime(6)");
+
                     b.Property<byte>("DrakiStage")
                         .HasColumnType("tinyint unsigned");
 

@@ -423,6 +423,7 @@ public class BorderDefenseWarTests
             Substitute.For<IStealthService>(),
             Substitute.For<ICollectionRaceService>(),
             CreateService(),
+            Substitute.For<IDrakiTowerService>(),
             Substitute.For<IRespawnBlinkService>(),
             Substitute.For<ISoccerService>(),
             Substitute.For<IKrowazTrapService>(),

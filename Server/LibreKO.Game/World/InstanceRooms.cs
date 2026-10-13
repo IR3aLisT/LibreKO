@@ -74,6 +74,8 @@ public sealed class InstanceRoomRegistry(SessionManager sessionManager, ILogger<
             Close(room);
     }
 
+    public event Action<InstanceRoom>? RoomClosed;
+
     public void Close(InstanceRoom room)
     {
         if (!_rooms.TryRemove(room.Id, out _))
@@ -83,6 +85,7 @@ public sealed class InstanceRoomRegistry(SessionManager sessionManager, ILogger<
             sessionManager.Regions.RemoveNpc(npc);
         room.Npcs.Clear();
         logger.LogInformation("Instance room {Room} in zone {Zone} closed", room.Id, room.ZoneId);
+        RoomClosed?.Invoke(room);
     }
 }
 

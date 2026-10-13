@@ -35,6 +35,7 @@ public class CombatLifecycleService(
     ISavedMagicService savedMagicService,
     IStealthService stealthService,
     IPetService petService,
+    IDrakiTowerService drakiTowerService,
     IRespawnBlinkService respawnBlinkService,
     IChaosDungeonService chaosDungeonService,
     IKillStreakService killStreakService,
@@ -91,6 +92,16 @@ public class CombatLifecycleService(
                 "Regene requested by a live session {CharacterId}/{Name} (hp={Hp}) — re-syncing HP so the client leaves its dead state",
                 session.CharacterId, session.Name, session.Hp);
             await SendHpChangeAsync(session);
+            return;
+        }
+
+        if (session.ZoneId == DrakiTowerRules.ZoneIdValue)
+        {
+            session.KillerNpcType = 0;
+            session.DeathExpLoss = 0;
+            sessionManager.Regions.DropAggroOn(session.CharacterId);
+            await drakiTowerService.HandleTownAsync(session);
+            await SendRespawnAsync(client, session);
             return;
         }
 

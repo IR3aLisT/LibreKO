@@ -87,6 +87,9 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
         session.Repurchases.AddRange(RepurchaseRules.Decode(character.RepurchaseItems));
         session.DrakiStage = character.DrakiStage;
         session.DrakiSubStage = character.DrakiSubStage;
+        session.DrakiEntranceLimit = character.DrakiEntranceLimit;
+        session.DrakiEntranceLimitResetDate = character.DrakiEntranceLimitResetDate ?? DateTime.UtcNow.Date;
+        DrakiTowerRules.EnsureDailyLimit(session);
         session.AttendanceDays = character.AttendanceDays;
         session.AttendanceClaimedDays = character.AttendanceClaimedDays;
         session.AttendanceClaimedBonus = character.AttendanceClaimedBonus;
@@ -164,6 +167,8 @@ public class UserSessionCharacterMapper : IUserSessionCharacterMapper
         character.RepurchaseItems = RepurchaseRules.Encode(session.Repurchases);
         character.DrakiStage = session.DrakiStage;
         character.DrakiSubStage = session.DrakiSubStage;
+        character.DrakiEntranceLimit = session.DrakiEntranceLimit;
+        character.DrakiEntranceLimitResetDate = session.DrakiEntranceLimitResetDate;
         character.AttendanceDays = session.AttendanceDays;
         character.AttendanceClaimedDays = session.AttendanceClaimedDays;
         character.AttendanceClaimedBonus = session.AttendanceClaimedBonus;
