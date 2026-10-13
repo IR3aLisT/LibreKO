@@ -26,6 +26,7 @@ public class QuestNpcInteractionService(
     IKingSystemRuntimeService kingSystemRuntimeService,
     ITouchTrapService touchTrapService,
     IChaosDungeonService chaosDungeonService,
+    IBifrostEventService bifrostEventService,
     ILogger<QuestNpcInteractionService> logger) : IQuestNpcInteractionService
 {
     private const byte WarehouseRequest = 0x10;
@@ -172,6 +173,12 @@ public class QuestNpcInteractionService(
 
         if (await chaosDungeonService.TryTouchCubeAsync(session, npc))
             return;
+
+        if (npc.NpcId == BifrostRules.GateNpcId)
+        {
+            await bifrostEventService.TryEnterAsync(session);
+            return;
+        }
 
         if (kind == NpcEventTouch)
         {

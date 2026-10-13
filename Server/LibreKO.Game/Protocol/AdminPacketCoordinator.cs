@@ -497,6 +497,40 @@ public class AdminPacketCoordinator(
                 break;
             }
 
+            case "bifrost":
+            case "beef":
+            case "bifroststart":
+            case "bifrostclose":
+            {
+                var lower = (cmd == "bifrostclose" ? "close" : (cmd == "bifroststart" ? "start" : arg)).ToLowerInvariant().Trim();
+                if (lower is "open" or "start")
+                {
+                    bifrostEventService.Start();
+                    await SendNoticeAsync(session, "[Bifrost] Event started (Monument fight)!");
+                }
+                else if (lower is "close" or "cancel" or "stop")
+                {
+                    await bifrostEventService.CloseAsync();
+                    await SendNoticeAsync(session, "[Bifrost] Event closed!");
+                }
+                else if (lower is "enter" or "warp")
+                {
+                    await bifrostEventService.TryEnterAsync(session);
+                }
+                else if (lower.StartsWith("winner"))
+                {
+                    var bifrostTokens = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    var nation = bifrostTokens.Length > 1 && bifrostTokens[1] == "karus" ? AccountNation.Karus : AccountNation.ElMorad;
+                    bifrostEventService.SetWinner(nation, session.Name);
+                    await SendNoticeAsync(session, $"[Bifrost] Forced winner {nation}! Farming phase started.");
+                }
+                else
+                {
+                    await SendNoticeAsync(session, "Usage: +bifrost open | close | enter | winner <karus|elmorad>");
+                }
+                break;
+            }
+
             case "jrcancel":
             case "templecancel":
                 if (await eventSchedulerService.CancelTempleEventAsync())
@@ -676,14 +710,6 @@ public class AdminPacketCoordinator(
             case "kc":
             case "knightcash":
                 await HandleKnightCashAsync(session, arg);
-                break;
-
-            case "bifroststart":
-                await HandleBifrostStartAsync(session, arg);
-                break;
-
-            case "bifrostclose":
-                await HandleBifrostCloseAsync(session);
                 break;
 
             default:

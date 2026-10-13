@@ -35,6 +35,7 @@ public class CombatRewardService(
     IExpSealService expSeal,
     IUnderTheCastleService underTheCastleService,
     IForgottenTempleService forgottenTempleService,
+    IBifrostEventService bifrostEventService,
     ILogger<CombatRewardService> logger) : ICombatRewardService
 {
     private const int CoinRollMinPercent = 70;
@@ -96,6 +97,9 @@ public class CombatRewardService(
 
         if (npc.ZoneId == (byte)ZoneId.NereidsIsland)
             await nereidMonuments.OnNpcKilledAsync(npc, killer);
+
+        if (npc.ZoneId == BifrostRules.ZoneRonarkLand && npc.NpcId == BifrostRules.MonumentNpcId)
+            await bifrostEventService.OnMonumentKilledAsync(npc, killer);
 
         var damagerIds = npc.WithLock(n => n.DamageMap.Keys.ToArray());
         foreach (var charId in damagerIds)

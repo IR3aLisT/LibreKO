@@ -1,40 +1,55 @@
+﻿using LibreKO.Common.Enums;
+using LibreKO.Common.Domain.Entities.GameData;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.Protocol;
+using LibreKO.Game.Protocol.Writers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using LibreKO.Game.Protocol.Writers;
-
-using LibreKO.Common.Enums;
 
 namespace LibreKO.Game.World;
 
 public interface IBifrostEventService
 {
     long RemainingSecs { get; }
-
     bool IsActive { get; }
+    BifrostPhase Phase { get; }
+    AccountNation WinnerNation { get; }
+    long LoserDelayRemainingSecs { get; }
 
-    void Start(int? monumentMinutes = null);
-
+    void Start(int? monumentMinutes = null, int? loserDelayMinutes = null, int? farmingMinutes = null);
+    Task CloseAsync();
     void Close();
+    void SetWinner(AccountNation nation, string killerName = "GM");
+    Task OnMonumentKilledAsync(NpcInstance npc, UserSession killer);
+    BifrostEntryResult CanEnter(UserSession session);
+    Task<bool> TryEnterAsync(UserSession session);
+    Task TickAsync();
 }
 
 public class BifrostEventService(
     SessionManager sessionManager,
+    IZoneTransitionService zoneTransitionService,
     ILogger<BifrostEventService> logger) : BackgroundService, IBifrostEventService
 {
-    private const ushort ZoneBifrost = (ushort)ZoneId.Bifrost;
-    private const ushort ZoneRonarkLand = (ushort)ZoneId.RonarkLand;
-
-    private const int DefaultMonumentMinutes = 120;
-
     private readonly object stateLock = new();
     private long remainingSecs;
+    private long loserDelayRemainingSecs;
     private bool isActive;
+    private BifrostPhase phase = BifrostPhase.Inactive;
+    private AccountNation winnerNation = AccountNation.None;
+
+    private int monumentDurationMinutes = BifrostRules.DefaultMonumentMinutes;
+    private int loserDelayMinutes = BifrostRules.DefaultLoserDelayMinutes;
+    private int farmingDurationMinutes = BifrostRules.DefaultFarmingMinutes;
 
     public long RemainingSecs
     {
         get { lock (stateLock) return remainingSecs; }
+    }
+
+    public long LoserDelayRemainingSecs
+    {
+        get { lock (stateLock) return loserDelayRemainingSecs; }
     }
 
     public bool IsActive
@@ -42,7 +57,17 @@ public class BifrostEventService(
         get { lock (stateLock) return isActive; }
     }
 
-    public void Start(int? monumentMinutes = null)
+    public BifrostPhase Phase
+    {
+        get { lock (stateLock) return phase; }
+    }
+
+    public AccountNation WinnerNation
+    {
+        get { lock (stateLock) return winnerNation; }
+    }
+
+    public void Start(int? monumentMinutes = null, int? loserDelayMinutes = null, int? farmingMinutes = null)
     {
         lock (stateLock)
         {
@@ -52,28 +77,146 @@ public class BifrostEventService(
                 return;
             }
 
-            var minutes = monumentMinutes ?? DefaultMonumentMinutes;
-            remainingSecs = (long)minutes * 60;
+            monumentDurationMinutes = monumentMinutes ?? BifrostRules.DefaultMonumentMinutes;
+            this.loserDelayMinutes = loserDelayMinutes ?? BifrostRules.DefaultLoserDelayMinutes;
+            farmingDurationMinutes = farmingMinutes ?? BifrostRules.DefaultFarmingMinutes;
+
+            remainingSecs = (long)monumentDurationMinutes * 60;
+            loserDelayRemainingSecs = 0;
+            winnerNation = AccountNation.None;
+            phase = BifrostPhase.MonumentFight;
             isActive = true;
-            logger.LogInformation("Bifrost event started: {Minutes}min ({Secs}s)", minutes, remainingSecs);
+            logger.LogInformation("Bifrost event started (Monument phase): {Minutes}min ({Secs}s)", monumentDurationMinutes, remainingSecs);
         }
 
+        _ = BroadcastNoticeAsync(BifrostRules.NoticeStart);
         _ = BroadcastRemainingAsync();
     }
 
     public void Close()
+    {
+        _ = CloseAsync();
+    }
+
+    public async Task CloseAsync()
     {
         bool wasActive;
         lock (stateLock)
         {
             wasActive = isActive;
             isActive = false;
+            phase = BifrostPhase.Inactive;
             remainingSecs = 0;
+            loserDelayRemainingSecs = 0;
+            winnerNation = AccountNation.None;
         }
+
         if (wasActive)
         {
-            logger.LogInformation("Bifrost event closed by GM");
-            _ = BroadcastRemainingAsync();
+            logger.LogInformation("Bifrost event closed");
+            await BroadcastRemainingAsync();
+            await SweepPlayersAsync();
+        }
+    }
+
+    public void SetWinner(AccountNation nation, string killerName = "GM")
+    {
+        lock (stateLock)
+        {
+            isActive = true;
+            phase = BifrostPhase.Farming;
+            winnerNation = nation;
+            remainingSecs = (long)farmingDurationMinutes * 60;
+            loserDelayRemainingSecs = (long)loserDelayMinutes * 60;
+            logger.LogInformation("Bifrost forced winner: {Nation} by {Killer}", nation, killerName);
+        }
+
+        _ = BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation, killerName));
+        _ = BroadcastRemainingAsync();
+    }
+
+    public async Task OnMonumentKilledAsync(NpcInstance npc, UserSession killer)
+    {
+        if (npc.ZoneId != BifrostRules.ZoneRonarkLand || npc.NpcId != BifrostRules.MonumentNpcId)
+            return;
+
+        bool shouldTransition = false;
+        AccountNation nation = killer.Nation;
+        string killerName = killer.Name;
+
+        lock (stateLock)
+        {
+            if (!isActive || phase != BifrostPhase.MonumentFight)
+                return;
+
+            phase = BifrostPhase.Farming;
+            winnerNation = nation;
+            remainingSecs = (long)farmingDurationMinutes * 60;
+            loserDelayRemainingSecs = (long)loserDelayMinutes * 60;
+            shouldTransition = true;
+        }
+
+        if (shouldTransition)
+        {
+            logger.LogInformation("Bifrost Monument destroyed by {Killer} ({Nation}). Farming phase started.", killerName, nation);
+            await BroadcastNoticeAsync(BifrostRules.NoticeVictory(nation, killerName));
+            await BroadcastRemainingAsync();
+        }
+    }
+
+    public BifrostEntryResult CanEnter(UserSession session)
+    {
+        lock (stateLock)
+        {
+            if (!isActive)
+                return BifrostEntryResult.NotActive;
+
+            if (phase == BifrostPhase.MonumentFight)
+                return BifrostEntryResult.MonumentNotFallen;
+
+            if (phase != BifrostPhase.Farming)
+                return BifrostEntryResult.NotActive;
+
+            if (session.Nation == winnerNation)
+                return BifrostEntryResult.Success;
+
+            if (loserDelayRemainingSecs > 0)
+                return BifrostEntryResult.LoserDelayActive;
+
+            return BifrostEntryResult.Success;
+        }
+    }
+
+    public async Task<bool> TryEnterAsync(UserSession session)
+    {
+        if (session.Hp <= 0)
+            return false;
+
+        var check = CanEnter(session);
+        switch (check)
+        {
+            case BifrostEntryResult.NotActive:
+                await session.Client.SendPacket(ChatPacketWriter.SystemNotice((byte)session.Nation, BifrostRules.NoticeEventNotActive));
+                return false;
+
+            case BifrostEntryResult.MonumentNotFallen:
+                await session.Client.SendPacket(ChatPacketWriter.SystemNotice((byte)session.Nation, BifrostRules.NoticeMonumentNotFallen));
+                return false;
+
+            case BifrostEntryResult.LoserDelayActive:
+                var delayMinutes = (int)Math.Ceiling(LoserDelayRemainingSecs / 60.0);
+                var notice = $"{BifrostRules.NoticeCannotEnterYet} ({delayMinutes} min remaining)";
+                await session.Client.SendPacket(ChatPacketWriter.SystemNotice((byte)session.Nation, notice));
+                return false;
+
+            case BifrostEntryResult.Success:
+                float targetX = session.Nation == AccountNation.Karus ? BifrostRules.KarusEntryX : BifrostRules.ElMoradEntryX;
+                float targetZ = session.Nation == AccountNation.Karus ? BifrostRules.KarusEntryZ : BifrostRules.ElMoradEntryZ;
+                await zoneTransitionService.ChangeZoneAsync(session, BifrostRules.ZoneBifrost, targetX, targetZ);
+                return true;
+
+            default:
+                return false;
         }
     }
 
@@ -93,42 +236,124 @@ public class BifrostEventService(
         }
     }
 
-    private async Task TickAsync()
+    public async Task TickAsync()
     {
-        bool justExpired = false;
+        bool monumentTimedOut = false;
+        bool loserDelayJustEnded = false;
+        bool farmingTimedOut = false;
+
         lock (stateLock)
         {
             if (!isActive)
                 return;
 
-            if (remainingSecs > 0)
+            if (phase == BifrostPhase.MonumentFight)
             {
-                remainingSecs--;
-                if (remainingSecs == 0)
+                if (remainingSecs > 0)
                 {
-                    // Phase 2 will switch to farming; for now we reset.
-                    isActive = false;
-                    justExpired = true;
+                    remainingSecs--;
+                    if (remainingSecs == 0)
+                    {
+                        isActive = false;
+                        phase = BifrostPhase.Inactive;
+                        monumentTimedOut = true;
+                    }
+                }
+            }
+            else if (phase == BifrostPhase.Farming)
+            {
+                if (loserDelayRemainingSecs > 0)
+                {
+                    loserDelayRemainingSecs--;
+                    if (loserDelayRemainingSecs == 0)
+                    {
+                        loserDelayJustEnded = true;
+                    }
+                }
+
+                if (remainingSecs > 0)
+                {
+                    remainingSecs--;
+                    if (remainingSecs == 0)
+                    {
+                        isActive = false;
+                        phase = BifrostPhase.Inactive;
+                        farmingTimedOut = true;
+                    }
                 }
             }
         }
 
-        if (justExpired)
+        if (monumentTimedOut)
         {
-            logger.LogInformation("Bifrost event ended in draw (monument phase elapsed)");
+            logger.LogInformation("Bifrost event ended in draw (monument phase elapsed without kill)");
+            await BroadcastNoticeAsync(BifrostRules.NoticeDraw);
             await BroadcastRemainingAsync();
+        }
+        else if (loserDelayJustEnded)
+        {
+            logger.LogInformation("Bifrost gates are now open to all nations");
+            await BroadcastNoticeAsync(BifrostRules.NoticeGatesOpenAll);
+        }
+        else if (farmingTimedOut)
+        {
+            logger.LogInformation("Bifrost farming phase expired. Sweeping players.");
+            await BroadcastNoticeAsync(BifrostRules.NoticeFinish);
+            await BroadcastRemainingAsync();
+            await SweepPlayersAsync();
+        }
+    }
+
+    private async Task SweepPlayersAsync()
+    {
+        foreach (var session in sessionManager.GetAll())
+        {
+            if (session.ZoneId == BifrostRules.ZoneBifrost)
+            {
+                try
+                {
+                    await zoneTransitionService.ChangeZoneAsync(
+                        session,
+                        (byte)ZoneId.Moradon,
+                        BifrostRules.MoradonReturnX,
+                        BifrostRules.MoradonReturnZ);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to sweep player {Player} from Bifrost zone", session.Name);
+                }
+            }
+        }
+    }
+
+    private async Task BroadcastNoticeAsync(string text)
+    {
+        var pkt = NoticePacketWriter.Broadcast(text);
+        foreach (var session in sessionManager.GetAll())
+        {
+            if (session.ZoneId == BifrostRules.ZoneBifrost || session.ZoneId == BifrostRules.ZoneRonarkLand)
+            {
+                try
+                {
+                    await session.Client.SendPacket(pkt);
+                }
+                catch
+                {
+                    // best-effort
+                }
+            }
         }
     }
 
     private Task BroadcastRemainingAsync()
     {
-        var remaining = RemainingSecs;
+        var remaining = (int)Math.Min(RemainingSecs, int.MaxValue);
         var pkt = BifrostPacketWriter.Remaining(
-            TempleSubOpcode.BifrostRemaining, (int)Math.Min(remaining, int.MaxValue));
+            TempleSubOpcode.BifrostRemaining, remaining, (byte)Phase);
 
         foreach (var session in sessionManager.GetAll())
         {
-            if (session.ZoneId != ZoneBifrost && session.ZoneId != ZoneRonarkLand)
+            if (session.ZoneId != BifrostRules.ZoneBifrost && session.ZoneId != BifrostRules.ZoneRonarkLand)
                 continue;
             try
             {
