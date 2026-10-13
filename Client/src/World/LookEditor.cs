@@ -27,12 +27,10 @@ public partial class LookEditor : VBoxContainer
     {
         AddThemeConstantOverride("separation", 8);
         CustomMinimumSize = new Vector2(230, 0);
-        if (withRace)
-        {
-            AddChild(UiTheme.SectionTitle("Race"));
-            _races.AddThemeConstantOverride("separation", 4);
-            AddChild(_races);
-        }
+        if (withRace) AddChild(UiTheme.SectionTitle("Race"));
+        _races.AddThemeConstantOverride("separation", 4);
+        _races.Visible = withRace;
+        AddChild(_races);
         AddChild(UiTheme.SectionTitle("Appearance"));
         (_faceLbl, _faceSteps) = StepperRow("Face", StepFace);
         (_hairLbl, _hairSteps) = StepperRow("Hair", StepHair);

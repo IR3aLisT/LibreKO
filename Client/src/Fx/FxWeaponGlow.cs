@@ -35,7 +35,7 @@ public partial class FxWeaponGlow : Node3D, IFxTicked
     private float _fps = 1f;
     private double _age;
     private double _texAge;
-    private Vector3 _wobbleDir = Vector3.Up;
+    private Shell? _shell;
     private Aabb _bounds;
 
     public static Node3D? Create(string fxName, string tailFxName, string guideStem,
@@ -54,11 +54,18 @@ public partial class FxWeaponGlow : Node3D, IFxTicked
         return root._tails.Count > 0 ? FxRegistry.Track(root, tailFxName, "weapon glow tail") : null;
     }
 
-    private static readonly System.Collections.Generic.Dictionary<string, Mesh?> ShellCache = Shutdown.Track(new System.Collections.Generic.Dictionary<string, Mesh?>());
+    private sealed class Shell(Mesh mesh)
+    {
+        public readonly Mesh Mesh = mesh;
+        public Vector3 Normal = Vector3.Up;
+    }
+
+    private static readonly System.Collections.Generic.Dictionary<string, Shell?> ShellCache =
+        Shutdown.Track(new System.Collections.Generic.Dictionary<string, Shell?>(), shell => shell?.Mesh);
 
     private const string WeaponGuideDir = "res://assets/items/weapon/fxguide";
 
-    private static Mesh? GuideShell(string guideStem, string guideDir)
+    private static Shell? GuideShell(string guideStem, string guideDir)
     {
         string guidePath = $"{guideDir}/{guideStem}.glb";
         if (ShellCache.TryGetValue(guidePath, out var cached)) return cached;
@@ -74,9 +81,20 @@ public partial class FxWeaponGlow : Node3D, IFxTicked
         catch (System.InvalidOperationException e) { GD.PushWarning($"[fx] guide '{guideStem}' instantiate failed: {e.Message}"); }
         if (guide == null) return null;
 
-        var shell = FindMesh(guide)?.Mesh;
+        var mesh = FindMesh(guide)?.Mesh;
         guide.QueueFree();
-        if (shell != null) ShellCache[guidePath] = shell;
+        if (mesh == null) return null;
+        var shell = new Shell(mesh);
+        ShellCache[guidePath] = shell;
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var normal = FirstNormal(mesh);
+                Callable.From(() => shell.Normal = normal).CallDeferred();
+            }
+            catch (System.Exception e) { GD.PushWarning($"[fx] guide '{guideStem}' normal unreadable: {e.Message}"); }
+        });
         return shell;
     }
 
@@ -100,7 +118,8 @@ public partial class FxWeaponGlow : Node3D, IFxTicked
         var root = new FxWeaponGlow
         {
             Name = $"fx_{fxName}_guide",
-            _bounds = shell.GetAabb(),
+            _bounds = shell.Mesh.GetAabb(),
+            _shell = shell,
             _shine = new MeshInstance3D[Layers],
             _meshes = new Node3D[Layers],
             _shown = new[] { -1, -1, -1 },
@@ -113,7 +132,6 @@ public partial class FxWeaponGlow : Node3D, IFxTicked
         for (int i = 0; i < textures.Count; i++)
             root._frames[i] = Fx.FrameTexture(part, i);
         root._fps = Mathf.Max(0.01f, Fx.ReadF(part, "texFPS", 1f));
-        root._wobbleDir = FirstNormal(shell);
         root._texAge = GD.Randf() * TexPhaseMax;
 
         for (int i = 0; i < Layers; i++)
@@ -124,7 +142,7 @@ public partial class FxWeaponGlow : Node3D, IFxTicked
             var shine = new MeshInstance3D
             {
                 Name = $"shine{i}",
-                Mesh = shell,
+                Mesh = shell.Mesh,
                 MaterialOverride = root.SharedMaterial(i, 0),
                 CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
                 Layers = FxShading.LayerBit,
@@ -230,10 +248,11 @@ public partial class FxWeaponGlow : Node3D, IFxTicked
 
         float phase = (float)(_age * WobbleHz);
         float wobble = (phase - Mathf.Floor(phase)) * WobbleSpan - WobbleBias;
+        var axis = _shell?.Normal ?? Vector3.Up;
         _meshes[1].Transform = new Transform3D(
-            new Basis(Vector3.Up, Mathf.DegToRad(-RollDegrees)), _wobbleDir * wobble);
+            new Basis(Vector3.Up, Mathf.DegToRad(-RollDegrees)), axis * wobble);
         _meshes[2].Transform = new Transform3D(
-            new Basis(Vector3.Up, Mathf.DegToRad(RollDegrees)), _wobbleDir * -wobble);
+            new Basis(Vector3.Up, Mathf.DegToRad(RollDegrees)), axis * -wobble);
 
         int frame = Mathf.PosMod((int)(_texAge * _fps), _frames.Length);
         int layersShown = _reduced ? ReducedLayers : Layers;

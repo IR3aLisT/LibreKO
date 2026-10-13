@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 using Godot;
 
 namespace LibreKO;
@@ -9,8 +10,23 @@ public static class CharacterMerge
     private const string MergedName = "merged_body";
     private const string PartsMeta = "merged_parts";
     private const string MergedIntoMeta = "merged_into";
+    private const string TicketMeta = "merge_ticket";
+
+    private sealed class Plan
+    {
+        public readonly List<(ArrayMesh Mesh, int Surface)> Sources = new();
+        public readonly List<OutfitMaterial.Slot> Slots = new();
+        public readonly List<(MeshInstance3D Part, ArrayMesh Mesh)> Used = new();
+        public Skin? Skin;
+        public Node? Parent;
+    }
+
+    private sealed record Surfaces(Vector3[] Verts, Vector3[] Normals, Vector2[] Uvs, Vector2[] SlotUvs,
+                                   int[] Bones, float[] Weights, int[] Indices, int Influences);
 
     private static readonly Dictionary<string, ArrayMesh?> _meshes = Shutdown.Track(new Dictionary<string, ArrayMesh?>());
+    private static readonly Dictionary<string, List<(Node3D Body, long Ticket)>> _reading = new();
+    private static long _lastTicket;
 
     public static int CachedMeshes => _meshes.Count;
 
@@ -23,18 +39,53 @@ public static class CharacterMerge
     public static void Apply(Node3D body)
     {
         Remove(body);
-        var sources = new List<(ArrayMesh Mesh, int Surface)>();
-        var slots = new List<OutfitMaterial.Slot>();
-        var used = new List<(MeshInstance3D Part, ArrayMesh Mesh)>();
-        Skin? skin = null;
-        Node? parent = null;
+        var plan = PlanFor(body);
+        if (plan.Used.Count < 2 || plan.Skin == null || plan.Parent == null) return;
+        string id = KeyOf(plan.Sources);
+        if (_meshes.TryGetValue(id, out var cached))
+        {
+            if (cached != null) Swap(plan, cached);
+            return;
+        }
+
+        long ticket = ++_lastTicket;
+        body.SetMeta(TicketMeta, ticket);
+        if (_reading.TryGetValue(id, out var waiting))
+        {
+            waiting.Add((body, ticket));
+            return;
+        }
+        _reading[id] = new List<(Node3D Body, long Ticket)> { (body, ticket) };
+        var sources = plan.Sources;
+        Task.Run(() =>
+        {
+            Surfaces? surfaces = null;
+            try { surfaces = Read(sources); }
+            catch (System.Exception ex) { GD.PushWarning($"[merge] surfaces could not be read: {ex.Message}"); }
+            Callable.From(() => Finish(id, surfaces)).CallDeferred();
+        });
+    }
+
+    private static void Finish(string id, Surfaces? surfaces)
+    {
+        if (!_reading.Remove(id, out var waiting)) return;
+        var alive = waiting.FindAll(w => GodotObject.IsInstanceValid(w.Body)
+            && w.Body.HasMeta(TicketMeta) && w.Body.GetMeta(TicketMeta).AsInt64() == w.Ticket);
+        if (alive.Count == 0) return;
+        _meshes[id] = surfaces == null ? null : Build(surfaces);
+        foreach (var (body, _) in alive) Apply(body);
+    }
+
+    private static Plan PlanFor(Node3D body)
+    {
+        var plan = new Plan();
         foreach (var part in Ordered(World.BodyParts(body)))
         {
             if (!part.Visible || part.Mesh is not ArrayMesh mesh || part.Skin == null) continue;
             if (part.Transform != Transform3D.Identity || part.MaterialOverlay != null) continue;
-            if (skin != null && (part.Skin != skin || part.GetParent() != parent)) continue;
+            if (plan.Skin != null && (part.Skin != plan.Skin || part.GetParent() != plan.Parent)) continue;
             int count = mesh.GetSurfaceCount();
-            if (count == 0 || slots.Count + count > OutfitMaterial.MaxSlots) continue;
+            if (count == 0 || plan.Slots.Count + count > OutfitMaterial.MaxSlots) continue;
             var (level, shinePart) = ShineOf(part);
             var partSlots = new List<OutfitMaterial.Slot>();
             for (int i = 0; i < count && partSlots.Count == i; i++)
@@ -42,21 +93,23 @@ public static class CharacterMerge
                     && OutfitMaterial.TryDescribe(part.GetActiveMaterial(i), level, shinePart, out var slot))
                     partSlots.Add(slot);
             if (partSlots.Count != count) continue;
-            skin ??= part.Skin;
-            parent ??= part.GetParent();
-            for (int i = 0; i < count; i++) sources.Add((mesh, i));
-            slots.AddRange(partSlots);
-            used.Add((part, mesh));
+            plan.Skin ??= part.Skin;
+            plan.Parent ??= part.GetParent();
+            for (int i = 0; i < count; i++) plan.Sources.Add((mesh, i));
+            plan.Slots.AddRange(partSlots);
+            plan.Used.Add((part, mesh));
         }
-        if (used.Count < 2 || skin == null || parent == null) return;
-        if (Combined(sources) is not { } combined) return;
+        return plan;
+    }
 
-        var first = used[0].Part;
+    private static void Swap(Plan plan, ArrayMesh combined)
+    {
+        var first = plan.Used[0].Part;
         var merged = new MeshInstance3D
         {
             Name = MergedName,
             Mesh = combined,
-            Skin = skin,
+            Skin = plan.Skin,
             Skeleton = first.Skeleton,
             CastShadow = first.CastShadow,
             Transparency = first.Transparency,
@@ -65,11 +118,11 @@ public static class CharacterMerge
             VisibilityRangeFadeMode = first.VisibilityRangeFadeMode,
             Layers = first.Layers,
         };
-        merged.SetSurfaceOverrideMaterial(0, OutfitMaterial.For(slots));
-        parent.AddChild(merged);
+        merged.SetSurfaceOverrideMaterial(0, OutfitMaterial.For(plan.Slots));
+        plan.Parent!.AddChild(merged);
         SkinShare.FixBounds(merged);
         var stored = new Godot.Collections.Array();
-        foreach (var (part, mesh) in used)
+        foreach (var (part, mesh) in plan.Used)
         {
             stored.Add(part);
             stored.Add(mesh);
@@ -82,6 +135,7 @@ public static class CharacterMerge
 
     public static void Remove(Node3D body)
     {
+        body.RemoveMeta(TicketMeta);
         foreach (var merged in FindMerged(body))
         {
             if (merged.HasMeta(PartsMeta))
@@ -129,13 +183,15 @@ public static class CharacterMerge
         foreach (int key in keys) yield return parts[key];
     }
 
-    private static ArrayMesh? Combined(List<(ArrayMesh Mesh, int Surface)> sources)
+    private static string KeyOf(List<(ArrayMesh Mesh, int Surface)> sources)
     {
         var key = new StringBuilder();
         foreach (var s in sources) key.Append(s.Mesh.GetInstanceId()).Append(':').Append(s.Surface).Append(',');
-        string id = key.ToString();
-        if (_meshes.TryGetValue(id, out var cached)) return cached;
+        return key.ToString();
+    }
 
+    private static Surfaces? Read(List<(ArrayMesh Mesh, int Surface)> sources)
+    {
         var verts = new List<Vector3>();
         var normals = new List<Vector3>();
         var uvs = new List<Vector2>();
@@ -144,9 +200,7 @@ public static class CharacterMerge
         var weights = new List<float>();
         var indices = new List<int>();
         int influences = 0;
-        ArrayMesh? mesh = null;
-        bool compatible = true;
-        for (int slot = 0; slot < sources.Count && compatible; slot++)
+        for (int slot = 0; slot < sources.Count; slot++)
         {
             var a = sources[slot].Mesh.SurfaceGetArrays(sources[slot].Surface);
             var v = a[(int)Mesh.ArrayType.Vertex].AsVector3Array();
@@ -158,10 +212,7 @@ public static class CharacterMerge
             if (influences == 0) influences = per;
             if (per == 0 || per != influences || w.Length != b.Length
                 || a[(int)Mesh.ArrayType.Index].VariantType == Variant.Type.Nil)
-            {
-                compatible = false;
-                break;
-            }
+                return null;
             int start = verts.Count;
             verts.AddRange(v);
             var n = a[(int)Mesh.ArrayType.Normal];
@@ -173,22 +224,24 @@ public static class CharacterMerge
             weights.AddRange(w);
             foreach (int index in a[(int)Mesh.ArrayType.Index].AsInt32Array()) indices.Add(start + index);
         }
-        if (compatible)
-        {
-            var arrays = new Godot.Collections.Array();
-            arrays.Resize((int)Mesh.ArrayType.Max);
-            arrays[(int)Mesh.ArrayType.Vertex] = verts.ToArray();
-            arrays[(int)Mesh.ArrayType.Normal] = normals.ToArray();
-            arrays[(int)Mesh.ArrayType.TexUV] = uvs.ToArray();
-            arrays[(int)Mesh.ArrayType.TexUV2] = slotUvs.ToArray();
-            arrays[(int)Mesh.ArrayType.Bones] = bones.ToArray();
-            arrays[(int)Mesh.ArrayType.Weights] = weights.ToArray();
-            arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
-            mesh = new ArrayMesh();
-            mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null,
-                influences > 4 ? Mesh.ArrayFormat.FlagUse8BoneWeights : 0);
-        }
-        _meshes[id] = mesh;
+        return new Surfaces(verts.ToArray(), normals.ToArray(), uvs.ToArray(), slotUvs.ToArray(),
+                            bones.ToArray(), weights.ToArray(), indices.ToArray(), influences);
+    }
+
+    private static ArrayMesh Build(Surfaces s)
+    {
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = s.Verts;
+        arrays[(int)Mesh.ArrayType.Normal] = s.Normals;
+        arrays[(int)Mesh.ArrayType.TexUV] = s.Uvs;
+        arrays[(int)Mesh.ArrayType.TexUV2] = s.SlotUvs;
+        arrays[(int)Mesh.ArrayType.Bones] = s.Bones;
+        arrays[(int)Mesh.ArrayType.Weights] = s.Weights;
+        arrays[(int)Mesh.ArrayType.Index] = s.Indices;
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null,
+            s.Influences > 4 ? Mesh.ArrayFormat.FlagUse8BoneWeights : 0);
         return mesh;
     }
 
