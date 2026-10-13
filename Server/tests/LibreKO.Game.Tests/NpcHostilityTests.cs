@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using LibreKO.Common.Enums;
 using LibreKO.Common.Infrastructure.Network;
 using LibreKO.Game.World;
@@ -71,6 +71,30 @@ public class NpcHostilityTests : GameTestBase
         };
 
         NpcHostility.IsAttackableBy(merchant, karus).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ABifrostMonumentIsAttackableOnlyWhenEventAllowsIt()
+    {
+        using var provider = CreateProvider(_ => { });
+        var player = CreatePlayer(provider, BifrostRules.ZoneRonarkLand);
+
+        var monument = new NpcInstance
+        {
+            ZoneId = BifrostRules.ZoneRonarkLand,
+            NpcId = BifrostRules.MonumentNpcId,
+            NpcType = LibreKO.Common.Domain.Entities.GameData.NpcData.TypeBifrostMonument,
+            Hp = 350000,
+            MaxHp = 350000,
+        };
+
+        NpcHostility.IsBifrostMonumentAttackable = () => true;
+        NpcHostility.IsAttackableBy(monument, player).Should().BeTrue();
+
+        NpcHostility.IsBifrostMonumentAttackable = () => false;
+        NpcHostility.IsAttackableBy(monument, player).Should().BeFalse();
+
+        NpcHostility.IsBifrostMonumentAttackable = null;
     }
 
     private static UserSession CreatePlayer(ServiceProvider provider, byte zoneId)

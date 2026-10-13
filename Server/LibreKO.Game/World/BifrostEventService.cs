@@ -26,11 +26,12 @@ public interface IBifrostEventService
     Task TickAsync();
 }
 
-public class BifrostEventService(
-    SessionManager sessionManager,
-    IZoneTransitionService zoneTransitionService,
-    ILogger<BifrostEventService> logger) : BackgroundService, IBifrostEventService
+public class BifrostEventService : BackgroundService, IBifrostEventService
 {
+    private readonly SessionManager sessionManager;
+    private readonly IZoneTransitionService zoneTransitionService;
+    private readonly ILogger<BifrostEventService> logger;
+
     private readonly object stateLock = new();
     private long remainingSecs;
     private long loserDelayRemainingSecs;
@@ -41,6 +42,19 @@ public class BifrostEventService(
     private int monumentDurationMinutes = BifrostRules.DefaultMonumentMinutes;
     private int loserDelayMinutes = BifrostRules.DefaultLoserDelayMinutes;
     private int farmingDurationMinutes = BifrostRules.DefaultFarmingMinutes;
+
+    public BifrostEventService(
+        SessionManager sessionManager,
+        IZoneTransitionService zoneTransitionService,
+        ILogger<BifrostEventService> logger)
+    {
+        this.sessionManager = sessionManager;
+        this.zoneTransitionService = zoneTransitionService;
+        this.logger = logger;
+
+        NpcHostility.IsBifrostMonumentAttackable = () => IsActive && Phase == BifrostPhase.MonumentFight;
+        this.zoneTransitionService.ZoneAbilitySent += OnZoneAbilitySentAsync;
+    }
 
     public long RemainingSecs
     {
@@ -87,6 +101,18 @@ public class BifrostEventService(
             phase = BifrostPhase.MonumentFight;
             isActive = true;
             logger.LogInformation("Bifrost event started (Monument phase): {Minutes}min ({Secs}s)", monumentDurationMinutes, remainingSecs);
+        }
+
+        var monument = sessionManager.Regions.GetNpcByProtoId(BifrostRules.ZoneRonarkLand, BifrostRules.MonumentNpcId);
+        if (monument != null)
+        {
+            monument.WithLock(n =>
+            {
+                n.Hp = n.MaxHp;
+                n.DeathTimeTicks = 0;
+                n.State = NpcState.Standing;
+            });
+            _ = sessionManager.Regions.BroadcastFromNpc(monument, Protocol.NpcPacketMapper.BuildInOutPacket(monument, InOutType.In));
         }
 
         _ = BroadcastNoticeAsync(BifrostRules.NoticeStart);
@@ -365,5 +391,26 @@ public class BifrostEventService(
             }
         }
         return Task.CompletedTask;
+    }
+
+    private async Task OnZoneAbilitySentAsync(UserSession session)
+    {
+        if (session.ZoneId != BifrostRules.ZoneBifrost && session.ZoneId != BifrostRules.ZoneRonarkLand)
+            return;
+
+        if (!IsActive)
+            return;
+
+        var remaining = (int)Math.Min(RemainingSecs, int.MaxValue);
+        var pkt = BifrostPacketWriter.Remaining(
+            TempleSubOpcode.BifrostRemaining, remaining, eventType: 0);
+        try
+        {
+            await session.Client.SendPacket(pkt);
+        }
+        catch
+        {
+            // best-effort
+        }
     }
 }

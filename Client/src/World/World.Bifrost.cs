@@ -269,6 +269,12 @@ public partial class World
             return;
         }
 
+        if (eventType == TempleEventType.None && _zone != 71 && _zone != 31)
+        {
+            EndBifrostEvent();
+            return;
+        }
+
         if (eventType != _eventType && _joinModalCount != null && IsInstanceValid(_joinModalCount))
             _joinModalCount.Visible = false;
         _eventType = eventType;

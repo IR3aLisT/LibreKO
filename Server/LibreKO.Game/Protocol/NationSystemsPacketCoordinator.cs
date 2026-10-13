@@ -48,7 +48,7 @@ public class NationSystemsPacketCoordinator(
             remaining = eventSchedulerService.TempleRemainingJoinSeconds;
             eventType = (byte)eventSchedulerService.CurrentTempleEvent;
         }
-        else
+        else if (session.ZoneId is BifrostRules.ZoneRonarkLand or BifrostRules.ZoneBifrost)
         {
             remaining = (int)Math.Min(bifrostEventService.RemainingSecs, int.MaxValue);
         }

@@ -196,4 +196,43 @@ public class BifrostTests
 
         await bifrostMock.Received(1).TryEnterAsync(session);
     }
+
+    [Fact]
+    public async Task ZoneAbilitySent_SendsRemainingPacket_WhenPlayerEntersRonarkLandAndEventActive()
+    {
+        var transitionMock = Substitute.For<IZoneTransitionService>();
+        var bifrostService = new BifrostEventService(
+            _sessions,
+            transitionMock,
+            Substitute.For<ILogger<BifrostEventService>>());
+
+        bifrostService.Start(monumentMinutes: 20);
+
+        var ronarkPlayer = CreateSession(1, "RonarkArrival");
+        ronarkPlayer.ZoneId = BifrostRules.ZoneRonarkLand;
+
+        transitionMock.ZoneAbilitySent += Raise.Event<Func<UserSession, Task>>(ronarkPlayer);
+
+        await ronarkPlayer.Client.Received().SendPacket(Arg.Is<Packet>(p =>
+            p.GetOpcode() == (byte)GameOpcodes.GS_BIFROST));
+    }
+
+    [Fact]
+    public async Task ZoneAbilitySent_DoesNotSendPacket_WhenPlayerEntersOtherZone()
+    {
+        var transitionMock = Substitute.For<IZoneTransitionService>();
+        var bifrostService = new BifrostEventService(
+            _sessions,
+            transitionMock,
+            Substitute.For<ILogger<BifrostEventService>>());
+
+        bifrostService.Start(monumentMinutes: 20);
+
+        var moradonPlayer = CreateSession(1, "MoradonArrival");
+        moradonPlayer.ZoneId = (byte)ZoneId.Moradon;
+
+        transitionMock.ZoneAbilitySent += Raise.Event<Func<UserSession, Task>>(moradonPlayer);
+
+        await moradonPlayer.Client.DidNotReceive().SendPacket(Arg.Any<Packet>());
+    }
 }
