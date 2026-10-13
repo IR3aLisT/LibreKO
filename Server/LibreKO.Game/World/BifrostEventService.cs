@@ -349,7 +349,7 @@ public class BifrostEventService(
     {
         var remaining = (int)Math.Min(RemainingSecs, int.MaxValue);
         var pkt = BifrostPacketWriter.Remaining(
-            TempleSubOpcode.BifrostRemaining, remaining, (byte)Phase);
+            TempleSubOpcode.BifrostRemaining, remaining, eventType: 0);
 
         foreach (var session in sessionManager.GetAll())
         {
